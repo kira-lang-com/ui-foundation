@@ -1,0 +1,49 @@
+version = 1
+
+[root]
+name = "basic-foundation-app"
+version = "0.1.0"
+kind = "app"
+kira = "0.1.0"
+
+[[root_dependency]]
+name = "KiraUIFoundation"
+source = "path"
+path = "../.."
+
+[[package]]
+name = "Foundation"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "Foundation"
+source = "path"
+path = "C:\Users\Shadow\Coding\kira-projects\kirac\foundation"
+
+[[package]]
+name = "KiraGraphics"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraGraphics"
+source = "path"
+path = "C:\Users\Shadow\Coding\kira-projects\kira-graphics"
+
+[[package]]
+name = "KiraLayout"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraLayout"
+source = "path"
+path = "C:\Users\Shadow\Coding\kira-projects\kira-layout"
+
+[[package]]
+name = "KiraUIFoundation"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraUIFoundation"
+source = "path"
+path = "C:\Users\Shadow\Coding\kira-projects\kira-ui-foundation"
+dependencies = ["Foundation", "KiraGraphics", "KiraLayout"]

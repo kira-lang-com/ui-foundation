@@ -1,0 +1,170 @@
+struct FoundationHitRegionRecord {
+    let bounds: Rect
+    let disabled: Bool = false
+    let onPress: () -> Void
+}
+
+class KiraGraphicsFoundationBackend {
+    let frame: GraphicsFrame
+    var encoder: RenderEncoder
+    var hitRegions: [FoundationHitRegionRecord] = []
+    var clipDepth: Int = 0
+    var backdropDepth: Int = 0
+    var offscreenDepth: Int = 0
+
+    function beginFrame(width: Int, height: Int) {
+        self.hitRegions = []
+        self.clipDepth = 0
+        self.backdropDepth = 0
+        self.offscreenDepth = 0
+        self.encoder.drawSurface(
+            Rect {
+                x: 0.0
+                y: 0.0
+                width: intAsFloat(value: width)
+                height: intAsFloat(value: height)
+            },
+            Color {
+                r: 0.07
+                g: 0.08
+                b: 0.11
+                a: 1.0
+            },
+            Color {
+                r: 0.0
+                g: 0.0
+                b: 0.0
+                a: 0.0
+            },
+            0.0,
+            0.0
+        )
+        return
+    }
+
+    function endFrame() {
+        while self.clipDepth > 0 {
+            popClip()
+        }
+        frame.endPass(self.encoder)
+        return
+    }
+
+    function submit() {
+        frame.requestQuit()
+        return
+    }
+
+    function pushClip(frame: Rect, radius: Float) {
+        self.encoder.pushClip(frame, radius)
+        self.clipDepth = self.clipDepth + 1
+        return
+    }
+
+    function popClip() {
+        if self.clipDepth > 0 {
+            self.encoder.popClip()
+            self.clipDepth = self.clipDepth - 1
+        }
+        return
+    }
+
+    function drawSurface(bounds: Rect, paint: FoundationSurfacePaint) {
+        self.encoder.drawSurface(bounds, paint.fill, paint.border, paint.borderWidth, paint.radius)
+        return
+    }
+
+    function drawText(bounds: Rect, paint: FoundationTextPaint) {
+        self.encoder.drawText(bounds, paint.content, paint.color, paint.size)
+        return
+    }
+
+    function beginBackdrop(bounds: Rect, material: FoundationMaterial) {
+        self.backdropDepth = self.backdropDepth + 1
+        let tint = materialTint(material: material)
+        self.encoder.drawSurface(
+            bounds,
+            tint,
+            Color {
+                r: 1.0
+                g: 1.0
+                b: 1.0
+                a: 0.08
+            },
+            1.0,
+            0.0
+        )
+        return
+    }
+
+    function applyBackdropEffect(bounds: Rect, effect: FoundationEffect) {
+        match effect {
+            BackdropGlow(glow) -> {
+                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                return
+            }
+            LayerGlow(glow) -> {
+                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                return
+            }
+        }
+    }
+
+    function endBackdrop(bounds: Rect) {
+        if self.backdropDepth > 0 {
+            self.backdropDepth = self.backdropDepth - 1
+        }
+        let ignored = bounds
+        return
+    }
+
+    function beginOffscreen(bounds: Rect) {
+        self.offscreenDepth = self.offscreenDepth + 1
+        self.encoder.pushClip(bounds, 0.0)
+        return
+    }
+
+    function applyLayerEffect(bounds: Rect, effect: FoundationEffect) {
+        match effect {
+            LayerGlow(glow) -> {
+                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                return
+            }
+            BackdropGlow(glow) -> {
+                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                return
+            }
+        }
+    }
+
+    function endOffscreen(bounds: Rect) {
+        if self.offscreenDepth > 0 {
+            self.encoder.popClip()
+            self.offscreenDepth = self.offscreenDepth - 1
+        }
+        let ignored = bounds
+        return
+    }
+
+    function registerHitRegion(bounds: Rect, disabled: Bool, onPress: () -> Void) {
+        self.hitRegions.append(FoundationHitRegionRecord {
+            bounds: bounds
+            disabled: disabled
+            onPress: onPress
+        })
+        return
+    }
+
+    function materialTint(material: FoundationMaterial) -> Color {
+        match material {
+            Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
+            Translucent -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.06 };
+            Frosted -> return Color { r: 0.88 g: 0.94 b: 1.0 a: 0.10 };
+            LayeredGlass -> return Color { r: 0.75 g: 0.90 b: 1.0 a: 0.12 };
+            Luminous -> return Color { r: 0.60 g: 0.80 b: 1.0 a: 0.16 };
+            Metallic -> return Color { r: 0.72 g: 0.75 b: 0.82 a: 0.14 };
+            Crystal -> return Color { r: 0.92 g: 0.98 b: 1.0 a: 0.12 };
+        }
+    }
+
+}

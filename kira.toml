@@ -1,0 +1,15 @@
+[package]
+name = "KiraUIFoundation"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraUIFoundation"
+
+[defaults]
+execution_mode = "vm"
+build_target = "host"
+
+[dependencies]
+Foundation = { path = "../kirac/foundation" }
+KiraLayout = { path = "../kira-layout" }
+KiraGraphics = { path = "../kira-graphics" }

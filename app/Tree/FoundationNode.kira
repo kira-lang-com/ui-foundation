@@ -1,0 +1,35 @@
+struct FoundationNode {
+    let id: Int
+    let view: FoundationView
+    let layout: LayoutDescriptor
+    let frame: Rect = Rect {}
+    let children: [FoundationNode] = []
+}
+
+class FoundationTreeBuilder {
+    var nextId: Int = 0
+
+    function build(view: FoundationView) -> FoundationNode {
+        let id = allocateId()
+        var builtChildren: [FoundationNode] = []
+        let childViews = view.children()
+
+        for child in childViews {
+            builtChildren.append(build(child))
+        }
+
+        return FoundationNode(
+            id: id,
+            view: view,
+            layout: view.layoutDescriptor(),
+            frame: Rect {},
+            children: builtChildren
+        )
+    }
+
+    function allocateId() -> Int {
+        let id = nextId
+        nextId = nextId + 1
+        return id
+    }
+}

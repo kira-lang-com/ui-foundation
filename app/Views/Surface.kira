@@ -1,0 +1,88 @@
+class Surface extends FoundationView {
+    let fill: Color = Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 1.0
+    }
+    let border: Color = Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+    }
+    let borderWidth: Float = 0.0
+    let radius: Float = 0.0
+    let material: FoundationMaterial = FoundationMaterial.Flat
+    let effects: [FoundationEffect] = []
+    let padding: EdgeInsets = EdgeInsets {}
+    let clipContent: Bool = false
+    let children: [FoundationView]
+
+    override function children() -> [FoundationView] {
+        return self.children
+    }
+
+    override function layoutDescriptor() -> LayoutDescriptor {
+        return LayoutDescriptor {
+            width: SizeMode.Hug
+            height: SizeMode.Hug
+            arrange: ArrangeMode.Fill
+            axis: Axis.Vertical
+            alignment: CrossAlignment.Stretch
+            overlayAlignment: Alignment.Center
+            padding: self.padding
+            margin: EdgeInsets {}
+            clipContent: self.clipContent
+        }
+    }
+
+    override function paint(frame: Rect) -> FoundationPaint {
+        return FoundationPaint.Surface(FoundationSurfacePaint {
+            fill: self.fill
+            border: self.border
+            borderWidth: self.borderWidth
+            radius: self.radius
+            material: self.material
+            effects: self.effects
+            clipContent: self.clipContent
+        })
+    }
+}
+
+class Card extends Surface {
+    override let fill: Color = Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 0.18
+    }
+    override let border: Color = Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 0.26
+    }
+    override let borderWidth: Float = 1.0
+    override let radius: Float = 16.0
+    override let material: FoundationMaterial = FoundationMaterial.Frosted
+    override let effects: [FoundationEffect] = [
+        FoundationEffect.LayerGlow(Glow {
+            color: Color {
+                r: 0.30
+                g: 0.55
+                b: 1.0
+                a: 1.0
+            }
+            radius: 18.0
+            intensity: 0.45
+        })
+    ]
+    override let padding: EdgeInsets = EdgeInsets {
+        top: 16.0
+        trailing: 18.0
+        bottom: 16.0
+        leading: 18.0
+    }
+    override let clipContent: Bool = true
+}

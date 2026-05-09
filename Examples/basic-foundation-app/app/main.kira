@@ -1,0 +1,18 @@
+import KiraUIFoundation
+
+@Main
+function main() {
+    RunFoundationApp(
+        Card(
+            children: [
+                VStack {
+                    spacing: 8.0
+                    children: [
+                        Text(content: "Hi world !")
+                    ]
+                }
+            ]
+        )
+    )
+    return
+}

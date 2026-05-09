@@ -1,0 +1,69 @@
+struct Glow {
+    let color: Color = Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 1.0
+    }
+    let radius: Float = 0.0
+    let intensity: Float = 0.0
+}
+
+enum FoundationMaterial {
+    Flat
+    Translucent
+    Frosted
+    LayeredGlass
+    Luminous
+    Metallic
+    Crystal
+}
+
+enum FoundationEffect {
+    BackdropGlow(Glow)
+    LayerGlow(Glow)
+}
+
+struct FoundationTextPaint {
+    let content: String
+    let color: Color = Color {
+        r: 0.08
+        g: 0.08
+        b: 0.10
+        a: 1.0
+    }
+    let size: Float = 15.0
+    let weight: Float = 400.0
+}
+
+struct FoundationSurfacePaint {
+    let fill: Color = Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 1.0
+    }
+    let border: Color = Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+    }
+    let borderWidth: Float = 0.0
+    let radius: Float = 0.0
+    let material: FoundationMaterial = FoundationMaterial.Flat
+    let effects: [FoundationEffect] = []
+    let clipContent: Bool = false
+}
+
+struct FoundationHitRegionPaint {
+    let disabled: Bool = false
+    let onPress: () -> Void
+}
+
+enum FoundationPaint {
+    None
+    Text(FoundationTextPaint)
+    Surface(FoundationSurfacePaint)
+    HitRegion(FoundationHitRegionPaint)
+}

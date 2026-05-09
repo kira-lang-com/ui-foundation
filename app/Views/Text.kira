@@ -1,0 +1,33 @@
+class Text extends FoundationView {
+    let content: String
+    let color: Color = Color {
+        r: 0.08
+        g: 0.08
+        b: 0.10
+        a: 1.0
+    }
+    let size: Float = 15.0
+    let weight: Float = 400.0
+
+    override function layoutDescriptor() -> LayoutDescriptor {
+        return LayoutDescriptor {
+            width: SizeMode.Fixed(120.0)
+            height: SizeMode.Fixed(24.0)
+            arrange: ArrangeMode.Fill
+            axis: Axis.Vertical
+            alignment: CrossAlignment.Stretch
+            overlayAlignment: Alignment.Center
+            padding: EdgeInsets {}
+            margin: EdgeInsets {}
+        }
+    }
+
+    override function paint(frame: Rect) -> FoundationPaint {
+        return FoundationPaint.Text(FoundationTextPaint {
+            content: self.content
+            color: self.color
+            size: self.size
+            weight: self.weight
+        })
+    }
+}

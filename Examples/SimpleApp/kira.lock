@@ -1,0 +1,21 @@
+version = 1
+
+[root]
+name = "SimpleApp"
+version = "0.1.0"
+kind = "app"
+kira = "0.1.0"
+
+[[root_dependency]]
+name = "KiraUIFoundation"
+source = "path"
+path = "../.."
+
+[[package]]
+name = "KiraUIFoundation"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraUIFoundation"
+source = "path"
+path = "C:\Users\Shadow\Coding\kira-projects\kira-ui-foundation"

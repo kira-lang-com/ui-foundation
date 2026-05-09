@@ -1,0 +1,62 @@
+class FoundationLayoutPass {
+    let engine: LayoutEngine = LayoutEngine {}
+
+    function run(root: FoundationNode, available: Size) -> FoundationNode {
+        var tree = LayoutTree {
+            nodes: collect(root, 0, [])
+        }
+        tree = engine.measure(tree: tree, index: 0, available: available)
+        tree = engine.place(tree: tree, index: 0, origin: Point {})
+        return apply(root, tree, 0)
+    }
+
+    function collect(node: FoundationNode, index: Int, output: [LayoutNode]) -> [LayoutNode] {
+        var nodes = output
+        nodes.append(LayoutNode {
+            descriptor: node.layout
+            measuredSize: Size {}
+            placedOrigin: Point {}
+            firstChild: index + 1
+            childCount: node.children.count
+        })
+
+        var nextIndex = index + 1
+        for child in node.children {
+            nodes = collect(child, nextIndex, nodes)
+            nextIndex = nextIndex + count(child)
+        }
+        return nodes
+    }
+
+    function apply(node: FoundationNode, tree: LayoutTree, index: Int) -> FoundationNode {
+        let layoutNode = tree.nodes[index]
+        var children: [FoundationNode] = []
+        var childIndex = layoutNode.firstChild
+
+        for child in node.children {
+            children.append(apply(child, tree, childIndex))
+            childIndex = childIndex + count(child)
+        }
+
+        return FoundationNode(
+            id: node.id,
+            view: node.view,
+            layout: node.layout,
+            frame: Rect {
+                x: layoutNode.placedOrigin.x
+                y: layoutNode.placedOrigin.y
+                width: layoutNode.measuredSize.width
+                height: layoutNode.measuredSize.height
+            },
+            children: children
+        )
+    }
+
+    function count(node: FoundationNode) -> Int {
+        var total = 1
+        for child in node.children {
+            total = total + count(child)
+        }
+        return total
+    }
+}

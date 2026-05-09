@@ -1,0 +1,22 @@
+class FoundationView {
+    function children() -> [FoundationView] {
+        return []
+    }
+
+    function layoutDescriptor() -> LayoutDescriptor {
+        return LayoutDescriptor {
+            width: SizeMode.Hug
+            height: SizeMode.Hug
+            arrange: ArrangeMode.Fill
+            axis: Axis.Vertical
+            alignment: CrossAlignment.Stretch
+            overlayAlignment: Alignment.Center
+            padding: EdgeInsets {}
+            margin: EdgeInsets {}
+        }
+    }
+
+    function paint(frame: Rect) -> FoundationPaint {
+        return FoundationPaint.None
+    }
+}

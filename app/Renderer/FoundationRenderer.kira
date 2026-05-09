@@ -1,0 +1,54 @@
+class FoundationRenderer {
+    let backend: KiraGraphicsFoundationBackend
+
+    function render(layer: FoundationLayer) {
+        match layer.payload {
+            Clip(clip) -> {
+                backend.pushClip(layer.bounds, clip.radius)
+                for child in layer.children {
+                    render(child)
+                }
+                backend.popClip()
+                return
+            }
+            Backdrop(backdrop) -> {
+                backend.beginBackdrop(layer.bounds, backdrop.material)
+                for effect in backdrop.effects {
+                    backend.applyBackdropEffect(layer.bounds, effect)
+                }
+                for child in layer.children {
+                    render(child)
+                }
+                backend.endBackdrop(layer.bounds)
+                return
+            }
+            Surface(surface) -> {
+                backend.drawSurface(layer.bounds, surface.paint)
+                return
+            }
+            Text(text) -> {
+                backend.drawText(layer.bounds, text.paint)
+                return
+            }
+            Effect(effect) -> {
+                backend.beginOffscreen(layer.bounds)
+                backend.applyLayerEffect(layer.bounds, effect.effect)
+                for child in layer.children {
+                    render(child)
+                }
+                backend.endOffscreen(layer.bounds)
+                return
+            }
+            HitRegion(hit) -> {
+                backend.registerHitRegion(layer.bounds, hit.disabled, hit.onPress)
+                return
+            }
+            None -> {}
+        }
+
+        for child in layer.children {
+            render(child)
+        }
+        return
+    }
+}

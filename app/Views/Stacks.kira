@@ -1,0 +1,47 @@
+class VStack extends FoundationView {
+    let spacing: Float = 0.0
+    let padding: EdgeInsets = EdgeInsets {}
+    let children: [FoundationView]
+
+    override function children() -> [FoundationView] {
+        return self.children
+    }
+
+    override function layoutDescriptor() -> LayoutDescriptor {
+        return LayoutDescriptor {
+            width: SizeMode.Hug
+            height: SizeMode.Hug
+            arrange: ArrangeMode.Stack
+            axis: Axis.Vertical
+            spacing: self.spacing
+            alignment: CrossAlignment.Stretch
+            overlayAlignment: Alignment.Center
+            padding: self.padding
+            margin: EdgeInsets {}
+        }
+    }
+}
+
+class HStack extends FoundationView {
+    let spacing: Float = 0.0
+    let padding: EdgeInsets = EdgeInsets {}
+    let children: [FoundationView]
+
+    override function children() -> [FoundationView] {
+        return self.children
+    }
+
+    override function layoutDescriptor() -> LayoutDescriptor {
+        return LayoutDescriptor {
+            width: SizeMode.Hug
+            height: SizeMode.Hug
+            arrange: ArrangeMode.Stack
+            axis: Axis.Horizontal
+            spacing: self.spacing
+            alignment: CrossAlignment.Center
+            overlayAlignment: Alignment.Center
+            padding: self.padding
+            margin: EdgeInsets {}
+        }
+    }
+}
