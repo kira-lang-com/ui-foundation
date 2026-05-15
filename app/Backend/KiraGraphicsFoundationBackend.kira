@@ -4,6 +4,15 @@ struct FoundationHitRegionRecord {
     let onPress: () -> Void
 }
 
+function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
+    return GraphicsRect {
+        x: bounds.x
+        y: bounds.y
+        width: bounds.width
+        height: bounds.height
+    }
+}
+
 class KiraGraphicsFoundationBackend {
     let frame: GraphicsFrame
     var encoder: RenderEncoder
@@ -18,7 +27,7 @@ class KiraGraphicsFoundationBackend {
         self.backdropDepth = 0
         self.offscreenDepth = 0
         self.encoder.drawSurface(
-            Rect {
+            GraphicsRect {
                 x: 0.0
                 y: 0.0
                 width: intAsFloat(value: width)
@@ -46,7 +55,7 @@ class KiraGraphicsFoundationBackend {
         while self.clipDepth > 0 {
             popClip()
         }
-        frame.endPass(self.encoder)
+        frame.endPass()
         return
     }
 
@@ -55,8 +64,8 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function pushClip(frame: Rect, radius: Float) {
-        self.encoder.pushClip(frame, radius)
+    function pushClip(frame: borrow Rect, radius: Float) {
+        self.encoder.pushClip(graphicsRect(frame), radius)
         self.clipDepth = self.clipDepth + 1
         return
     }
@@ -69,21 +78,21 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function drawSurface(bounds: Rect, paint: FoundationSurfacePaint) {
-        self.encoder.drawSurface(bounds, paint.fill, paint.border, paint.borderWidth, paint.radius)
+    function drawSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
+        self.encoder.drawSurface(graphicsRect(bounds), paint.fill, paint.border, paint.borderWidth, paint.radius)
         return
     }
 
-    function drawText(bounds: Rect, paint: FoundationTextPaint) {
-        self.encoder.drawText(bounds, paint.content, paint.color, paint.size)
+    function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
+        self.encoder.drawText(graphicsRect(bounds), paint.content, paint.color, paint.size)
         return
     }
 
-    function beginBackdrop(bounds: Rect, material: FoundationMaterial) {
+    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial) {
         self.backdropDepth = self.backdropDepth + 1
         let tint = materialTint(material: material)
         self.encoder.drawSurface(
-            bounds,
+            graphicsRect(bounds),
             tint,
             Color {
                 r: 1.0
@@ -97,20 +106,20 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function applyBackdropEffect(bounds: Rect, effect: FoundationEffect) {
+    function applyBackdropEffect(bounds: borrow Rect, effect: borrow FoundationEffect) {
         match effect {
             BackdropGlow(glow) -> {
-                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
                 return
             }
             LayerGlow(glow) -> {
-                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
                 return
             }
         }
     }
 
-    function endBackdrop(bounds: Rect) {
+    function endBackdrop(bounds: borrow Rect) {
         if self.backdropDepth > 0 {
             self.backdropDepth = self.backdropDepth - 1
         }
@@ -118,26 +127,26 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function beginOffscreen(bounds: Rect) {
+    function beginOffscreen(bounds: borrow Rect) {
         self.offscreenDepth = self.offscreenDepth + 1
-        self.encoder.pushClip(bounds, 0.0)
+        self.encoder.pushClip(graphicsRect(bounds), 0.0)
         return
     }
 
-    function applyLayerEffect(bounds: Rect, effect: FoundationEffect) {
+    function applyLayerEffect(bounds: borrow Rect, effect: borrow FoundationEffect) {
         match effect {
             LayerGlow(glow) -> {
-                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
                 return
             }
             BackdropGlow(glow) -> {
-                self.encoder.drawGlow(bounds, glow.color, glow.radius, glow.intensity)
+                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
                 return
             }
         }
     }
 
-    function endOffscreen(bounds: Rect) {
+    function endOffscreen(bounds: borrow Rect) {
         if self.offscreenDepth > 0 {
             self.encoder.popClip()
             self.offscreenDepth = self.offscreenDepth - 1
@@ -146,7 +155,7 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function registerHitRegion(bounds: Rect, disabled: Bool, onPress: () -> Void) {
+    function registerHitRegion(bounds: borrow Rect, disabled: Bool, onPress: () -> Void) {
         self.hitRegions.append(FoundationHitRegionRecord {
             bounds: bounds
             disabled: disabled
@@ -155,7 +164,7 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function materialTint(material: FoundationMaterial) -> Color {
+    function materialTint(material: borrow FoundationMaterial) -> Color {
         match material {
             Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
             Translucent -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.06 };

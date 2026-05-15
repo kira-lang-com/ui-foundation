@@ -1,7 +1,7 @@
 class FoundationRenderer {
     let backend: KiraGraphicsFoundationBackend
 
-    function render(layer: FoundationLayer) {
+    function render(layer: borrow FoundationLayer) {
         match layer.payload {
             Clip(clip) -> {
                 backend.pushClip(layer.bounds, clip.radius)

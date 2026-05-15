@@ -9,7 +9,7 @@ struct FoundationNode {
 class FoundationTreeBuilder {
     var nextId: Int = 0
 
-    function build(view: FoundationView) -> FoundationNode {
+    function build(view: borrow FoundationView) -> FoundationNode {
         let id = allocateId()
         var builtChildren: [FoundationNode] = []
         let childViews = view.children()

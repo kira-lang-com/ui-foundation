@@ -1,5 +1,5 @@
 class FoundationLayerBuilder {
-    function build(node: FoundationNode) -> FoundationLayer {
+    function build(node: borrow FoundationNode) -> FoundationLayer {
         let paint = node.view.paint(node.frame)
         match paint {
             Surface(surfacePaint) -> return surface(node, surfacePaint);
@@ -9,7 +9,7 @@ class FoundationLayerBuilder {
         }
     }
 
-    function group(node: FoundationNode) -> FoundationLayer {
+    function group(node: borrow FoundationNode) -> FoundationLayer {
         var children: [FoundationLayer] = []
         for child in node.children {
             children.append(build(child))
@@ -22,7 +22,7 @@ class FoundationLayerBuilder {
         }
     }
 
-    function surface(node: FoundationNode, paint: FoundationSurfacePaint) -> FoundationLayer {
+    function surface(node: borrow FoundationNode, paint: borrow FoundationSurfacePaint) -> FoundationLayer {
         var layers: [FoundationLayer] = []
 
         if paint.material != FoundationMaterial.Flat || paint.effects.count > 0 {
@@ -45,7 +45,7 @@ class FoundationLayerBuilder {
             })
             children: []
         }
-        layers.append(wrap(baseSurface, node.frame, paint.effects))
+        layers.append(wrap(move baseSurface, node.frame, paint.effects))
 
         for child in node.children {
             layers.append(build(child))
@@ -70,7 +70,7 @@ class FoundationLayerBuilder {
         }
     }
 
-    function hitRegion(node: FoundationNode, paint: FoundationHitRegionPaint) -> FoundationLayer {
+    function hitRegion(node: borrow FoundationNode, paint: borrow FoundationHitRegionPaint) -> FoundationLayer {
         var children: [FoundationLayer] = []
         for child in node.children {
             children.append(build(child))
@@ -92,7 +92,7 @@ class FoundationLayerBuilder {
         }
     }
 
-    function text(node: FoundationNode, paint: FoundationTextPaint) -> FoundationLayer {
+    function text(node: borrow FoundationNode, paint: borrow FoundationTextPaint) -> FoundationLayer {
         return FoundationLayer {
             kind: FoundationLayerKind.Text
             bounds: node.frame
@@ -103,7 +103,7 @@ class FoundationLayerBuilder {
         }
     }
 
-    function wrap(layer: FoundationLayer, bounds: Rect, effects: [FoundationEffect]) -> FoundationLayer {
+    function wrap(layer: FoundationLayer, bounds: borrow Rect, effects: borrow [FoundationEffect]) -> FoundationLayer {
         var current = layer
         for effect in effects {
             current = FoundationLayer {

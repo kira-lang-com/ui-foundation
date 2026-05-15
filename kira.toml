@@ -10,6 +10,5 @@ execution_mode = "vm"
 build_target = "host"
 
 [dependencies]
-Foundation = { path = "../kirac/foundation" }
 KiraLayout = { path = "../kira-layout" }
 KiraGraphics = { path = "../kira-graphics" }

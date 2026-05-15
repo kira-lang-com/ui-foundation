@@ -7,11 +7,6 @@ kind = "library"
 kira = "0.1.0"
 
 [[root_dependency]]
-name = "Foundation"
-source = "path"
-path = "../kirac/foundation"
-
-[[root_dependency]]
 name = "KiraGraphics"
 source = "path"
 path = "../kira-graphics"
@@ -22,22 +17,13 @@ source = "path"
 path = "../kira-layout"
 
 [[package]]
-name = "Foundation"
-version = "0.1.0"
-kind = "library"
-kira = "0.1.0"
-module_root = "Foundation"
-source = "path"
-path = "C:\Users\Shadow\Coding\kira-projects\kirac\foundation"
-
-[[package]]
 name = "KiraGraphics"
 version = "0.1.0"
 kind = "library"
 kira = "0.1.0"
 module_root = "KiraGraphics"
 source = "path"
-path = "C:\Users\Shadow\Coding\kira-projects\kira-graphics"
+path = "/Users/priamc/Coding/kira-projects/kira-graphics"
 
 [[package]]
 name = "KiraLayout"
@@ -46,4 +32,4 @@ kind = "library"
 kira = "0.1.0"
 module_root = "KiraLayout"
 source = "path"
-path = "C:\Users\Shadow\Coding\kira-projects\kira-layout"
+path = "/Users/priamc/Coding/kira-projects/kira-layout"

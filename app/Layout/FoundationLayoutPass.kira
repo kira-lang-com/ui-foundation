@@ -1,16 +1,16 @@
 class FoundationLayoutPass {
     let engine: LayoutEngine = LayoutEngine {}
 
-    function run(root: FoundationNode, available: Size) -> FoundationNode {
+    function run(root: borrow FoundationNode, available: borrow Size) -> FoundationNode {
         var tree = LayoutTree {
             nodes: collect(root, 0, [])
         }
-        tree = engine.measure(tree: tree, index: 0, available: available)
-        tree = engine.place(tree: tree, index: 0, origin: Point {})
+        engine.measure(tree: tree, index: 0, available: available)
+        engine.place(tree: tree, index: 0, origin: Point {})
         return apply(root, tree, 0)
     }
 
-    function collect(node: FoundationNode, index: Int, output: [LayoutNode]) -> [LayoutNode] {
+    function collect(node: borrow FoundationNode, index: Int, output: [LayoutNode]) -> [LayoutNode] {
         var nodes = output
         nodes.append(LayoutNode {
             descriptor: node.layout
@@ -22,13 +22,13 @@ class FoundationLayoutPass {
 
         var nextIndex = index + 1
         for child in node.children {
-            nodes = collect(child, nextIndex, nodes)
+            nodes = collect(child, nextIndex, move nodes)
             nextIndex = nextIndex + count(child)
         }
         return nodes
     }
 
-    function apply(node: FoundationNode, tree: LayoutTree, index: Int) -> FoundationNode {
+    function apply(node: borrow FoundationNode, tree: borrow LayoutTree, index: Int) -> FoundationNode {
         let layoutNode = tree.nodes[index]
         var children: [FoundationNode] = []
         var childIndex = layoutNode.firstChild
@@ -52,7 +52,7 @@ class FoundationLayoutPass {
         )
     }
 
-    function count(node: FoundationNode) -> Int {
+    function count(node: borrow FoundationNode) -> Int {
         var total = 1
         for child in node.children {
             total = total + count(child)
