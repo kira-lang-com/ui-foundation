@@ -1,0 +1,337 @@
+function runFoundationLayout(view: FoundationView, available: borrow Size) -> LayoutTree {
+    return FoundationLayoutPass().run(root: view, available: available)
+}
+
+function frameRight(frame: borrow Rect) -> Float {
+    return frame.x + frame.width
+}
+
+function frameBottom(frame: borrow Rect) -> Float {
+    return frame.y + frame.height
+}
+
+function smokePass(condition: Bool) -> Int {
+    return condition ? 1 : 0
+}
+
+function floatAbs(value: Float) -> Float {
+    return value < 0.0 ? 0.0 - value : value
+}
+
+function approxEqual(left: Float, right: Float) -> Bool {
+    return floatAbs(left - right) < 0.01
+}
+
+function smokeTextColor() -> Color {
+    return Color {
+        r: 0.96
+        g: 0.97
+        b: 0.99
+        a: 1.0
+    }
+}
+
+function foundationFrameAtPath(root: borrow FoundationView, tree: borrow LayoutTree, path: borrow [Int]) -> Rect {
+    return foundationFrameAtPathStep(root, tree, 0, path, 0)
+}
+
+function foundationFrameAtPathStep(root: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, path: borrow [Int], pathOffset: Int) -> Rect {
+    if pathOffset >= path.count {
+        return layoutFrame(tree, nodeIndex)
+    }
+
+    let children = foundationViewChildren(root)
+    let childOffset = path[pathOffset]
+    if childOffset < 0 || childOffset >= children.count {
+        return Rect {}
+    }
+
+    let node = tree.nodes[nodeIndex]
+    if node.firstChild == 0 {
+        return Rect {}
+    }
+
+    return foundationFrameAtPathStep(children[childOffset], tree, node.firstChild + childOffset, path, pathOffset + 1)
+}
+
+function FoundationPrimitiveLayoutSmoke() -> Int {
+    var passed = 0
+
+    let columnRoot = Column(
+        children: [
+            Text("TOP", smokeTextColor(), 18.0, 400.0),
+            Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
+        ],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 12.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+    let columnLayout = runFoundationLayout(move columnRoot, Size {
+        width: 400.0
+        height: 200.0
+    })
+    let columnTop = foundationFrameAtPath(
+        Column(
+            children: [
+                Text("TOP", smokeTextColor(), 18.0, 400.0),
+                Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 12.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        columnLayout,
+        [0]
+    )
+    let columnBottom = foundationFrameAtPath(
+        Column(
+            children: [
+                Text("TOP", smokeTextColor(), 18.0, 400.0),
+                Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 12.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        columnLayout,
+        [1]
+    )
+    passed = passed + smokePass(
+        approxEqual(columnTop.x, 0.0) &&
+        approxEqual(columnTop.y, 0.0) &&
+        approxEqual(columnBottom.x, 0.0) &&
+        approxEqual(columnBottom.y, 33.6) &&
+        columnBottom.y > frameBottom(columnTop)
+    )
+
+    let rowRoot = Row(
+        children: [
+            Text("LEFT", smokeTextColor(), 18.0, 400.0),
+            Text("RIGHT", smokeTextColor(), 18.0, 400.0)
+        ],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 14.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+    let rowLayout = runFoundationLayout(move rowRoot, Size {
+        width: 400.0
+        height: 120.0
+    })
+    let rowLeft = foundationFrameAtPath(
+        Row(
+            children: [
+                Text("LEFT", smokeTextColor(), 18.0, 400.0),
+                Text("RIGHT", smokeTextColor(), 18.0, 400.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 14.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        rowLayout,
+        [0]
+    )
+    let rowRight = foundationFrameAtPath(
+        Row(
+            children: [
+                Text("LEFT", smokeTextColor(), 18.0, 400.0),
+                Text("RIGHT", smokeTextColor(), 18.0, 400.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 14.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        rowLayout,
+        [1]
+    )
+    passed = passed + smokePass(
+        approxEqual(rowLeft.x, 0.0) &&
+        approxEqual(rowLeft.y, 0.0) &&
+        approxEqual(rowRight.x, 58.28) &&
+        approxEqual(rowRight.y, 0.0) &&
+        rowRight.x > frameRight(rowLeft)
+    )
+
+    let frameRootView = Frame(
+        child: Text("HELLO", smokeTextColor(), 20.0, 400.0),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {}
+    )
+    let frameLayout = runFoundationLayout(move frameRootView, Size {
+        width: 300.0
+        height: 120.0
+    })
+    let frameRoot = layoutFrame(frameLayout, 0)
+    let frameChild = foundationFrameAtPath(
+        Frame(
+            child: Text("HELLO", smokeTextColor(), 20.0, 400.0),
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            alignment: Alignment.TopLeading,
+            padding: EdgeInsets {}
+        ),
+        frameLayout,
+        [0]
+    )
+    passed = passed + smokePass(
+        approxEqual(frameRoot.width, 300.0) &&
+        approxEqual(frameRoot.height, 120.0) &&
+        approxEqual(frameChild.x, 0.0) &&
+        approxEqual(frameChild.y, 0.0) &&
+        frameChild.width > 0.0 &&
+        frameChild.width < 300.0 &&
+        frameChild.height > 0.0 &&
+        frameChild.height < 120.0
+    )
+
+    let surfaceRootView = Surface(
+        children: [
+            Text("PAD", smokeTextColor(), 16.0, 400.0)
+        ],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        flex: 0,
+        fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {
+            top: 10.0
+            trailing: 12.0
+            bottom: 14.0
+            leading: 16.0
+        },
+        clipContent: false
+    )
+    let surfaceLayout = runFoundationLayout(move surfaceRootView, Size {
+        width: 300.0
+        height: 200.0
+    })
+    let surfaceRoot = layoutFrame(surfaceLayout, 0)
+    let paddedChild = foundationFrameAtPath(
+        Surface(
+            children: [
+                Text("PAD", smokeTextColor(), 16.0, 400.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            flex: 0,
+            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            borderWidth: 0.0,
+            radius: 0.0,
+            shape: FoundationShape.RegularRoundedRect,
+            material: FoundationMaterial.Flat,
+            effects: [],
+            padding: EdgeInsets {
+                top: 10.0
+                trailing: 12.0
+                bottom: 14.0
+                leading: 16.0
+            },
+            clipContent: false
+        ),
+        surfaceLayout,
+        [0]
+    )
+    passed = passed + smokePass(
+        approxEqual(paddedChild.x, 16.0) &&
+        approxEqual(paddedChild.y, 10.0) &&
+        approxEqual(surfaceRoot.width, paddedChild.width + 28.0) &&
+        approxEqual(surfaceRoot.height, paddedChild.height + 24.0)
+    )
+
+    let textLayoutA = runFoundationLayout(
+        Text("KIRA", smokeTextColor(), 26.0, 400.0),
+        Size {
+            width: 300.0
+            height: 100.0
+        }
+    )
+    let textLayoutB = runFoundationLayout(
+        Text("KIRA", smokeTextColor(), 26.0, 400.0),
+        Size {
+            width: 300.0
+            height: 100.0
+        }
+    )
+    let textFrameA = layoutFrame(textLayoutA, 0)
+    let textFrameB = layoutFrame(textLayoutB, 0)
+    passed = passed + smokePass(textFrameA.width > 0.0 && textFrameA.height > 0.0 && textFrameA.width == textFrameB.width && textFrameA.height == textFrameB.height)
+
+    let spacerRootView = Row(
+        children: [
+            Text("LEFT", smokeTextColor(), 16.0, 400.0),
+            Spacer(0.0, 1),
+            Text("RIGHT", smokeTextColor(), 16.0, 400.0)
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Fixed(28.0),
+        spacing: 0.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Stretch
+    )
+    let spacerLayout = runFoundationLayout(move spacerRootView, Size {
+        width: 320.0
+        height: 28.0
+    })
+    let spacerFrame = foundationFrameAtPath(
+        Row(
+            children: [
+                Text("LEFT", smokeTextColor(), 16.0, 400.0),
+                Spacer(0.0, 1),
+                Text("RIGHT", smokeTextColor(), 16.0, 400.0)
+            ],
+            width: SizeMode.Fill,
+            height: SizeMode.Fixed(28.0),
+            spacing: 0.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Stretch
+        ),
+        spacerLayout,
+        [1]
+    )
+    let spacerRight = foundationFrameAtPath(
+        Row(
+            children: [
+                Text("LEFT", smokeTextColor(), 16.0, 400.0),
+                Spacer(0.0, 1),
+                Text("RIGHT", smokeTextColor(), 16.0, 400.0)
+            ],
+            width: SizeMode.Fill,
+            height: SizeMode.Fixed(28.0),
+            spacing: 0.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Stretch
+        ),
+        spacerLayout,
+        [2]
+    )
+    passed = passed + smokePass(
+        approxEqual(spacerFrame.x, 39.36) &&
+        approxEqual(spacerFrame.width, 230.72) &&
+        approxEqual(spacerRight.x, 270.08) &&
+        spacerFrame.width > 0.0 &&
+        spacerRight.x >= frameRight(spacerFrame)
+    )
+
+    return passed
+}

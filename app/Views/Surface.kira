@@ -1,88 +1,94 @@
-class Surface extends FoundationView {
-    let fill: Color = Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 1.0
-    }
-    let border: Color = Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
-        a: 0.0
-    }
-    let borderWidth: Float = 0.0
-    let radius: Float = 0.0
-    let material: FoundationMaterial = FoundationMaterial.Flat
-    let effects: [FoundationEffect] = []
-    let padding: EdgeInsets = EdgeInsets {}
-    let clipContent: Bool = false
-    let children: [FoundationView]
-
-    override function children() -> [FoundationView] {
-        return self.children
-    }
-
-    override function layoutDescriptor() -> LayoutDescriptor {
-        return LayoutDescriptor {
-            width: SizeMode.Hug
-            height: SizeMode.Hug
-            arrange: ArrangeMode.Fill
-            axis: Axis.Vertical
-            alignment: CrossAlignment.Stretch
-            overlayAlignment: Alignment.Center
-            padding: self.padding
-            margin: EdgeInsets {}
-            clipContent: self.clipContent
-        }
-    }
-
-    override function paint(frame: Rect) -> FoundationPaint {
-        return FoundationPaint.Surface(FoundationSurfacePaint {
-            fill: self.fill
-            border: self.border
-            borderWidth: self.borderWidth
-            radius: self.radius
-            material: self.material
-            effects: self.effects
-            clipContent: self.clipContent
-        })
+function Surface(
+    children: [FoundationView],
+    width: SizeMode,
+    height: SizeMode,
+    flex: Int,
+    fill: Color,
+    border: Color,
+    borderWidth: Float,
+    radius: Float,
+    shape: FoundationShape,
+    material: FoundationMaterial,
+    effects: [FoundationEffect],
+    padding: EdgeInsets,
+    clipContent: Bool,
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Surface
+        children: children
+        width: width
+        height: height
+        flex: flex
+        fill: fill
+        border: border
+        borderWidth: borderWidth
+        radius: radius
+        shape: shape
+        material: material
+        effects: effects
+        padding: padding
+        clipContent: clipContent
     }
 }
 
-class Card extends Surface {
-    override let fill: Color = Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.18
-    }
-    override let border: Color = Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.26
-    }
-    override let borderWidth: Float = 1.0
-    override let radius: Float = 16.0
-    override let material: FoundationMaterial = FoundationMaterial.Frosted
-    override let effects: [FoundationEffect] = [
-        FoundationEffect.LayerGlow(Glow {
-            color: Color {
-                r: 0.30
-                g: 0.55
-                b: 1.0
-                a: 1.0
-            }
-            radius: 18.0
-            intensity: 0.45
-        })
-    ]
-    override let padding: EdgeInsets = EdgeInsets {
-        top: 16.0
-        trailing: 18.0
-        bottom: 16.0
-        leading: 18.0
-    }
-    override let clipContent: Bool = true
+function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> FoundationView {
+    return Surface(
+        children: [child],
+        width: SizeMode.Fixed(width),
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.13 g: 0.14 b: 0.19 a: 0.96 },
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.08 },
+        borderWidth: 1.0,
+        radius: 28.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: move padding,
+        clipContent: true
+    )
+}
+
+function Card(children: [FoundationView]) -> FoundationView {
+    return Surface(
+        children: move children,
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        flex: 0,
+        fill: Color {
+            r: 1.0
+            g: 1.0
+            b: 1.0
+            a: 0.18
+        },
+        border: Color {
+            r: 1.0
+            g: 1.0
+            b: 1.0
+            a: 0.26
+        },
+        borderWidth: 1.0,
+        radius: 16.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Frosted,
+        effects: [
+            FoundationEffect.LayerGlow(Glow {
+                color: Color {
+                    r: 0.30
+                    g: 0.55
+                    b: 1.0
+                    a: 1.0
+                }
+                radius: 18.0
+                intensity: 0.45
+            })
+        ],
+        padding: EdgeInsets {
+            top: 16.0
+            trailing: 18.0
+            bottom: 16.0
+            leading: 18.0
+        },
+        clipContent: true
+    )
 }

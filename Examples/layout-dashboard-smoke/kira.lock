@@ -1,7 +1,7 @@
 version = 1
 
 [root]
-name = "basic-foundation-app"
+name = "layout-dashboard-smoke"
 version = "0.1.0"
 kind = "app"
 kira = "0.1.0"

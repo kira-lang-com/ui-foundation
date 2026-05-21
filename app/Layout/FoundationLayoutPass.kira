@@ -1,62 +1,91 @@
 class FoundationLayoutPass {
     let engine: LayoutEngine = LayoutEngine {}
 
-    function run(root: borrow FoundationNode, available: borrow Size) -> FoundationNode {
+    function run(root: borrow FoundationView, available: borrow Size) -> LayoutTree {
         var tree = LayoutTree {
-            nodes: collect(root, 0, [])
+            nodes: collect(root)
         }
         engine.measure(tree: tree, index: 0, available: available)
         engine.place(tree: tree, index: 0, origin: Point {})
-        return apply(root, tree, 0)
+        return tree
     }
 
-    function collect(node: borrow FoundationNode, index: Int, output: [LayoutNode]) -> [LayoutNode] {
+    function collect(root: borrow FoundationView) -> [LayoutNode] {
+        return appendNode(root, [])
+    }
+
+    function appendNode(view: borrow FoundationView, output: [LayoutNode]) -> [LayoutNode] {
         var nodes = output
+        let layout = foundationViewLayoutDescriptor(view)
+        let children = foundationViewChildren(view)
+        let parentIndex = nodes.count
         nodes.append(LayoutNode {
-            descriptor: node.layout
+            descriptor: layout
             measuredSize: Size {}
             placedOrigin: Point {}
-            firstChild: index + 1
-            childCount: node.children.count
+            firstChild: children.count > 0 ? parentIndex + 1 : 0
+            childCount: children.count
         })
 
-        var nextIndex = index + 1
-        for child in node.children {
-            nodes = collect(child, nextIndex, move nodes)
-            nextIndex = nextIndex + count(child)
+        var childOffset = 0
+        while childOffset < children.count {
+            let childView = children[childOffset]
+            nodes.append(LayoutNode {
+                descriptor: foundationViewLayoutDescriptor(childView)
+                measuredSize: Size {}
+                placedOrigin: Point {}
+                firstChild: 0
+                childCount: foundationViewChildren(childView).count
+            })
+            childOffset = childOffset + 1
+        }
+
+        var childIndex = parentIndex + 1
+        childOffset = 0
+        while childOffset < children.count {
+            nodes = appendDescendants(children[childOffset], childIndex, move nodes)
+            childIndex = childIndex + 1
+            childOffset = childOffset + 1
         }
         return nodes
     }
 
-    function apply(node: borrow FoundationNode, tree: borrow LayoutTree, index: Int) -> FoundationNode {
-        let layoutNode = tree.nodes[index]
-        var children: [FoundationNode] = []
-        var childIndex = layoutNode.firstChild
+    function appendDescendants(view: borrow FoundationView, nodeIndex: Int, output: [LayoutNode]) -> [LayoutNode] {
+        var nodes = output
+        let children = foundationViewChildren(view)
+        let firstChild = nodes.count
 
-        for child in node.children {
-            children.append(apply(child, tree, childIndex))
-            childIndex = childIndex + count(child)
+        var childOffset = 0
+        while childOffset < children.count {
+            let childView = children[childOffset]
+            nodes.append(LayoutNode {
+                descriptor: foundationViewLayoutDescriptor(childView)
+                measuredSize: Size {}
+                placedOrigin: Point {}
+                firstChild: 0
+                childCount: foundationViewChildren(childView).count
+            })
+            childOffset = childOffset + 1
         }
 
-        return FoundationNode(
-            id: node.id,
-            view: node.view,
-            layout: node.layout,
-            frame: Rect {
-                x: layoutNode.placedOrigin.x
-                y: layoutNode.placedOrigin.y
-                width: layoutNode.measuredSize.width
-                height: layoutNode.measuredSize.height
-            },
-            children: children
-        )
-    }
+        if children.count > 0 {
+            nodes[nodeIndex] = LayoutNode {
+                descriptor: nodes[nodeIndex].descriptor
+                measuredSize: nodes[nodeIndex].measuredSize
+                placedOrigin: nodes[nodeIndex].placedOrigin
+                firstChild: firstChild
+                childCount: children.count
+            }
 
-    function count(node: borrow FoundationNode) -> Int {
-        var total = 1
-        for child in node.children {
-            total = total + count(child)
+            var childIndex = firstChild
+            childOffset = 0
+            while childOffset < children.count {
+                nodes = appendDescendants(children[childOffset], childIndex, move nodes)
+                childIndex = childIndex + 1
+                childOffset = childOffset + 1
+            }
         }
-        return total
+
+        return nodes
     }
 }

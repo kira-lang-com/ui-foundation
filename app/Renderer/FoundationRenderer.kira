@@ -1,54 +1,64 @@
-class FoundationRenderer {
-    let backend: KiraGraphicsFoundationBackend
+function foundationRender(root: borrow FoundationView, tree: borrow LayoutTree, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+    var current = backend
+    return foundationRenderView(root, tree, 0, current)
+}
 
-    function render(layer: borrow FoundationLayer) {
-        match layer.payload {
-            Clip(clip) -> {
-                backend.pushClip(layer.bounds, clip.radius)
-                for child in layer.children {
-                    render(child)
-                }
-                backend.popClip()
-                return
-            }
-            Backdrop(backdrop) -> {
-                backend.beginBackdrop(layer.bounds, backdrop.material)
-                for effect in backdrop.effects {
-                    backend.applyBackdropEffect(layer.bounds, effect)
-                }
-                for child in layer.children {
-                    render(child)
-                }
-                backend.endBackdrop(layer.bounds)
-                return
-            }
-            Surface(surface) -> {
-                backend.drawSurface(layer.bounds, surface.paint)
-                return
-            }
-            Text(text) -> {
-                backend.drawText(layer.bounds, text.paint)
-                return
-            }
-            Effect(effect) -> {
-                backend.beginOffscreen(layer.bounds)
-                backend.applyLayerEffect(layer.bounds, effect.effect)
-                for child in layer.children {
-                    render(child)
-                }
-                backend.endOffscreen(layer.bounds)
-                return
-            }
-            HitRegion(hit) -> {
-                backend.registerHitRegion(layer.bounds, hit.disabled, hit.onPress)
-                return
-            }
-            None -> {}
-        }
+function foundationRenderChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+    let node = tree.nodes[nodeIndex]
+    let children = foundationViewChildren(view)
+    var current = backend
+    var rendered = 0
+    var childOffset = 0
+    while childOffset < children.count {
+        rendered = rendered + foundationRenderView(children[childOffset], tree, node.firstChild + childOffset, current)
+        childOffset = childOffset + 1
+    }
+    return rendered
+}
 
-        for child in layer.children {
-            render(child)
+function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+    var current = backend
+    let frame = layoutFrame(tree, nodeIndex)
+    match view.kind {
+        Surface -> {
+            if view.material != FoundationMaterial.Flat || view.effects.count > 0 {
+                current.beginBackdrop(frame, view.material)
+                var effectIndex = 0
+                while effectIndex < view.effects.count {
+                    current.applyBackdropEffect(frame, view.effects[effectIndex])
+                    effectIndex = effectIndex + 1
+                }
+                current.endBackdrop(frame)
+            }
+
+            if view.shape == FoundationShape.Squircle {
+                current.drawSquircleSurfaceFields(frame, view.fill, view.border, view.borderWidth, view.radius)
+            } else {
+                current.drawSurfaceFields(frame, view.fill, view.border, view.borderWidth, view.radius)
+            }
+
+            if view.radius > 0.0 || view.clipContent {
+                current.pushClip(frame, view.radius)
+                let childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
+                current.popClip()
+                return childRendered + 1
+            }
+
+            return foundationRenderChildren(view, tree, nodeIndex, current) + 1
         }
-        return
+        Text -> {
+            current.drawTextFields(frame, view.content, view.color, view.size)
+            return 1
+        }
+        HitArea -> {
+            current.registerHitRegion(frame, view.disabled, view.onPress)
+            return foundationRenderChildren(view, tree, nodeIndex, current)
+        }
+        Row -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        Column -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        Frame -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        Spacer -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        LayoutPriority -> return foundationRenderChildren(view, tree, nodeIndex, current);
     }
 }

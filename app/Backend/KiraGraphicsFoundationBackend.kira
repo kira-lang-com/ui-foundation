@@ -14,18 +14,19 @@ function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
 }
 
 class KiraGraphicsFoundationBackend {
-    let frame: GraphicsFrame
     var encoder: RenderEncoder
     var hitRegions: [FoundationHitRegionRecord] = []
     var clipDepth: Int = 0
     var backdropDepth: Int = 0
     var offscreenDepth: Int = 0
+    var drewVisibleUi: Bool = false
 
     function beginFrame(width: Int, height: Int) {
         self.hitRegions = []
         self.clipDepth = 0
         self.backdropDepth = 0
         self.offscreenDepth = 0
+        self.drewVisibleUi = false
         self.encoder.drawSurface(
             GraphicsRect {
                 x: 0.0
@@ -55,12 +56,10 @@ class KiraGraphicsFoundationBackend {
         while self.clipDepth > 0 {
             popClip()
         }
-        frame.endPass()
         return
     }
 
     function submit() {
-        frame.requestQuit()
         return
     }
 
@@ -79,12 +78,38 @@ class KiraGraphicsFoundationBackend {
     }
 
     function drawSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
+        self.drewVisibleUi = true
         self.encoder.drawSurface(graphicsRect(bounds), paint.fill, paint.border, paint.borderWidth, paint.radius)
         return
     }
 
+    function drawSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
+        self.drewVisibleUi = true
+        self.encoder.drawSurface(graphicsRect(bounds), fill, border, borderWidth, radius)
+        return
+    }
+
+    function drawSquircleSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
+        self.drewVisibleUi = true
+        self.encoder.drawSquircleSurface(graphicsRect(bounds), paint.fill, paint.border, paint.borderWidth, paint.radius)
+        return
+    }
+
+    function drawSquircleSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
+        self.drewVisibleUi = true
+        self.encoder.drawSquircleSurface(graphicsRect(bounds), fill, border, borderWidth, radius)
+        return
+    }
+
     function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
+        self.drewVisibleUi = true
         self.encoder.drawText(graphicsRect(bounds), paint.content, paint.color, paint.size)
+        return
+    }
+
+    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float) {
+        self.drewVisibleUi = true
+        self.encoder.drawText(graphicsRect(bounds), content, color, size)
         return
     }
 

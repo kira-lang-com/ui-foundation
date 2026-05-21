@@ -1,8 +1,51 @@
 struct FoundationAppState {
     var frameCount: Int = 0
+    var announcedTree: Bool = false
+    var announcedLayout: Bool = false
 }
 
 @Native
+function rootViewportSize() -> Size {
+    return Size(width: sapp_widthf(), height: sapp_heightf())
+}
+
+@Native
+function rootViewportWidth() -> Int {
+    return sapp_width()
+}
+
+@Native
+function rootViewportHeight() -> Int {
+    return sapp_height()
+}
+
+function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
+    var total = 0
+    match view.kind {
+        Surface -> total = total + 1;
+        Text -> total = total + 1;
+        Row -> {}
+        Column -> {}
+        Expanded -> {}
+        Frame -> {}
+        Spacer -> {}
+        HitArea -> {}
+        LayoutPriority -> {}
+    }
+
+    let children = foundationViewChildren(view)
+    var childOffset = 0
+    while childOffset < children.count {
+        total = total + foundationRenderableViewCount(children[childOffset])
+        childOffset = childOffset + 1
+    }
+    return total
+}
+
+function foundationRootFrame(tree: borrow LayoutTree) -> Rect {
+    return layoutFrame(tree, 0)
+}
+
 function RunFoundationApp(root: FoundationView) {
     var app = GraphicsApplication {
         title: "Kira UI Foundation"
@@ -18,29 +61,75 @@ function RunFoundationApp(root: FoundationView) {
             b: 0.07
             a: 1.0
         })
-        let viewport = Size {
-            width: 1280.0
-            height: 720.0
-        }
-        let tree = FoundationTreeBuilder().build(root)
-        let laidOut = FoundationLayoutPass().run(root: tree, available: viewport)
-        let layers = FoundationLayerBuilder().build(laidOut)
-        let backend = KiraGraphicsFoundationBackend {
-            frame: frame
+        let state = nativeRecover<FoundationAppState>(frame.userData)
+        var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
         }
-        let renderer = FoundationRenderer {
-            backend: backend
+        let viewport = rootViewportSize()
+        if !state.announcedTree {
+            print("KIRA_UI_TREE_BUILT")
+            state.announcedTree = true
         }
-        backend.beginFrame(1280, 720)
-        renderer.render(layers)
+
+        let laidOut = FoundationLayoutPass().run(root: root, available: viewport)
+        let rootFrame = foundationRootFrame(laidOut)
+        if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
+            print("KIRA_UI_LAYOUT_NON_EMPTY")
+            state.announcedLayout = true
+        }
+
+        backend.beginFrame(rootViewportWidth(), rootViewportHeight())
+        let ignored = foundationRender(root, laidOut, backend)
+
+        state.frameCount = state.frameCount + 1
         backend.endFrame()
+        frame.endPass()
         backend.submit()
         return
     }
 
-    app.run(nativeUserData(nativeState(FoundationAppState {
-        frameCount: 0
-    })))
+    app.run(nativeUserData(nativeState(FoundationAppState {})))
+    return
+}
+
+function RunFoundationSurfaceTextApp(
+    surfaceBounds: Rect,
+    surfacePaint: FoundationSurfacePaint,
+    textBounds: Rect,
+    textPaint: FoundationTextPaint,
+) {
+    print("KIRA_UI_TREE_BUILT")
+    if surfaceBounds.width > 0.0 && surfaceBounds.height > 0.0 {
+        print("KIRA_UI_LAYOUT_NON_EMPTY")
+    }
+    var app = GraphicsApplication {
+        title: "Kira UI Foundation"
+        width: 1280
+        height: 720
+        sampleCount: 1
+    }
+
+    app.onFrame { frame in
+        let encoder = frame.beginPass(Color {
+            r: 0.04
+            g: 0.05
+            b: 0.07
+            a: 1.0
+        })
+        let state = nativeRecover<FoundationAppState>(frame.userData)
+        let backend = KiraGraphicsFoundationBackend {
+            encoder: encoder
+        }
+        backend.beginFrame(1280, 720)
+        backend.drawSurface(surfaceBounds, surfacePaint)
+        backend.drawText(textBounds, textPaint)
+        state.frameCount = state.frameCount + 1
+        backend.endFrame()
+        frame.endPass()
+        backend.submit()
+        return
+    }
+
+    app.run(nativeUserData(nativeState(FoundationAppState {})))
     return
 }

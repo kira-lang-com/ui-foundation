@@ -47,36 +47,28 @@ function dashboardCardBorder() -> Color {
 
 function dashboardRegularCardFill() -> Color {
     return Color {
-        r: 0.22
-        g: 0.23
-        b: 0.31
+        r: 0.18
+        g: 0.19
+        b: 0.26
         a: 1.0
     }
 }
 
 function dashboardSquircleFill() -> Color {
     return Color {
-        r: 0.22
-        g: 0.26
-        b: 0.36
+        r: 0.18
+        g: 0.22
+        b: 0.30
         a: 1.0
     }
 }
 
-function dashboardRegularSlotFill() -> Color {
-    return dashboardRegularCardFill()
-}
-
-function dashboardSquircleSlotFill() -> Color {
-    return dashboardSquircleFill()
-}
-
-function dashboardCardOutline() -> Color {
+function dashboardCardStageFill() -> Color {
     return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.06
+        r: 0.17
+        g: 0.18
+        b: 0.25
+        a: 1.0
     }
 }
 
@@ -152,8 +144,8 @@ function dashboardRegularCardView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: dashboardRegularCardFill(),
-        border: dashboardCardOutline(),
-        borderWidth: 1.0,
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
         radius: 18.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
@@ -338,8 +330,70 @@ function FoundationDashboardView() -> FoundationView {
     )
 }
 
+function FoundationDashboardLayoutSmoke() -> Int {
+    let laidOut = runFoundationLayout(
+        FoundationDashboardView(),
+        Size {
+            width: 1280.0
+            height: 720.0
+        }
+    )
+
+    var passed = 0
+    passed = passed + smokePass(
+        foundationViewChildren(FoundationDashboardView()).count == 1 &&
+        foundationViewChildren(foundationViewChildren(FoundationDashboardView())[0]).count == 2 &&
+        foundationViewChildren(foundationViewChildren(foundationViewChildren(FoundationDashboardView())[0])[0]).count == 1 &&
+        foundationViewChildren(foundationViewChildren(foundationViewChildren(FoundationDashboardView())[0])[1]).count == 1 &&
+        foundationViewChildren(foundationViewChildren(foundationViewChildren(foundationViewChildren(FoundationDashboardView())[0])[1])[0]).count == 2
+    )
+
+    let dashboardRootFrame = layoutFrame(laidOut, 0)
+    let sidebarFrame = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 0])
+    let contentFrame = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1])
+    let sidebarTitle = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 0, 0, 0])
+    let titleFrame = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 0])
+    let cardsFrame = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 1, 0, 2])
+    let regularCard = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 1, 0, 2, 0, 0, 0])
+    let squircleCard = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 1, 0, 2, 0, 1, 0])
+
+    let contentColumn = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0])
+    let mainCard = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 1])
+    let cardsRow = foundationFrameAtPath(FoundationDashboardView(), laidOut, [0, 1, 0, 1, 0, 2, 0])
+
+    passed = passed + smokePass(
+        approxEqual(dashboardRootFrame.width, 1280.0) &&
+        approxEqual(dashboardRootFrame.height, 720.0) &&
+        approxEqual(sidebarFrame.x, 40.0) &&
+        approxEqual(sidebarFrame.y, 40.0) &&
+        approxEqual(sidebarFrame.width, 250.0) &&
+        approxEqual(sidebarFrame.height, 640.0) &&
+        approxEqual(contentFrame.x, 330.0) &&
+        approxEqual(contentFrame.y, 40.0) &&
+        approxEqual(contentFrame.width, 910.0) &&
+        approxEqual(contentFrame.height, 640.0) &&
+        approxEqual(contentColumn.x, 330.0) &&
+        approxEqual(contentColumn.y, 40.0) &&
+        approxEqual(titleFrame.x, 330.0) &&
+        approxEqual(titleFrame.y, 40.0) &&
+        approxEqual(mainCard.x, 330.0) &&
+        approxEqual(mainCard.y, 110.8) &&
+        approxEqual(cardsFrame.x, 366.0) &&
+        approxEqual(cardsFrame.y, 238.0) &&
+        approxEqual(cardsRow.x, 372.0) &&
+        approxEqual(cardsRow.y, 244.0) &&
+        approxEqual(cardsRow.width, 826.0) &&
+        approxEqual(regularCard.x, 372.0) &&
+        approxEqual(regularCard.width, 390.0) &&
+        approxEqual(squircleCard.x, 808.0) &&
+        approxEqual(squircleCard.width, 390.0) &&
+        sidebarTitle.width > 0.0
+    )
+    return passed
+}
+
 @Main
 function main() {
-    RunFoundationApp(FoundationDashboardView())
+    print(FoundationDashboardLayoutSmoke())
     return
 }

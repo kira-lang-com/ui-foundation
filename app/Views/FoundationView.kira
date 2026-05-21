@@ -1,22 +1,208 @@
-class FoundationView {
-    function children() -> [FoundationView] {
-        return []
-    }
+enum FoundationViewKind {
+    Row
+    Column
+    Expanded
+    Frame
+    Spacer
+    Surface
+    Text
+    HitArea
+    LayoutPriority
+}
 
-    function layoutDescriptor() -> LayoutDescriptor {
-        return LayoutDescriptor {
-            width: SizeMode.Hug
-            height: SizeMode.Hug
-            arrange: ArrangeMode.Fill
-            axis: Axis.Vertical
-            alignment: CrossAlignment.Stretch
-            overlayAlignment: Alignment.Center
-            padding: EdgeInsets {}
-            margin: EdgeInsets {}
+function foundationNoopPress() {
+    return
+}
+
+struct FoundationView {
+    let kind: FoundationViewKind
+    let children: [FoundationView] = []
+    let width: SizeMode = SizeMode.Hug
+    let height: SizeMode = SizeMode.Hug
+    let flex: Int = 0
+    let gap: Float = 0.0
+    let padding: EdgeInsets = EdgeInsets {}
+    let crossAxisAlignment: CrossAlignment = CrossAlignment.Stretch
+    let alignment: Alignment = Alignment.Center
+    let fill: Color = Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 1.0
+    }
+    let border: Color = Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+    }
+    let borderWidth: Float = 0.0
+    let radius: Float = 0.0
+    let shape: FoundationShape = FoundationShape.RegularRoundedRect
+    let material: FoundationMaterial = FoundationMaterial.Flat
+    let effects: [FoundationEffect] = []
+    let clipContent: Bool = false
+    let content: String = ""
+    let color: Color = Color {
+        r: 0.08
+        g: 0.08
+        b: 0.10
+        a: 1.0
+    }
+    let size: Float = 15.0
+    let weight: Float = 400.0
+    let disabled: Bool = false
+    let onPress: () -> Void = foundationNoopPress
+    let minLength: Float = 0.0
+}
+
+function foundationViewChildren(view: borrow FoundationView) -> [FoundationView] {
+    return view.children
+}
+
+function foundationLayoutDescriptorWithFlex(layout: borrow LayoutDescriptor, flex: Int) -> LayoutDescriptor {
+    return LayoutDescriptor {
+        width: layout.width
+        height: layout.height
+        flex: flex
+        arrange: layout.arrange
+        axis: layout.axis
+        spacing: layout.spacing
+        rowSpacing: layout.rowSpacing
+        alignment: layout.alignment
+        overlayAlignment: layout.overlayAlignment
+        columns: layout.columns
+        padding: layout.padding
+        margin: layout.margin
+        x: layout.x
+        y: layout.y
+        zIndex: layout.zIndex
+        clipContent: layout.clipContent
+    }
+}
+
+function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDescriptor {
+    match view.kind {
+        Row -> {
+            return LayoutDescriptor {
+                width: view.width
+                height: view.height
+                arrange: ArrangeMode.Stack
+                axis: Axis.Horizontal
+                spacing: view.gap
+                alignment: view.crossAxisAlignment
+                overlayAlignment: Alignment.Center
+                padding: view.padding
+                margin: EdgeInsets {}
+            }
         }
-    }
-
-    function paint(frame: Rect) -> FoundationPaint {
-        return FoundationPaint.None
+        Column -> {
+            return LayoutDescriptor {
+                width: view.width
+                height: view.height
+                arrange: ArrangeMode.Stack
+                axis: Axis.Vertical
+                spacing: view.gap
+                alignment: view.crossAxisAlignment
+                overlayAlignment: Alignment.Center
+                padding: view.padding
+                margin: EdgeInsets {}
+            }
+        }
+        Expanded -> {
+            return LayoutDescriptor {
+                width: SizeMode.Fill
+                height: SizeMode.Fill
+                flex: view.flex
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        Frame -> {
+            return LayoutDescriptor {
+                width: view.width
+                height: view.height
+                flex: view.flex
+                arrange: ArrangeMode.Overlay
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: view.alignment
+                padding: view.padding
+                margin: EdgeInsets {}
+            }
+        }
+        Spacer -> {
+            let ignored = view.minLength
+            return LayoutDescriptor {
+                width: SizeMode.Fill
+                height: SizeMode.Fill
+                flex: view.flex
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        Surface -> {
+            return LayoutDescriptor {
+                width: view.width
+                height: view.height
+                flex: view.flex
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: view.padding
+                margin: EdgeInsets {}
+                clipContent: view.clipContent
+            }
+        }
+        Text -> {
+            let measured = FoundationTextMeasurer {}.measure(content: view.content, size: view.size)
+            return LayoutDescriptor {
+                width: SizeMode.Fixed(measured.width)
+                height: SizeMode.Fixed(measured.height)
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        HitArea -> {
+            return LayoutDescriptor {
+                width: SizeMode.Hug
+                height: SizeMode.Hug
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        LayoutPriority -> {
+            if view.children.count == 0 {
+                return LayoutDescriptor {
+                    width: SizeMode.Hug
+                    height: SizeMode.Hug
+                    flex: view.flex
+                    arrange: ArrangeMode.Fill
+                    axis: Axis.Vertical
+                    alignment: CrossAlignment.Stretch
+                    overlayAlignment: Alignment.Center
+                    padding: EdgeInsets {}
+                    margin: EdgeInsets {}
+                }
+            }
+            return foundationLayoutDescriptorWithFlex(foundationViewLayoutDescriptor(view.children[0]), view.flex)
+        }
     }
 }

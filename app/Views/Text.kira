@@ -1,33 +1,31 @@
-class Text extends FoundationView {
-    let content: String
-    let color: Color = Color {
-        r: 0.08
-        g: 0.08
-        b: 0.10
-        a: 1.0
+class FoundationTextMeasurer {
+    function intrinsicWidth(size: Float, characterCount: Int) -> Float {
+        let glyphWidth = size * 0.48
+        let gap = size * 0.18
+        if characterCount <= 0 {
+            return 0.0
+        }
+        return intAsFloat(value: characterCount) * glyphWidth + intAsFloat(value: characterCount - 1) * gap
     }
-    let size: Float = 15.0
-    let weight: Float = 400.0
 
-    override function layoutDescriptor() -> LayoutDescriptor {
-        return LayoutDescriptor {
-            width: SizeMode.Fixed(120.0)
-            height: SizeMode.Fixed(24.0)
-            arrange: ArrangeMode.Fill
-            axis: Axis.Vertical
-            alignment: CrossAlignment.Stretch
-            overlayAlignment: Alignment.Center
-            padding: EdgeInsets {}
-            margin: EdgeInsets {}
+    function intrinsicHeight(size: Float) -> Float {
+        return size * 1.20
+    }
+
+    function measure(content: borrow String, size: Float) -> Size {
+        return Size {
+            width: intrinsicWidth(size: size, characterCount: content.count)
+            height: intrinsicHeight(size: size)
         }
     }
+}
 
-    override function paint(frame: Rect) -> FoundationPaint {
-        return FoundationPaint.Text(FoundationTextPaint {
-            content: self.content
-            color: self.color
-            size: self.size
-            weight: self.weight
-        })
+function Text(content: String, color: Color, size: Float, weight: Float) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Text
+        content: content
+        color: color
+        size: size
+        weight: weight
     }
 }

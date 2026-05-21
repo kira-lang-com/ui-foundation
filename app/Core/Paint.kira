@@ -9,6 +9,11 @@ struct Glow {
     let intensity: Float = 0.0
 }
 
+enum FoundationShape {
+    RegularRoundedRect
+    Squircle
+}
+
 enum FoundationMaterial {
     Flat
     Translucent
@@ -54,6 +59,7 @@ struct FoundationSurfacePaint {
     let material: FoundationMaterial = FoundationMaterial.Flat
     let effects: [FoundationEffect] = []
     let clipContent: Bool = false
+    let shape: FoundationShape = FoundationShape.RegularRoundedRect
 }
 
 struct FoundationHitRegionPaint {

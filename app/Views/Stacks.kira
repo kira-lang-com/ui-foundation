@@ -1,47 +1,104 @@
-class VStack extends FoundationView {
-    let spacing: Float = 0.0
-    let padding: EdgeInsets = EdgeInsets {}
-    let children: [FoundationView]
-
-    override function children() -> [FoundationView] {
-        return self.children
-    }
-
-    override function layoutDescriptor() -> LayoutDescriptor {
-        return LayoutDescriptor {
-            width: SizeMode.Hug
-            height: SizeMode.Hug
-            arrange: ArrangeMode.Stack
-            axis: Axis.Vertical
-            spacing: self.spacing
-            alignment: CrossAlignment.Stretch
-            overlayAlignment: Alignment.Center
-            padding: self.padding
-            margin: EdgeInsets {}
-        }
+function Row(
+    children: [FoundationView],
+    width: SizeMode,
+    height: SizeMode,
+    spacing: Float,
+    padding: EdgeInsets,
+    crossAxisAlignment: CrossAlignment,
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Row
+        width: width
+        height: height
+        gap: spacing
+        padding: padding
+        crossAxisAlignment: crossAxisAlignment
+        children: children
     }
 }
 
-class HStack extends FoundationView {
-    let spacing: Float = 0.0
-    let padding: EdgeInsets = EdgeInsets {}
-    let children: [FoundationView]
-
-    override function children() -> [FoundationView] {
-        return self.children
+function Column(
+    children: [FoundationView],
+    width: SizeMode,
+    height: SizeMode,
+    spacing: Float,
+    padding: EdgeInsets,
+    crossAxisAlignment: CrossAlignment,
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Column
+        width: width
+        height: height
+        gap: spacing
+        padding: padding
+        crossAxisAlignment: crossAxisAlignment
+        children: children
     }
+}
 
-    override function layoutDescriptor() -> LayoutDescriptor {
-        return LayoutDescriptor {
-            width: SizeMode.Hug
-            height: SizeMode.Hug
-            arrange: ArrangeMode.Stack
-            axis: Axis.Horizontal
-            spacing: self.spacing
-            alignment: CrossAlignment.Center
-            overlayAlignment: Alignment.Center
-            padding: self.padding
-            margin: EdgeInsets {}
-        }
+function Expanded(child: FoundationView, flex: Int) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Expanded
+        flex: flex
+        children: [child]
     }
+}
+
+function Frame(
+    child: FoundationView,
+    width: SizeMode,
+    height: SizeMode,
+    flex: Int,
+    alignment: Alignment,
+    padding: EdgeInsets,
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Frame
+        width: width
+        height: height
+        flex: flex
+        alignment: alignment
+        padding: padding
+        children: [child]
+    }
+}
+
+function Spacer(minLength: Float, flex: Int) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Spacer
+        width: SizeMode.Fill
+        height: SizeMode.Fill
+        flex: flex
+        minLength: minLength
+    }
+}
+
+function LayoutPriority(child: FoundationView, value: Int) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.LayoutPriority
+        flex: value
+        children: [child]
+    }
+}
+
+function VStack(children: [FoundationView], spacing: Float, padding: EdgeInsets) -> FoundationView {
+    return Column(
+        children: move children,
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: spacing,
+        padding: move padding,
+        crossAxisAlignment: CrossAlignment.Stretch
+    )
+}
+
+function HStack(children: [FoundationView], spacing: Float, padding: EdgeInsets) -> FoundationView {
+    return Row(
+        children: move children,
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: spacing,
+        padding: move padding,
+        crossAxisAlignment: CrossAlignment.Center
+    )
 }

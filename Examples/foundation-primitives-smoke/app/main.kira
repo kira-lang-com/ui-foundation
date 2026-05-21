@@ -1,0 +1,7 @@
+import KiraUIFoundation
+
+@Main
+function main() {
+    print(FoundationPrimitiveLayoutSmoke())
+    return
+}
