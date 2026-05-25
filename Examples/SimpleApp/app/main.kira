@@ -1,7 +1,12 @@
 import KiraUIFoundation
 
+function hello() {
+    print("hello from SimpleApp")
+    return
+}
+
 @Main
 function main() {
-    hello();
-    return;
+    hello()
+    return
 }

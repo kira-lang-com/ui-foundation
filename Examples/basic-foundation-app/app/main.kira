@@ -278,7 +278,7 @@ function dashboardMainCardView() -> FoundationView {
 function dashboardMainContentView() -> FoundationView {
     return Column(
         children: [
-            Text("UI FOUNDATION", dashboardTextPrimary(), 34.0, 760.0),
+            Text("UI Foundation", dashboardTextPrimary(), 34.0, 760.0),
             dashboardMainCardView()
         ],
         width: SizeMode.Fill,

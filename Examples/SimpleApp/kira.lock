@@ -12,10 +12,29 @@ source = "path"
 path = "../.."
 
 [[package]]
+name = "KiraGraphics"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraGraphics"
+source = "path"
+path = "/Users/priamc/Coding/kira-projects/kira-graphics"
+
+[[package]]
+name = "KiraLayout"
+version = "0.1.0"
+kind = "library"
+kira = "0.1.0"
+module_root = "KiraLayout"
+source = "path"
+path = "/Users/priamc/Coding/kira-projects/kira-layout"
+
+[[package]]
 name = "KiraUIFoundation"
 version = "0.1.0"
 kind = "library"
 kira = "0.1.0"
 module_root = "KiraUIFoundation"
 source = "path"
-path = "C:\Users\Shadow\Coding\kira-projects\kira-ui-foundation"
+path = "/Users/priamc/Coding/kira-projects/ui-foundation"
+dependencies = ["KiraGraphics", "KiraLayout"]
