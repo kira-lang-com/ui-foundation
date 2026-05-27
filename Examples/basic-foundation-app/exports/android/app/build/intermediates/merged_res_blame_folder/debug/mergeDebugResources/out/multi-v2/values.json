@@ -1,0 +1,26 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.kira.app-mergeDebugResources-2:/values/values.xml",
+            "map": [
+                {
+                    "source": "/Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/res/values/styles.xml",
+                    "from": {
+                        "startLines": "0",
+                        "startColumns": "11",
+                        "startOffsets": "11",
+                        "endColumns": "91",
+                        "endOffsets": "91"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "84",
+                        "endOffsets": "135"
+                    }
+                }
+            ]
+        }
+    ]
+}

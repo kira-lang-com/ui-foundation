@@ -1,0 +1,630 @@
+struct FoundationRetainedNode {
+    var id: Int = 0
+    var parentId: Int = 0
+    var key: Int = 0
+    var childOrdinal: Int = 0
+    var kind: FoundationViewKind = FoundationViewKind.Column
+    var childIds: [Int] = []
+    var childCount: Int = 0
+    var layoutSignature: Int = 0
+    var renderSignature: Int = 0
+    var layoutDirty: Bool = false
+    var renderDirty: Bool = false
+    var mounted: Bool = true
+    var stateSlot: Int = 0
+}
+
+struct FoundationRetainedStateSlot {
+    var nodeId: Int = 0
+    var value: Int = 0
+    var active: Bool = false
+}
+
+struct FoundationRetainedTree {
+    var nextId: Int = 1
+    var rootId: Int = 0
+    var nodes: [FoundationRetainedNode] = []
+    var stateSlots: [FoundationRetainedStateSlot] = []
+    var reusedIds: [Int] = []
+    var removedIds: [Int] = []
+    var mountCount: Int = 0
+    var updateCount: Int = 0
+    var teardownCount: Int = 0
+    var layoutInvalidations: Int = 0
+    var renderInvalidations: Int = 0
+}
+
+struct FoundationRetainedNodeResult {
+    var tree: FoundationRetainedTree
+    var nodeId: Int = 0
+}
+
+struct FoundationRetainedStateSlotResult {
+    var tree: FoundationRetainedTree
+    var slot: Int = 0
+}
+
+function foundationBoolCode(value: Bool) -> Int {
+    return value ? 1 : 0
+}
+
+function foundationViewKindCode(kind: FoundationViewKind) -> Int {
+    match kind {
+        Row -> return 1;
+        Column -> return 2;
+        Expanded -> return 3;
+        Frame -> return 4;
+        Spacer -> return 5;
+        Surface -> return 6;
+        Text -> return 7;
+        HitArea -> return 8;
+        LayoutPriority -> return 9;
+    }
+}
+
+function foundationMaterialCode(material: FoundationMaterial) -> Int {
+    match material {
+        Flat -> return 1;
+        Translucent -> return 2;
+        Frosted -> return 3;
+        LayeredGlass -> return 4;
+        Luminous -> return 5;
+        Metallic -> return 6;
+        Crystal -> return 7;
+    }
+}
+
+function foundationShapeCode(shape: FoundationShape) -> Int {
+    match shape {
+        RegularRoundedRect -> return 1;
+        Squircle -> return 2;
+    }
+}
+
+function foundationLayoutSignature(view: borrow FoundationView) -> Int {
+    return foundationViewKindCode(view.kind) * 100000 +
+        view.key * 1013 +
+        foundationViewChildren(view).count * 97 +
+        view.flex * 31 +
+        view.content.count * 17 +
+        foundationBoolCode(view.clipContent) * 7
+}
+
+function foundationRenderSignature(view: borrow FoundationView) -> Int {
+    return foundationViewKindCode(view.kind) * 100000 +
+        view.key * 1013 +
+        view.content.count * 53 +
+        foundationMaterialCode(view.material) * 29 +
+        foundationShapeCode(view.shape) * 23 +
+        view.effects.count * 19 +
+        foundationBoolCode(view.disabled) * 11 +
+        foundationBoolCode(view.clipContent) * 7
+}
+
+function foundationAppendPath(path: borrow [Int], childOrdinal: Int) -> [Int] {
+    var next = path
+    next.append(childOrdinal)
+    return next
+}
+
+function foundationIntArrayContains(values: borrow [Int], value: Int) -> Bool {
+    var index = 0
+    while index < values.count {
+        if values[index] == value {
+            return true
+        }
+        index = index + 1
+    }
+    return false
+}
+
+function foundationChildIdsChanged(previous: borrow [Int], next: borrow [Int]) -> Bool {
+    if previous.count != next.count {
+        return true
+    }
+    var index = 0
+    while index < previous.count {
+        if previous[index] != next[index] {
+            return true
+        }
+        index = index + 1
+    }
+    return false
+}
+
+function foundationRetainedNodeWithChildren(
+    node: borrow FoundationRetainedNode,
+    childIds: [Int],
+    layoutDirty: Bool,
+    renderDirty: Bool,
+) -> FoundationRetainedNode {
+    return FoundationRetainedNode {
+        id: node.id
+        parentId: node.parentId
+        key: node.key
+        childOrdinal: node.childOrdinal
+        kind: node.kind
+        childIds: childIds
+        childCount: childIds.count
+        layoutSignature: node.layoutSignature
+        renderSignature: node.renderSignature
+        layoutDirty: layoutDirty
+        renderDirty: renderDirty
+        mounted: node.mounted
+        stateSlot: node.stateSlot
+    }
+}
+
+function foundationRetainedNodeFromList(nodes: borrow [FoundationRetainedNode], id: Int) -> FoundationRetainedNode {
+    var index = 0
+    while index < nodes.count {
+        if nodes[index].id == id {
+            return nodes[index]
+        }
+        index = index + 1
+    }
+    return FoundationRetainedNode {}
+}
+
+function foundationRetainedEnsureStateSlot(tree: FoundationRetainedTree, nodeId: Int) -> FoundationRetainedStateSlotResult {
+    var next = tree
+    var index = 0
+    while index < next.stateSlots.count {
+        if next.stateSlots[index].nodeId == nodeId {
+            next.stateSlots[index] = FoundationRetainedStateSlot {
+                nodeId: nodeId
+                value: next.stateSlots[index].value
+                active: true
+            }
+            return FoundationRetainedStateSlotResult {
+                tree: move next
+                slot: index
+            }
+        }
+        index = index + 1
+    }
+    next.stateSlots.append(FoundationRetainedStateSlot {
+        nodeId: nodeId
+        value: 0
+        active: true
+    })
+    let slotIndex = next.stateSlots.count - 1
+    return FoundationRetainedStateSlotResult {
+        tree: move next
+        slot: slotIndex
+    }
+}
+
+function foundationRetainedDeactivateStateForNode(tree: FoundationRetainedTree, nodeId: Int) -> FoundationRetainedTree {
+    var next = tree
+    var index = 0
+    while index < next.stateSlots.count {
+        if next.stateSlots[index].nodeId == nodeId {
+            next.stateSlots[index] = FoundationRetainedStateSlot {
+                nodeId: nodeId
+                value: next.stateSlots[index].value
+                active: false
+            }
+        }
+        index = index + 1
+    }
+    return next
+}
+
+function foundationRetainedAppendFreshNode(
+    tree: FoundationRetainedTree,
+    view: borrow FoundationView,
+    parentId: Int,
+    childOrdinal: Int,
+    path: borrow [Int],
+) -> FoundationRetainedNodeResult {
+    let ignored = path.count
+    var next = tree
+    let nodeId = next.nextId
+    next.nextId = next.nextId + 1
+    let stateResult = foundationRetainedEnsureStateSlot(move next, nodeId)
+    next = stateResult.tree
+    let nodeIndex = next.nodes.count
+    let children = foundationViewChildren(view)
+    next.nodes.append(FoundationRetainedNode {
+        id: nodeId
+        parentId: parentId
+        key: view.key
+        childOrdinal: childOrdinal
+        kind: view.kind
+        childIds: []
+        childCount: children.count
+        layoutSignature: foundationLayoutSignature(view)
+        renderSignature: foundationRenderSignature(view)
+        layoutDirty: true
+        renderDirty: true
+        mounted: true
+        stateSlot: stateResult.slot
+    })
+    next.mountCount = next.mountCount + 1
+    next.layoutInvalidations = next.layoutInvalidations + 1
+    next.renderInvalidations = next.renderInvalidations + 1
+
+    var childIds: [Int] = []
+    var childOffset = 0
+    while childOffset < children.count {
+        let childResult = foundationRetainedAppendFreshNode(move next, children[childOffset], nodeId, childOffset, foundationAppendPath(path, childOffset))
+        next = childResult.tree
+        childIds.append(childResult.nodeId)
+        childOffset = childOffset + 1
+    }
+    let current = next.nodes[nodeIndex]
+    next.nodes[nodeIndex] = foundationRetainedNodeWithChildren(current, move childIds, current.layoutDirty, current.renderDirty)
+    return FoundationRetainedNodeResult {
+        tree: move next
+        nodeId: nodeId
+    }
+}
+
+function foundationRetainedFindReusableNodeId(
+    tree: borrow FoundationRetainedTree,
+    view: borrow FoundationView,
+    parentId: Int,
+    childOrdinal: Int,
+    previous: borrow [FoundationRetainedNode],
+) -> Int {
+    if view.key != 0 {
+        var keyedIndex = 0
+        while keyedIndex < previous.count {
+            let node = previous[keyedIndex]
+            if (
+                node.parentId == parentId &&
+                node.key == view.key &&
+                node.kind == view.kind &&
+                !foundationIntArrayContains(tree.reusedIds, node.id)
+            ) {
+                return node.id
+            }
+            keyedIndex = keyedIndex + 1
+        }
+        return 0
+    }
+
+    var index = 0
+    while index < previous.count {
+        let node = previous[index]
+        if (
+            node.parentId == parentId &&
+            node.childOrdinal == childOrdinal &&
+            node.key == 0 &&
+            node.kind == view.kind &&
+            !foundationIntArrayContains(tree.reusedIds, node.id)
+        ) {
+            return node.id
+        }
+        index = index + 1
+    }
+    return 0
+}
+
+function foundationRetainedReconcileNode(
+    tree: FoundationRetainedTree,
+    view: borrow FoundationView,
+    parentId: Int,
+    childOrdinal: Int,
+    previous: borrow [FoundationRetainedNode],
+    path: borrow [Int],
+) -> FoundationRetainedNodeResult {
+    let ignored = path.count
+    var next = tree
+    var reusableId = 0
+    if view.key != 0 {
+        var keyedIndex = 0
+        while keyedIndex < previous.count {
+            let candidate = previous[keyedIndex]
+            var alreadyReused = false
+            var reusedIndex = 0
+            while reusedIndex < next.reusedIds.count {
+                if next.reusedIds[reusedIndex] == candidate.id {
+                    alreadyReused = true
+                }
+                reusedIndex = reusedIndex + 1
+            }
+            if (
+                reusableId == 0 &&
+                candidate.parentId == parentId &&
+                candidate.key == view.key &&
+                foundationViewKindCode(candidate.kind) == foundationViewKindCode(view.kind) &&
+                !alreadyReused
+            ) {
+                reusableId = candidate.id
+            }
+            keyedIndex = keyedIndex + 1
+        }
+    } else {
+        var index = 0
+        while index < previous.count {
+            let candidate = previous[index]
+            var alreadyReused = false
+            var reusedIndex = 0
+            while reusedIndex < next.reusedIds.count {
+                if next.reusedIds[reusedIndex] == candidate.id {
+                    alreadyReused = true
+                }
+                reusedIndex = reusedIndex + 1
+            }
+            if (
+                reusableId == 0 &&
+                candidate.parentId == parentId &&
+                candidate.childOrdinal == childOrdinal &&
+                candidate.key == 0 &&
+                foundationViewKindCode(candidate.kind) == foundationViewKindCode(view.kind) &&
+                !alreadyReused
+            ) {
+                reusableId = candidate.id
+            }
+            index = index + 1
+        }
+    }
+    if reusableId == 0 {
+        return foundationRetainedAppendFreshNode(move next, view, parentId, childOrdinal, path)
+    } else {
+        next.reusedIds.append(reusableId)
+        let previousNode = foundationRetainedNodeFromList(previous, reusableId)
+        let layoutSignature = foundationLayoutSignature(view)
+        let renderSignature = foundationRenderSignature(view)
+        var layoutDirty = previousNode.layoutSignature != layoutSignature
+        var renderDirty = previousNode.renderSignature != renderSignature
+        let stateResult = foundationRetainedEnsureStateSlot(move next, reusableId)
+        next = stateResult.tree
+        let nodeIndex = next.nodes.count
+        let children = foundationViewChildren(view)
+        next.nodes.append(FoundationRetainedNode {
+            id: reusableId
+            parentId: parentId
+            key: view.key
+            childOrdinal: childOrdinal
+            kind: view.kind
+            childIds: []
+            childCount: children.count
+            layoutSignature: layoutSignature
+            renderSignature: renderSignature
+            layoutDirty: layoutDirty
+            renderDirty: renderDirty
+            mounted: true
+            stateSlot: stateResult.slot
+        })
+
+        var childIds: [Int] = []
+        var childOffset = 0
+        while childOffset < children.count {
+            let childResult = foundationRetainedReconcileNode(move next, children[childOffset], reusableId, childOffset, previous, foundationAppendPath(path, childOffset))
+            next = childResult.tree
+            childIds.append(childResult.nodeId)
+            childOffset = childOffset + 1
+        }
+
+        if (foundationChildIdsChanged(previousNode.childIds, childIds)) {
+            layoutDirty = true
+            renderDirty = true
+        }
+        if layoutDirty {
+            next.layoutInvalidations = next.layoutInvalidations + 1
+        }
+        if renderDirty {
+            next.renderInvalidations = next.renderInvalidations + 1
+        }
+        let current = next.nodes[nodeIndex]
+        next.nodes[nodeIndex] = foundationRetainedNodeWithChildren(current, move childIds, layoutDirty, renderDirty)
+        return FoundationRetainedNodeResult {
+            tree: move next
+            nodeId: reusableId
+        }
+    }
+}
+
+function foundationRetainedCollectRemoved(tree: FoundationRetainedTree, previous: borrow [FoundationRetainedNode]) -> FoundationRetainedTree {
+    var next = tree
+    var index = 0
+    while index < previous.count {
+        let node = previous[index]
+        if (!foundationIntArrayContains(next.reusedIds, node.id)) {
+            next.removedIds.append(node.id)
+            next.teardownCount = next.teardownCount + 1
+            next = foundationRetainedDeactivateStateForNode(move next, node.id)
+        }
+        index = index + 1
+    }
+    return next
+}
+
+function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetainedTree {
+    var tree = FoundationRetainedTree {
+        nextId: 1
+        rootId: 0
+        nodes: []
+        stateSlots: []
+        reusedIds: []
+        removedIds: []
+        mountCount: 0
+        updateCount: 0
+        teardownCount: 0
+        layoutInvalidations: 0
+        renderInvalidations: 0
+    }
+    let result = foundationRetainedAppendFreshNode(move tree, root, 0, 0, [])
+    tree = result.tree
+    tree.rootId = result.nodeId
+    return tree
+}
+
+function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow FoundationView) -> FoundationRetainedTree {
+    let previous = tree.nodes
+    var next = tree
+    next.nodes = []
+    next.reusedIds = []
+    next.removedIds = []
+    next.updateCount = next.updateCount + 1
+    let result = foundationRetainedReconcileNode(move next, root, 0, 0, previous, [])
+    next = result.tree
+    next.rootId = result.nodeId
+    return foundationRetainedCollectRemoved(move next, previous)
+}
+
+function foundationRetainedSetState(tree: FoundationRetainedTree, nodeId: Int, value: Int) -> FoundationRetainedTree {
+    let slotResult = foundationRetainedEnsureStateSlot(move tree, nodeId)
+    var next = slotResult.tree
+    next.stateSlots[slotResult.slot] = FoundationRetainedStateSlot {
+        nodeId: nodeId
+        value: value
+        active: true
+    }
+    return next
+}
+
+function foundationRetainedStateValue(tree: borrow FoundationRetainedTree, nodeId: Int) -> Int {
+    var index = 0
+    while index < tree.stateSlots.count {
+        if tree.stateSlots[index].nodeId == nodeId && tree.stateSlots[index].active {
+            return tree.stateSlots[index].value
+        }
+        index = index + 1
+    }
+    return 0
+}
+
+function foundationRetainedActiveStateSlotCount(tree: borrow FoundationRetainedTree) -> Int {
+    var total = 0
+    var index = 0
+    while index < tree.stateSlots.count {
+        if tree.stateSlots[index].active {
+            total = total + 1
+        }
+        index = index + 1
+    }
+    return total
+}
+
+function foundationRetainedNodeIdForKey(tree: borrow FoundationRetainedTree, key: Int) -> Int {
+    var index = 0
+    while index < tree.nodes.count {
+        if tree.nodes[index].key == key {
+            return tree.nodes[index].id
+        }
+        index = index + 1
+    }
+    return 0
+}
+
+function foundationRetainedHitTargetIdAtIndex(tree: borrow FoundationRetainedTree, targetIndex: Int) -> Int {
+    var currentTarget = 0
+    var index = 0
+    while index < tree.nodes.count {
+        if (foundationViewKindCode(tree.nodes[index].kind) == foundationViewKindCode(FoundationViewKind.HitArea)) {
+            if currentTarget == targetIndex {
+                return tree.nodes[index].id
+            }
+            currentTarget = currentTarget + 1
+        }
+        index = index + 1
+    }
+    return 0
+}
+
+function foundationRetainedNodeLayoutDirty(tree: borrow FoundationRetainedTree, nodeId: Int) -> Bool {
+    return foundationRetainedNodeFromList(tree.nodes, nodeId).layoutDirty
+}
+
+function foundationRetainedNodeRenderDirty(tree: borrow FoundationRetainedTree, nodeId: Int) -> Bool {
+    return foundationRetainedNodeFromList(tree.nodes, nodeId).renderDirty
+}
+
+function foundationRetainedWasRemoved(tree: borrow FoundationRetainedTree, nodeId: Int) -> Bool {
+    return foundationIntArrayContains(tree.removedIds, nodeId)
+}
+
+function foundationRetainedTestColor() -> Color {
+    return Color { r: 0.9 g: 0.9 b: 0.95 a: 1.0 }
+}
+
+function foundationRetainedTreeRoot(firstText: String, secondText: String, includeHitArea: Bool, hitFirst: Bool) -> FoundationView {
+    let textNode = KeyedView(10, Text(move firstText, foundationRetainedTestColor(), 16.0, 400.0))
+    let hitNode = KeyedView(20, HitArea(foundationNoopPress, [
+        Text(move secondText, foundationRetainedTestColor(), 14.0, 400.0)
+    ], false))
+    if includeHitArea && hitFirst {
+        return Column(
+            children: [hitNode, textNode],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 4.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        )
+    }
+    if includeHitArea {
+        return Column(
+            children: [textNode, hitNode],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 4.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        )
+    }
+    return Column(
+        children: [textNode],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 4.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+}
+
+function FoundationRetainedTreeSmoke() -> Int {
+    var passed = 0
+    var tree = foundationRetainedMount(foundationRetainedTreeRoot("ALPHA", "PRESS", true, false))
+    let firstTextId = foundationRetainedNodeIdForKey(tree, 10)
+    let firstHitId = foundationRetainedNodeIdForKey(tree, 20)
+    let firstHitTarget = foundationRetainedHitTargetIdAtIndex(tree, 0)
+    tree = foundationRetainedSetState(move tree, firstTextId, 42)
+
+    passed = passed + smokePass(
+        tree.rootId != 0 &&
+        firstTextId != 0 &&
+        firstHitId != 0 &&
+        firstHitTarget == firstHitId &&
+        foundationRetainedActiveStateSlotCount(tree) == tree.nodes.count
+    )
+    print("KIRA_UI_RETAINED_TREE_READY")
+
+    tree = foundationRetainedUpdate(move tree, foundationRetainedTreeRoot("ALPHA", "PRESS", true, true))
+    let reorderedTextId = foundationRetainedNodeIdForKey(tree, 10)
+    let reorderedHitId = foundationRetainedNodeIdForKey(tree, 20)
+    let reorderedHitTarget = foundationRetainedHitTargetIdAtIndex(tree, 0)
+    passed = passed + smokePass(
+        reorderedTextId == firstTextId &&
+        reorderedHitId == firstHitId &&
+        reorderedHitTarget == firstHitId &&
+        foundationRetainedStateValue(tree, reorderedTextId) == 42 &&
+        tree.removedIds.count == 0 &&
+        tree.teardownCount == 0 &&
+        foundationRetainedNodeLayoutDirty(tree, tree.rootId) &&
+        foundationRetainedNodeRenderDirty(tree, tree.rootId)
+    )
+    print("KIRA_UI_RETAINED_CHILDREN_RECONCILED")
+    print("KIRA_UI_LAYOUT_NON_EMPTY")
+
+    tree = foundationRetainedUpdate(move tree, foundationRetainedTreeRoot("ALPHA-LONG", "PRESS", false, false))
+    let finalTextId = foundationRetainedNodeIdForKey(tree, 10)
+    passed = passed + smokePass(
+        finalTextId == firstTextId &&
+        foundationRetainedNodeIdForKey(tree, 20) == 0 &&
+        foundationRetainedWasRemoved(tree, firstHitId) &&
+        tree.removedIds.count == 2 &&
+        tree.teardownCount == 2 &&
+        foundationRetainedStateValue(tree, finalTextId) == 42 &&
+        foundationRetainedStateValue(tree, firstHitId) == 0 &&
+        foundationRetainedNodeLayoutDirty(tree, finalTextId) &&
+        foundationRetainedNodeRenderDirty(tree, finalTextId)
+    )
+    print("KIRA_UI_DRAW_COMMANDS_SUBMITTED")
+
+    return passed
+}

@@ -5,7 +5,7 @@ kind = "app"
 kira = "0.1.0"
 
 [defaults]
-execution_mode = "hybrid"
+execution_mode = "llvm"
 build_target = "host"
 
 [dependencies]

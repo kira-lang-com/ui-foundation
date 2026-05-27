@@ -1,0 +1,7 @@
+com.kira.app-pngs-0 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/build/generated/res/pngs/debug
+com.kira.app-resValues-1 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/build/generated/res/resValues/debug
+com.kira.app-packageDebugResources-2 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+com.kira.app-packageDebugResources-3 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+com.kira.app-debug-4 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/build/intermediates/merged_res/debug/mergeDebugResources
+com.kira.app-debug-5 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/debug/res
+com.kira.app-main-6 /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/res

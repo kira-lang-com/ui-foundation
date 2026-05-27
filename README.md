@@ -64,12 +64,18 @@ Flexbox-inspired layout system with `VStack` and `HStack` — spacing, padding, 
 **Interactive Hit Areas**
 Drop-in clickable regions with optional disabled states and press handlers.
 
+**Retained Foundation Tree**
+Foundation views lower into a retained tree with stable node IDs, keyed child reconciliation, dirty layout/render flags, state slots, hit target IDs, and deterministic teardown records. The retained layer is intentionally below Kira UI so future `@State`, `@Binding`, environment, styling, and modifier features can attach to stable identity instead of anonymous per-frame values.
+
 ## Architecture
 
 Kira UI Foundation sits at the top of a layered rendering pipeline:
 
 ```
 View (declarative UI)
+    │
+    ▼
+Retained Tree (identity + reconcile + state)
     │
     ▼
 Tree (hierarchy + frames)

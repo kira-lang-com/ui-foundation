@@ -16,6 +16,7 @@ function foundationNoopPress() {
 
 struct FoundationView {
     let kind: FoundationViewKind
+    let key: Int = 0
     let children: [FoundationView] = []
     let width: SizeMode = SizeMode.Hug
     let height: SizeMode = SizeMode.Hug
@@ -54,6 +55,36 @@ struct FoundationView {
     let disabled: Bool = false
     let onPress: () -> Void = foundationNoopPress
     let minLength: Float = 0.0
+}
+
+function KeyedView(key: Int, child: FoundationView) -> FoundationView {
+    return FoundationView {
+        kind: child.kind
+        key: key
+        children: child.children
+        width: child.width
+        height: child.height
+        flex: child.flex
+        gap: child.gap
+        padding: child.padding
+        crossAxisAlignment: child.crossAxisAlignment
+        alignment: child.alignment
+        fill: child.fill
+        border: child.border
+        borderWidth: child.borderWidth
+        radius: child.radius
+        shape: child.shape
+        material: child.material
+        effects: child.effects
+        clipContent: child.clipContent
+        content: child.content
+        color: child.color
+        size: child.size
+        weight: child.weight
+        disabled: child.disabled
+        onPress: child.onPress
+        minLength: child.minLength
+    }
 }
 
 function foundationViewChildren(view: borrow FoundationView) -> [FoundationView] {

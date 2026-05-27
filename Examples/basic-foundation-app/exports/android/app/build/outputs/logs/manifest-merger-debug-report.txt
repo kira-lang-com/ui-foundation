@@ -1,0 +1,47 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:1-391
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:1-391
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:1-391
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:1-391
+	package
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:11-69
+application
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:70-380
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:70-380
+	android:extractNativeLibs
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	android:label
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:115-138
+	android:theme
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:83-114
+activity#com.kira.app.MainActivity
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:139-366
+	android:exported
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:190-213
+	android:name
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:149-189
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:214-355
+action#android.intent.action.MAIN
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:229-280
+	android:name
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:237-278
+category#android.intent.category.LAUNCHER
+ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:280-339
+	android:name
+		ADDED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml:1:290-337
+uses-sdk
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Users/priamc/Coding/kira-projects/ui-foundation/Examples/basic-foundation-app/exports/android/app/src/main/AndroidManifest.xml

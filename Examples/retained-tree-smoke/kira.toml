@@ -1,0 +1,12 @@
+[package]
+name = "retained-tree-smoke"
+version = "0.1.0"
+kind = "app"
+
+[defaults]
+execution_mode = "vm"
+build_target = "host"
+kira = "0.1.0"
+
+[dependencies]
+KiraUIFoundation = { path = "../.." }
