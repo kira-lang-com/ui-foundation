@@ -1,7 +1,9 @@
 struct FoundationAppState {
     var frameCount: Int = 0
     var announcedTree: Bool = false
+    var announcedRetainedTree: Bool = false
     var announcedLayout: Bool = false
+    var announcedRenderCommands: Bool = false
     var retainedTree: FoundationRetainedTree = FoundationRetainedTree {}
 }
 
@@ -72,20 +74,28 @@ function RunFoundationApp(root: FoundationView) {
         } else {
             state.retainedTree = foundationRetainedUpdate(state.retainedTree, root)
         }
-        if !state.announcedTree {
-            print("KIRA_UI_TREE_BUILT")
+        if !state.announcedTree && foundationRenderableViewCount(root) > 0 {
+            kiraGraphicsLiveUiFoundationTreeBuilt()
             state.announcedTree = true
+        }
+        if !state.announcedRetainedTree && state.retainedTree.rootId != 0 {
+            kiraGraphicsLiveUiFoundationRetainedTreeReady()
+            state.announcedRetainedTree = true
         }
 
         let laidOut = FoundationLayoutPass().run(root: root, available: viewport)
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
-            print("KIRA_UI_LAYOUT_NON_EMPTY")
+            kiraGraphicsLiveUiFoundationLayoutNonEmpty()
             state.announcedLayout = true
         }
 
         backend.beginFrame(rootViewportWidth(), rootViewportHeight())
-        let ignored = foundationRender(root, laidOut, backend)
+        let renderCount = foundationRender(root, laidOut, backend)
+        if renderCount > 0 && !state.announcedRenderCommands {
+            kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
+            state.announcedRenderCommands = true
+        }
 
         state.frameCount = state.frameCount + 1
         backend.endFrame()
@@ -94,6 +104,7 @@ function RunFoundationApp(root: FoundationView) {
         return
     }
 
+    kiraGraphicsLiveUiFoundationAppStarted()
     app.run(nativeUserData(nativeState(FoundationAppState {})))
     return
 }

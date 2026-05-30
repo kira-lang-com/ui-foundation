@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>D976615B-5138-4FEE-B053-1E58CC8C0AEB</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>D976615B-5138-4FEE-B053-1E58CC8C0AEB.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>2</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>KiraApp project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>KiraApp-iOS</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building workspace KiraApp with scheme KiraApp-iOS and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>801837604.34820402</real>
+			<key>timeStoppedRecording</key>
+			<real>801837605.96011305</real>
+			<key>title</key>
+			<string>Building workspace KiraApp with scheme KiraApp-iOS and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>D976615B-5138-4FEE-B053-1E58CC8C0AEB</string>
+		</dict>
+	</dict>
+</dict>
+</plist>
