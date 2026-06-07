@@ -6,3 +6,30 @@ function HitArea(onPress: () -> Void, children: [FoundationView], disabled: Bool
         children: children
     }
 }
+
+function InteractiveHitArea(
+    key: Int,
+    focusable: Bool,
+    disabled: Bool,
+    onPress: () -> Void,
+    onTextInput: (String) -> Void,
+    onTextCodepoint: (Int) -> Void,
+    onBackspace: () -> Void,
+    onSubmit: () -> Void,
+    onScroll: (Float, Float) -> Void,
+    children: [FoundationView],
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.HitArea
+        key: key
+        focusable: focusable
+        disabled: disabled
+        onPress: onPress
+        onTextInput: onTextInput
+        onTextCodepoint: onTextCodepoint
+        onBackspace: onBackspace
+        onSubmit: onSubmit
+        onScroll: onScroll
+        children: children
+    }
+}

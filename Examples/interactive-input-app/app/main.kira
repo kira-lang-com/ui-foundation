@@ -1,0 +1,290 @@
+import KiraUIFoundation
+
+struct InteractiveInputState {
+    var buttonPressed: Bool = false
+    var textValue: String = ""
+    var submittedValue: String = ""
+    var didScroll: Bool = false
+}
+
+function appBackground() -> Color {
+    return Color { r: 0.05 g: 0.06 b: 0.09 a: 1.0 }
+}
+
+function panelFill(active: Bool) -> Color {
+    if active {
+        return Color { r: 0.22 g: 0.36 b: 0.62 a: 1.0 }
+    }
+    return Color { r: 0.14 g: 0.16 b: 0.23 a: 1.0 }
+}
+
+function panelBorder(active: Bool) -> Color {
+    if active {
+        return Color { r: 0.80 g: 0.90 b: 1.0 a: 0.55 }
+    }
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.12 }
+}
+
+function primaryText() -> Color {
+    return Color { r: 0.96 g: 0.97 b: 0.99 a: 1.0 }
+}
+
+function secondaryText() -> Color {
+    return Color { r: 0.74 g: 0.80 b: 0.88 a: 1.0 }
+}
+
+function placeholderOrValue(value: String) -> String {
+    if value.count == 0 {
+        return "TYPE HERE"
+    }
+    return value
+}
+
+function submitLabel(value: String) -> String {
+    if value.count == 0 {
+        return "PRESS ENTER TO SUBMIT"
+    }
+    return value
+}
+
+function buttonLabel(pressed: Bool) -> String {
+    if pressed {
+        return "BUTTON PRESSED"
+    }
+    return "CLICK THE PANEL"
+}
+
+function scrollLabel(didScroll: Bool) -> String {
+    if didScroll {
+        return "SCROLL RECEIVED"
+    }
+    return "SCROLL IN THIS PANEL"
+}
+
+function ignoreAction() {
+    return
+}
+
+function ignoreText(value: String) {
+    let ignored = value.count
+    return
+}
+
+function ignoreCodepoint(value: Int) {
+    let ignored = value + 0
+    return
+}
+
+function ignoreScroll(dx: Float, dy: Float) {
+    let ignored = dx + dy
+    return
+}
+
+function interactiveCard(
+    key: Int,
+    title: String,
+    status: String,
+    active: Bool,
+    focusable: Bool,
+    onPress: () -> Void,
+    onTextInput: (String) -> Void,
+    onTextCodepoint: (Int) -> Void,
+    onBackspace: () -> Void,
+    onSubmit: () -> Void,
+    onScroll: (Float, Float) -> Void,
+) -> FoundationView {
+    return InteractiveHitArea(
+        key: key,
+        focusable: focusable,
+        disabled: false,
+        onPress: move onPress,
+        onTextInput: move onTextInput,
+        onTextCodepoint: move onTextCodepoint,
+        onBackspace: move onBackspace,
+        onSubmit: move onSubmit,
+        onScroll: move onScroll,
+        children: [
+            Surface(
+                children: [
+                    Column(
+                        children: [
+                            Text(move title, primaryText(), 18.0, 680.0),
+                            Text(move status, secondaryText(), 14.0, 450.0)
+                        ],
+                        width: SizeMode.Fill,
+                        height: SizeMode.Hug,
+                        spacing: 14.0,
+                        padding: EdgeInsets {},
+                        crossAxisAlignment: CrossAlignment.Start
+                    )
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                flex: 0,
+                fill: panelFill(active),
+                border: panelBorder(active),
+                borderWidth: 1.0,
+                radius: 22.0,
+                shape: FoundationShape.RegularRoundedRect,
+                material: FoundationMaterial.Flat,
+                effects: [],
+                padding: EdgeInsets {
+                    top: 22.0
+                    trailing: 22.0
+                    bottom: 22.0
+                    leading: 22.0
+                },
+                clipContent: true
+            )
+        ]
+    )
+}
+
+function interactiveRoot(
+    context: borrow FoundationUiContext,
+    stateUser: RawPtr,
+    buttonPressed: Bool,
+    textValue: String,
+    submittedValue: String,
+    didScroll: Bool,
+) -> FoundationView {
+    let buttonActive = buttonPressed || context.hoveredKey == 1001 || context.pressedKey == 1001
+    let textActive = context.focusedKey == 2001 || context.hoveredKey == 2001
+    let scrollActive = didScroll || context.hoveredKey == 3001
+    let submittedActive = submittedValue.count > 0
+    let buttonPress: () -> Void = { in
+        var state = nativeRecover<InteractiveInputState>(stateUser)
+        state.buttonPressed = true
+        return
+    }
+    let textCodepoint: (Int) -> Void = { codepoint in
+        var state = nativeRecover<InteractiveInputState>(stateUser)
+        state.textValue = foundationAppendCodepoint(state.textValue, codepoint)
+        return
+    }
+    let textBackspace: () -> Void = { in
+        var state = nativeRecover<InteractiveInputState>(stateUser)
+        state.textValue = foundationDropLastScalar(state.textValue)
+        return
+    }
+    let textSubmit: () -> Void = { in
+        var state = nativeRecover<InteractiveInputState>(stateUser)
+        state.submittedValue = state.textValue
+        return
+    }
+    let scrollHandler: (Float, Float) -> Void = { dx, dy in
+        let ignored = dx + dy
+        var state = nativeRecover<InteractiveInputState>(stateUser)
+        state.didScroll = true
+        return
+    }
+
+    return Surface(
+        children: [
+            Column(
+                children: [
+                    Text("UI FOUNDATION INPUT", primaryText(), 28.0, 720.0),
+                    Text("CLICK, FOCUS, TYPE, BACKSPACE, ENTER, AND SCROLL", secondaryText(), 14.0, 450.0),
+                    interactiveCard(
+                        key: 1001,
+                        title: "POINTER PRESS",
+                        status: buttonLabel(buttonPressed),
+                        active: buttonActive,
+                        focusable: false,
+                        onPress: move buttonPress,
+                        onTextInput: ignoreText,
+                        onTextCodepoint: ignoreCodepoint,
+                        onBackspace: ignoreAction,
+                        onSubmit: ignoreAction,
+                        onScroll: ignoreScroll
+                    ),
+                    interactiveCard(
+                        key: 2001,
+                        title: "TEXT INPUT",
+                        status: placeholderOrValue(move textValue),
+                        active: textActive,
+                        focusable: true,
+                        onPress: ignoreAction,
+                        onTextInput: ignoreText,
+                        onTextCodepoint: move textCodepoint,
+                        onBackspace: move textBackspace,
+                        onSubmit: move textSubmit,
+                        onScroll: ignoreScroll
+                    ),
+                    interactiveCard(
+                        key: 2101,
+                        title: "SUBMITTED VALUE",
+                        status: submitLabel(move submittedValue),
+                        active: submittedActive,
+                        focusable: false,
+                        onPress: ignoreAction,
+                        onTextInput: ignoreText,
+                        onTextCodepoint: ignoreCodepoint,
+                        onBackspace: ignoreAction,
+                        onSubmit: ignoreAction,
+                        onScroll: ignoreScroll
+                    ),
+                    interactiveCard(
+                        key: 3001,
+                        title: "SCROLL INPUT",
+                        status: scrollLabel(didScroll),
+                        active: scrollActive,
+                        focusable: false,
+                        onPress: ignoreAction,
+                        onTextInput: ignoreText,
+                        onTextCodepoint: ignoreCodepoint,
+                        onBackspace: ignoreAction,
+                        onSubmit: ignoreAction,
+                        onScroll: move scrollHandler
+                    )
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                spacing: 18.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: appBackground(),
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {
+            top: 28.0
+            trailing: 28.0
+            bottom: 28.0
+            leading: 28.0
+        },
+        clipContent: true
+    )
+}
+
+@Main
+function main() {
+    let stateStorage = nativeState(InteractiveInputState {})
+    let stateUser = nativeUserData(stateStorage)
+
+    RunFoundationInteractiveApp(
+        title: "Foundation Input Demo",
+        width: 960,
+        height: 720,
+        rootBuilder: { context in
+            var state = nativeRecover<InteractiveInputState>(stateUser)
+            return interactiveRoot(
+                context,
+                stateUser,
+                state.buttonPressed,
+                state.textValue,
+                state.submittedValue,
+                state.didScroll
+            )
+        }
+    )
+    return
+}

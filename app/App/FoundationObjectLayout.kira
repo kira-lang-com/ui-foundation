@@ -40,9 +40,8 @@ function foundationFrameAtPathStep(root: borrow FoundationView, tree: borrow Lay
         return layoutFrame(tree, nodeIndex)
     }
 
-    let children = foundationViewChildren(root)
     let childOffset = path[pathOffset]
-    if childOffset < 0 || childOffset >= children.count {
+    if childOffset < 0 || childOffset >= root.children.count {
         return Rect {}
     }
 
@@ -51,7 +50,7 @@ function foundationFrameAtPathStep(root: borrow FoundationView, tree: borrow Lay
         return Rect {}
     }
 
-    return foundationFrameAtPathStep(children[childOffset], tree, node.firstChild + childOffset, path, pathOffset + 1)
+    return foundationFrameAtPathStep(root.children[childOffset], tree, node.firstChild + childOffset, path, pathOffset + 1)
 }
 
 function FoundationPrimitiveLayoutSmoke() -> Int {

@@ -1,0 +1,19 @@
+import KiraUIFoundation
+// Host leak repro: loops the per-frame pipeline (foundationRetainedUpdate +
+// FoundationLayoutPass.run). Measure true leaks with:
+//   MallocStackLogging=1 leaks --atExit -- ./generated/leak-harness
+@Main
+function main() {
+    let root = foundationRetainedTreeRoot("ALPHA", "PRESS", true, false)
+    let viewport = Size { width: 1280.0 height: 720.0 }
+    var tree = foundationRetainedMount(root)
+    var frame = 0
+    var checksum = 0
+    while frame < 10000 {
+        tree = foundationRetainedUpdate(move tree, root)
+        let laidOut = FoundationLayoutPass().run(root: root, available: viewport)
+        checksum = checksum + laidOut.nodes.count + tree.nodes.count
+        frame = frame + 1
+    }
+    print(checksum)
+}

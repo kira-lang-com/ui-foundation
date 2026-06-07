@@ -1,7 +1,14 @@
 struct FoundationHitRegionRecord {
+    let key: Int = 0
     let bounds: Rect
     let disabled: Bool = false
+    let focusable: Bool = false
     let onPress: () -> Void
+    let onTextInput: (String) -> Void = foundationNoopTextInput
+    let onTextCodepoint: (Int) -> Void = foundationNoopTextCodepoint
+    let onBackspace: () -> Void = foundationNoopPress
+    let onSubmit: () -> Void = foundationNoopPress
+    let onScroll: (Float, Float) -> Void = foundationNoopScroll
 }
 
 function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
@@ -35,9 +42,9 @@ class KiraGraphicsFoundationBackend {
                 height: intAsFloat(value: height)
             },
             Color {
-                r: 0.07
-                g: 0.08
-                b: 0.11
+                r: 0.96
+                g: 0.95
+                b: 0.93
                 a: 1.0
             },
             Color {
@@ -180,11 +187,29 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function registerHitRegion(bounds: borrow Rect, disabled: Bool, onPress: () -> Void) {
+    function registerHitRegion(
+        key: Int,
+        bounds: borrow Rect,
+        disabled: Bool,
+        focusable: Bool,
+        onPress: () -> Void,
+        onTextInput: (String) -> Void,
+        onTextCodepoint: (Int) -> Void,
+        onBackspace: () -> Void,
+        onSubmit: () -> Void,
+        onScroll: (Float, Float) -> Void,
+    ) {
         self.hitRegions.append(FoundationHitRegionRecord {
+            key: key
             bounds: bounds
             disabled: disabled
+            focusable: focusable
             onPress: onPress
+            onTextInput: onTextInput
+            onTextCodepoint: onTextCodepoint
+            onBackspace: onBackspace
+            onSubmit: onSubmit
+            onScroll: onScroll
         })
         return
     }

@@ -14,6 +14,21 @@ function foundationNoopPress() {
     return
 }
 
+function foundationNoopTextInput(value: String) {
+    let ignored = value.count
+    return
+}
+
+function foundationNoopTextCodepoint(value: Int) {
+    let ignored = value + 0
+    return
+}
+
+function foundationNoopScroll(dx: Float, dy: Float) {
+    let ignored = dx + dy
+    return
+}
+
 struct FoundationView {
     let kind: FoundationViewKind
     let key: Int = 0
@@ -53,7 +68,13 @@ struct FoundationView {
     let size: Float = 15.0
     let weight: Float = 400.0
     let disabled: Bool = false
+    let focusable: Bool = false
     let onPress: () -> Void = foundationNoopPress
+    let onTextInput: (String) -> Void = foundationNoopTextInput
+    let onTextCodepoint: (Int) -> Void = foundationNoopTextCodepoint
+    let onBackspace: () -> Void = foundationNoopPress
+    let onSubmit: () -> Void = foundationNoopPress
+    let onScroll: (Float, Float) -> Void = foundationNoopScroll
     let minLength: Float = 0.0
 }
 
@@ -82,7 +103,13 @@ function KeyedView(key: Int, child: FoundationView) -> FoundationView {
         size: child.size
         weight: child.weight
         disabled: child.disabled
+        focusable: child.focusable
         onPress: child.onPress
+        onTextInput: child.onTextInput
+        onTextCodepoint: child.onTextCodepoint
+        onBackspace: child.onBackspace
+        onSubmit: child.onSubmit
+        onScroll: child.onScroll
         minLength: child.minLength
     }
 }

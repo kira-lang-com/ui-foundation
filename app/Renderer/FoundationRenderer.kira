@@ -5,12 +5,11 @@ function foundationRender(root: borrow FoundationView, tree: borrow LayoutTree, 
 
 function foundationRenderChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
     let node = tree.nodes[nodeIndex]
-    let children = foundationViewChildren(view)
     var current = backend
     var rendered = 0
     var childOffset = 0
-    while childOffset < children.count {
-        rendered = rendered + foundationRenderView(children[childOffset], tree, node.firstChild + childOffset, current)
+    while childOffset < view.children.count {
+        rendered = rendered + foundationRenderView(view.children[childOffset], tree, node.firstChild + childOffset, current)
         childOffset = childOffset + 1
     }
     return rendered
@@ -51,7 +50,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             return 1
         }
         HitArea -> {
-            current.registerHitRegion(frame, view.disabled, view.onPress)
+            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current);

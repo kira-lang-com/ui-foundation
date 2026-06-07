@@ -1,3 +1,86 @@
+function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], node: LayoutNode) {
+    var output = nodes
+    output.append(move node)
+    return
+}
+
+function foundationLayoutReplaceNode(nodes: borrow mut [LayoutNode], index: Int, node: LayoutNode) {
+    var output = nodes
+    output[index] = node
+    return
+}
+
+function foundationLayoutAppendRoot(view: borrow FoundationView, nodes: borrow mut [LayoutNode]) {
+    var output = nodes
+    let layout = foundationViewLayoutDescriptor(view)
+    let parentIndex = output.count
+    foundationLayoutAppendNode(output, LayoutNode {
+        descriptor: layout
+        measuredSize: Size {}
+        placedOrigin: Point {}
+        firstChild: view.children.count > 0 ? parentIndex + 1 : 0
+        childCount: view.children.count
+    })
+
+    var childOffset = 0
+    while childOffset < view.children.count {
+        foundationLayoutAppendNode(output, LayoutNode {
+            descriptor: foundationViewLayoutDescriptor(view.children[childOffset])
+            measuredSize: Size {}
+            placedOrigin: Point {}
+            firstChild: 0
+            childCount: view.children[childOffset].children.count
+        })
+        childOffset = childOffset + 1
+    }
+
+    var childIndex = parentIndex + 1
+    childOffset = 0
+    while childOffset < view.children.count {
+        foundationLayoutAppendDescendants(view.children[childOffset], childIndex, output)
+        childIndex = childIndex + 1
+        childOffset = childOffset + 1
+    }
+    return
+}
+
+function foundationLayoutAppendDescendants(view: borrow FoundationView, nodeIndex: Int, nodes: borrow mut [LayoutNode]) {
+    var output = nodes
+    let firstChild = output.count
+
+    var childOffset = 0
+    while childOffset < view.children.count {
+        foundationLayoutAppendNode(output, LayoutNode {
+            descriptor: foundationViewLayoutDescriptor(view.children[childOffset])
+            measuredSize: Size {}
+            placedOrigin: Point {}
+            firstChild: 0
+            childCount: view.children[childOffset].children.count
+        })
+        childOffset = childOffset + 1
+    }
+
+    if view.children.count > 0 {
+        foundationLayoutReplaceNode(output, nodeIndex, LayoutNode {
+            descriptor: output[nodeIndex].descriptor
+            measuredSize: output[nodeIndex].measuredSize
+            placedOrigin: output[nodeIndex].placedOrigin
+            firstChild: firstChild
+            childCount: view.children.count
+        })
+
+        var childIndex = firstChild
+        childOffset = 0
+        while childOffset < view.children.count {
+            foundationLayoutAppendDescendants(view.children[childOffset], childIndex, output)
+            childIndex = childIndex + 1
+            childOffset = childOffset + 1
+        }
+    }
+
+    return
+}
+
 class FoundationLayoutPass {
     let engine: LayoutEngine = LayoutEngine {}
 
@@ -11,81 +94,9 @@ class FoundationLayoutPass {
     }
 
     function collect(root: borrow FoundationView) -> [LayoutNode] {
-        return appendNode(root, [])
-    }
-
-    function appendNode(view: borrow FoundationView, output: [LayoutNode]) -> [LayoutNode] {
-        var nodes = output
-        let layout = foundationViewLayoutDescriptor(view)
-        let children = foundationViewChildren(view)
-        let parentIndex = nodes.count
-        nodes.append(LayoutNode {
-            descriptor: layout
-            measuredSize: Size {}
-            placedOrigin: Point {}
-            firstChild: children.count > 0 ? parentIndex + 1 : 0
-            childCount: children.count
-        })
-
-        var childOffset = 0
-        while childOffset < children.count {
-            let childView = children[childOffset]
-            nodes.append(LayoutNode {
-                descriptor: foundationViewLayoutDescriptor(childView)
-                measuredSize: Size {}
-                placedOrigin: Point {}
-                firstChild: 0
-                childCount: foundationViewChildren(childView).count
-            })
-            childOffset = childOffset + 1
-        }
-
-        var childIndex = parentIndex + 1
-        childOffset = 0
-        while childOffset < children.count {
-            nodes = appendDescendants(children[childOffset], childIndex, move nodes)
-            childIndex = childIndex + 1
-            childOffset = childOffset + 1
-        }
+        var nodes: [LayoutNode] = []
+        foundationLayoutAppendRoot(root, nodes)
         return nodes
     }
 
-    function appendDescendants(view: borrow FoundationView, nodeIndex: Int, output: [LayoutNode]) -> [LayoutNode] {
-        var nodes = output
-        let children = foundationViewChildren(view)
-        let firstChild = nodes.count
-
-        var childOffset = 0
-        while childOffset < children.count {
-            let childView = children[childOffset]
-            nodes.append(LayoutNode {
-                descriptor: foundationViewLayoutDescriptor(childView)
-                measuredSize: Size {}
-                placedOrigin: Point {}
-                firstChild: 0
-                childCount: foundationViewChildren(childView).count
-            })
-            childOffset = childOffset + 1
-        }
-
-        if children.count > 0 {
-            nodes[nodeIndex] = LayoutNode {
-                descriptor: nodes[nodeIndex].descriptor
-                measuredSize: nodes[nodeIndex].measuredSize
-                placedOrigin: nodes[nodeIndex].placedOrigin
-                firstChild: firstChild
-                childCount: children.count
-            }
-
-            var childIndex = firstChild
-            childOffset = 0
-            while childOffset < children.count {
-                nodes = appendDescendants(children[childOffset], childIndex, move nodes)
-                childIndex = childIndex + 1
-                childOffset = childOffset + 1
-            }
-        }
-
-        return nodes
-    }
 }

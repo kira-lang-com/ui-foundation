@@ -1,114 +1,101 @@
 import KiraUIFoundation
 
-function dashboardRootFill() -> Color {
-    return Color {
-        r: 0.07
-        g: 0.08
-        b: 0.11
-        a: 1.0
-    }
+// ── Épurée Light Palette ──────────────────────────────────
+// A warm, minimalist light theme with refined neutrals.
+
+function bgBase() -> Color {
+    return Color { r: 0.96 g: 0.95 b: 0.93 a: 1.0 }  // #F5F2ED — warm cream
 }
 
-function dashboardSidebarFill() -> Color {
-    return Color {
-        r: 0.13
-        g: 0.14
-        b: 0.19
-        a: 1.0
-    }
+function bgSidebar() -> Color {
+    return Color { r: 0.93 g: 0.91 b: 0.88 a: 1.0 }  // #EDE8E1 — slightly warmer
 }
 
-function dashboardSidebarBorder() -> Color {
-    return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.10
-    }
+function surfaceWhite() -> Color {
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }     // #FFFFFF — crisp white
 }
 
-function dashboardCardFill() -> Color {
-    return Color {
-        r: 0.14
-        g: 0.16
-        b: 0.22
-        a: 1.0
-    }
+function borderSoft() -> Color {
+    return Color { r: 0.89 g: 0.86 b: 0.82 a: 1.0 }  // #E3DDD2 — soft warm border
 }
 
-function dashboardCardBorder() -> Color {
-    return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.14
-    }
+function borderSubtle() -> Color {
+    return Color { r: 0.91 g: 0.89 b: 0.85 a: 1.0 }  // #E9E4D9 — barely there
 }
 
-function dashboardRegularCardFill() -> Color {
-    return Color {
-        r: 0.22
-        g: 0.23
-        b: 0.31
-        a: 1.0
-    }
+function textPrimary() -> Color {
+    return Color { r: 0.11 g: 0.11 b: 0.12 a: 1.0 }  // #1C1C1E — soft black
 }
 
-function dashboardSquircleFill() -> Color {
-    return Color {
-        r: 0.22
-        g: 0.26
-        b: 0.36
-        a: 1.0
-    }
+function textSecondary() -> Color {
+    return Color { r: 0.56 g: 0.56 b: 0.58 a: 1.0 }  // #8E8E93 — muted gray
 }
 
-function dashboardRegularSlotFill() -> Color {
-    return dashboardRegularCardFill()
+function textMuted() -> Color {
+    return Color { r: 0.69 g: 0.68 b: 0.66 a: 1.0 }  // #B0ADA9 — faint
 }
 
-function dashboardSquircleSlotFill() -> Color {
-    return dashboardSquircleFill()
+function accentTaupe() -> Color {
+    return Color { r: 0.61 g: 0.53 b: 0.48 a: 1.0 }  // #9B8B7A — warm taupe
 }
 
-function dashboardCardOutline() -> Color {
-    return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
-        a: 0.06
-    }
+function statGreen() -> Color {
+    return Color { r: 0.45 g: 0.68 b: 0.50 a: 1.0 }  // #73AE80 — muted sage
 }
 
-function dashboardTextPrimary() -> Color {
-    return Color {
-        r: 0.96
-        g: 0.97
-        b: 0.99
-        a: 1.0
-    }
+function statBlue() -> Color {
+    return Color { r: 0.45 g: 0.58 b: 0.72 a: 1.0 }  // #7394B8 — muted blue
 }
 
-function dashboardTextSecondary() -> Color {
-    return Color {
-        r: 0.70
-        g: 0.76
-        b: 0.84
-        a: 1.0
-    }
+function statOrange() -> Color {
+    return Color { r: 0.76 g: 0.58 b: 0.40 a: 1.0 }  // #C29466 — warm ochre
 }
 
-function dashboardSidebarView() -> FoundationView {
+// ── Sidebar ───────────────────────────────────────────────
+
+function sidebarView() -> FoundationView {
     return Surface(
         children: [
             Column(
                 children: [
-                    Text("KIRA", dashboardTextPrimary(), 26.0, 700.0),
-                    Text("SIDEBAR", dashboardTextSecondary(), 14.0, 500.0)
+                    // Logo area
+                    Text("KIRA", textPrimary(), 24.0, 700.0),
+                    Text("UI FOUNDATION", accentTaupe(), 10.0, 600.0),
+
+                    // Divider
+                    Surface(
+                        children: [],
+                        width: SizeMode.Fill,
+                        height: SizeMode.Fixed(1.0),
+                        flex: 0,
+                        fill: borderSoft(),
+                        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+                        borderWidth: 0.0,
+                        radius: 0.0,
+                        shape: FoundationShape.RegularRoundedRect,
+                        material: FoundationMaterial.Flat,
+                        effects: [],
+                        padding: EdgeInsets {},
+                        clipContent: false
+                    ),
+
+                    Text("DASHBOARD", textSecondary(), 12.0, 600.0),
+                    Text("ANALYTICS", textMuted(), 12.0, 500.0),
+                    Text("SETTINGS", textMuted(), 12.0, 500.0),
+
+                    // Spacer at bottom
+                    Frame(
+                        child: Text("v0.1.0", textMuted(), 11.0, 400.0),
+                        width: SizeMode.Fill,
+                        height: SizeMode.Fill,
+                        flex: 0,
+                        alignment: Alignment.BottomLeading,
+                        padding: EdgeInsets {}
+                    )
                 ],
                 width: SizeMode.Fill,
-                height: SizeMode.Hug,
-                spacing: 18.0,
+                height: SizeMode.Fill,
+                spacing: 16.0,
                 padding: EdgeInsets {},
                 crossAxisAlignment: CrossAlignment.Start
             )
@@ -116,34 +103,157 @@ function dashboardSidebarView() -> FoundationView {
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: dashboardSidebarFill(),
+        fill: bgSidebar(),
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
-        radius: 48.0,
+        radius: 32.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
             top: 32.0
+            trailing: 28.0
+            bottom: 28.0
+            leading: 28.0
+        },
+        clipContent: true
+    )
+}
+
+// ── Stat card ─────────────────────────────────────────────
+
+function StatCard(value: String, label: String, accent: Color) -> FoundationView {
+    return Surface(
+        children: [
+            Column(
+                children: [
+                    Text(move value, textPrimary(), 28.0, 700.0),
+                    Text(move label, textSecondary(), 12.0, 500.0)
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                spacing: 6.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Hug,
+        flex: 0,
+        fill: surfaceWhite(),
+        border: borderSubtle(),
+        borderWidth: 1.0,
+        radius: 16.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {
+            top: 20.0
             trailing: 24.0
-            bottom: 32.0
+            bottom: 20.0
             leading: 24.0
         },
         clipContent: true
     )
 }
 
-function dashboardRegularCardView() -> FoundationView {
+// ── Stats row ─────────────────────────────────────────────
+
+function statsRowView() -> FoundationView {
+    return Row(
+        children: [
+            StatCard("12,458", "TOTAL USERS", statBlue()),
+            StatCard("342",  "ACTIVE NOW", statGreen()),
+            StatCard("8.2K", "REVENUE", statOrange()),
+            StatCard("24%",  "BOUNCE RATE", textSecondary())
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Hug,
+        spacing: 20.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Stretch
+    )
+}
+
+// ── Activity row ──────────────────────────────────────────
+
+function activityRow(label: String, detail: String) -> FoundationView {
+    return Row(
+        children: [
+            // Dot indicator
+            Surface(
+                children: [],
+                width: SizeMode.Fixed(8.0),
+                height: SizeMode.Fixed(8.0),
+                flex: 0,
+                fill: accentTaupe(),
+                border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+                borderWidth: 0.0,
+                radius: 4.0,
+                shape: FoundationShape.RegularRoundedRect,
+                material: FoundationMaterial.Flat,
+                effects: [],
+                padding: EdgeInsets {},
+                clipContent: false
+            ),
+            Column(
+                children: [
+                    Text(move label, textPrimary(), 14.0, 600.0),
+                    Text(move detail, textSecondary(), 12.0, 400.0)
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                spacing: 2.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Hug,
+        spacing: 14.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Center
+    )
+}
+
+function activityDivider() -> FoundationView {
+    return Surface(
+        children: [],
+        width: SizeMode.Fill,
+        height: SizeMode.Fixed(1.0),
+        flex: 0,
+        fill: borderSubtle(),
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+// ── Activity card ─────────────────────────────────────────
+
+function activityCardView() -> FoundationView {
     return Surface(
         children: [
             Column(
                 children: [
-                    Text("REGULAR", dashboardTextPrimary(), 20.0, 680.0),
-                    Text("CLASSIC ROUND RECT", dashboardTextSecondary(), 13.0, 500.0)
+                    Text("RECENT ACTIVITY", textPrimary(), 16.0, 700.0),
+                    activityRow("New user registered",   "2 minutes ago"),
+                    activityDivider(),
+                    activityRow("Layout engine updated",  "1 hour ago"),
+                    activityDivider(),
+                    activityRow("Squircle shader deployed", "3 hours ago"),
+                    activityDivider(),
+                    activityRow("Theme changed to épurée",  "Yesterday"),
+                    Spacer(0.0, 1)
                 ],
                 width: SizeMode.Fill,
-                height: SizeMode.Hug,
-                spacing: 20.0,
+                height: SizeMode.Fill,
+                spacing: 14.0,
                 padding: EdgeInsets {},
                 crossAxisAlignment: CrossAlignment.Start
             )
@@ -151,34 +261,36 @@ function dashboardRegularCardView() -> FoundationView {
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: dashboardRegularCardFill(),
-        border: dashboardCardOutline(),
+        fill: surfaceWhite(),
+        border: borderSubtle(),
         borderWidth: 1.0,
-        radius: 18.0,
+        radius: 24.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
-            leading: 36.0
+            top: 24.0
+            trailing: 28.0
+            bottom: 24.0
+            leading: 28.0
         },
         clipContent: true
     )
 }
 
-function dashboardSquircleCardView() -> FoundationView {
+// ── Sub-cards for the shape demo ──────────────────────────
+
+function regularCardView() -> FoundationView {
     return Surface(
         children: [
             Column(
                 children: [
-                    Text("SQUIRCLE", dashboardTextPrimary(), 20.0, 680.0),
-                    Text("SOFT SUPERELLIPSE", dashboardTextSecondary(), 13.0, 500.0)
+                    Text("REGULAR ROUND", textPrimary(), 18.0, 680.0),
+                    Text("CLASSIC RECT", textSecondary(), 12.0, 400.0)
                 ],
                 width: SizeMode.Fill,
                 height: SizeMode.Hug,
-                spacing: 20.0,
+                spacing: 8.0,
                 padding: EdgeInsets {},
                 crossAxisAlignment: CrossAlignment.Start
             )
@@ -186,35 +298,72 @@ function dashboardSquircleCardView() -> FoundationView {
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: dashboardSquircleFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
-        borderWidth: 0.0,
-        radius: 72.0,
-        shape: FoundationShape.Squircle,
+        fill: surfaceWhite(),
+        border: borderSubtle(),
+        borderWidth: 1.0,
+        radius: 16.0,
+        shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
-            leading: 36.0
+            top: 28.0
+            trailing: 28.0
+            bottom: 28.0
+            leading: 28.0
         },
         clipContent: true
     )
 }
 
-function dashboardMainCardView() -> FoundationView {
+function squircleCardView() -> FoundationView {
     return Surface(
         children: [
             Column(
                 children: [
-                    Text("ROUNDED CORNERS", dashboardTextPrimary(), 22.0, 700.0),
-                    Text("REGULAR AND SQUIRCLE CARDS", dashboardTextSecondary(), 14.0, 500.0),
+                    Text("SQUIRCLE", textPrimary(), 18.0, 680.0),
+                    Text("SOFT SUPERELLIPSE", textSecondary(), 12.0, 400.0)
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                spacing: 8.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: surfaceWhite(),
+        border: borderSubtle(),
+        borderWidth: 1.0,
+        radius: 64.0,
+        shape: FoundationShape.Squircle,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {
+            top: 28.0
+            trailing: 28.0
+            bottom: 28.0
+            leading: 28.0
+        },
+        clipContent: true
+    )
+}
+
+// ── Components card ───────────────────────────────────────
+
+function componentsCardView() -> FoundationView {
+    return Surface(
+        children: [
+            Column(
+                children: [
+                    Text("COMPONENTS", textPrimary(), 16.0, 700.0),
+                    Text("ROUNDED CORNERS — REGULAR AND SQUIRCLE CARDS", textSecondary(), 13.0, 400.0),
                     Frame(
                         child: Row(
                             children: [
                                 Frame(
-                                    child: dashboardRegularCardView(),
+                                    child: regularCardView(),
                                     width: SizeMode.Fill,
                                     height: SizeMode.Fill,
                                     flex: 0,
@@ -222,7 +371,7 @@ function dashboardMainCardView() -> FoundationView {
                                     padding: EdgeInsets {}
                                 ),
                                 Frame(
-                                    child: dashboardSquircleCardView(),
+                                    child: squircleCardView(),
                                     width: SizeMode.Fill,
                                     height: SizeMode.Fill,
                                     flex: 0,
@@ -232,62 +381,90 @@ function dashboardMainCardView() -> FoundationView {
                             ],
                             width: SizeMode.Fill,
                             height: SizeMode.Fill,
-                            spacing: 46.0,
+                            spacing: 24.0,
                             padding: EdgeInsets {},
                             crossAxisAlignment: CrossAlignment.Stretch
                         ),
                         width: SizeMode.Fill,
-                        height: SizeMode.Fixed(250.0),
+                        height: SizeMode.Fill,
                         flex: 0,
-                        alignment: Alignment.TopLeading,
-                        padding: EdgeInsets {
-                            top: 6.0
-                            trailing: 6.0
-                            bottom: 6.0
-                            leading: 6.0
-                        }
+                        alignment: Alignment.Center,
+                        padding: EdgeInsets {}
                     )
                 ],
                 width: SizeMode.Fill,
-                height: SizeMode.Hug,
-                spacing: 24.0,
+                height: SizeMode.Fill,
+                spacing: 20.0,
                 padding: EdgeInsets {},
                 crossAxisAlignment: CrossAlignment.Start
             )
         ],
         width: SizeMode.Fill,
-        height: SizeMode.Hug,
+        height: SizeMode.Fill,
         flex: 0,
-        fill: dashboardCardFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
-        borderWidth: 0.0,
-        radius: 56.0,
+        fill: surfaceWhite(),
+        border: borderSubtle(),
+        borderWidth: 1.0,
+        radius: 24.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
-            leading: 36.0
+            top: 24.0
+            trailing: 28.0
+            bottom: 24.0
+            leading: 28.0
         },
         clipContent: true
     )
 }
 
-function dashboardMainContentView() -> FoundationView {
+// ── Main content ──────────────────────────────────────────
+
+function mainContentView() -> FoundationView {
     return Column(
         children: [
-            Text("UI Foundation", dashboardTextPrimary(), 34.0, 760.0),
-            dashboardMainCardView()
+            Text("Dashboard", textPrimary(), 30.0, 700.0),
+            Text("Light · Épurée", accentTaupe(), 12.0, 500.0),
+            statsRowView(),
+            Frame(
+                child: Row(
+                    children: [
+                        Expanded(
+                            child: componentsCardView(),
+                            flex: 1
+                        ),
+                        Frame(
+                            child: activityCardView(),
+                            width: SizeMode.Fixed(360.0),
+                            height: SizeMode.Fill,
+                            flex: 0,
+                            alignment: Alignment.TopLeading,
+                            padding: EdgeInsets {}
+                        )
+                    ],
+                    width: SizeMode.Fill,
+                    height: SizeMode.Fill,
+                    spacing: 24.0,
+                    padding: EdgeInsets {},
+                    crossAxisAlignment: CrossAlignment.Stretch
+                ),
+                width: SizeMode.Fill,
+                height: SizeMode.Fixed(360.0),
+                flex: 0,
+                alignment: Alignment.TopLeading,
+                padding: EdgeInsets {}
+            )
         ],
         width: SizeMode.Fill,
         height: SizeMode.Hug,
-        spacing: 30.0,
+        spacing: 24.0,
         padding: EdgeInsets {},
         crossAxisAlignment: CrossAlignment.Start
     )
 }
+
+// ── Root view ─────────────────────────────────────────────
 
 function FoundationDashboardView() -> FoundationView {
     return Surface(
@@ -295,15 +472,15 @@ function FoundationDashboardView() -> FoundationView {
             Row(
                 children: [
                     Frame(
-                        child: dashboardSidebarView(),
-                        width: SizeMode.Fixed(250.0),
+                        child: sidebarView(),
+                        width: SizeMode.Fixed(260.0),
                         height: SizeMode.Fill,
                         flex: 0,
                         alignment: Alignment.TopLeading,
                         padding: EdgeInsets {}
                     ),
                     Frame(
-                        child: dashboardMainContentView(),
+                        child: mainContentView(),
                         width: SizeMode.Fill,
                         height: SizeMode.Fill,
                         flex: 0,
@@ -313,7 +490,7 @@ function FoundationDashboardView() -> FoundationView {
                 ],
                 width: SizeMode.Fill,
                 height: SizeMode.Fill,
-                spacing: 40.0,
+                spacing: 32.0,
                 padding: EdgeInsets {},
                 crossAxisAlignment: CrossAlignment.Stretch
             )
@@ -321,7 +498,7 @@ function FoundationDashboardView() -> FoundationView {
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: dashboardRootFill(),
+        fill: bgBase(),
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
@@ -329,10 +506,10 @@ function FoundationDashboardView() -> FoundationView {
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 40.0
-            trailing: 40.0
-            bottom: 40.0
-            leading: 40.0
+            top: 32.0
+            trailing: 32.0
+            bottom: 32.0
+            leading: 32.0
         },
         clipContent: false
     )

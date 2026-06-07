@@ -1,10 +1,54 @@
+struct FoundationUiContext {
+    var frameCount: Int = 0
+    var viewport: Size = Size {}
+    var pointerX: Float = 0.0
+    var pointerY: Float = 0.0
+    var hoveredKey: Int = 0
+    var pressedKey: Int = 0
+    var clickedKey: Int = 0
+    var focusedKey: Int = 0
+    var scrollX: Float = 0.0
+    var scrollY: Float = 0.0
+    var lastTextCodepoint: Int = 0
+    var lastKeyCode: Int = 0
+}
+
 struct FoundationAppState {
     var frameCount: Int = 0
     var announcedTree: Bool = false
     var announcedRetainedTree: Bool = false
     var announcedLayout: Bool = false
     var announcedRenderCommands: Bool = false
+    var root: FoundationView = FoundationView {}
     var retainedTree: FoundationRetainedTree = FoundationRetainedTree {}
+    var hitRegions: [FoundationHitRegionRecord] = []
+    var ui: FoundationUiContext = FoundationUiContext {}
+}
+
+struct FoundationSurfaceTextAppState {
+    var frameCount: Int = 0
+    var surfaceBounds: Rect = Rect {}
+    var surfacePaint: FoundationSurfacePaint = FoundationSurfacePaint {}
+    var textBounds: Rect = Rect {}
+    var textPaint: FoundationTextPaint = FoundationTextPaint {}
+}
+
+function foundationEmptyRootView() -> FoundationView {
+    return Surface(
+        children: [],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true
+    )
 }
 
 @Native
@@ -36,10 +80,9 @@ function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
         LayoutPriority -> {}
     }
 
-    let children = foundationViewChildren(view)
     var childOffset = 0
-    while childOffset < children.count {
-        total = total + foundationRenderableViewCount(children[childOffset])
+    while childOffset < view.children.count {
+        total = total + foundationRenderableViewCount(view.children[childOffset])
         childOffset = childOffset + 1
     }
     return total
@@ -49,26 +92,336 @@ function foundationRootFrame(tree: borrow LayoutTree) -> Rect {
     return layoutFrame(tree, 0)
 }
 
-function RunFoundationApp(root: FoundationView) {
+function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
+    var index = 0
+    while index < tree.nodes.count {
+        let frame = layoutFrame(tree, index)
+        if frame.width > 0.0 && frame.height > 0.0 {
+            return true
+        }
+        index = index + 1
+    }
+    return false
+}
+
+function foundationRectContains(bounds: borrow Rect, x: Float, y: Float) -> Bool {
+    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
+}
+
+function foundationHitRegionIndexAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    var index = regions.count
+    while index > 0 {
+        index = index - 1
+        let region = regions[index]
+        let contains = foundationRectContains(region.bounds, x, y)
+        if region.disabled == false {
+            if contains {
+                return index
+            }
+        }
+    }
+    return -1
+}
+
+function foundationHitRegionKeyAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    let index = foundationHitRegionIndexAtPoint(regions, x, y)
+    if index < 0 {
+        return 0
+    }
+    return regions[index].key
+}
+
+function foundationEventViewport(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    if event.windowWidth > 0 && event.windowHeight > 0 {
+        state.ui.viewport = Size {
+            width: intAsFloat(value: event.windowWidth)
+            height: intAsFloat(value: event.windowHeight)
+        }
+    }
+    return
+}
+
+function foundationClearTransientInput(state: borrow mut FoundationAppState) {
+    state.ui.clickedKey = 0
+    state.ui.scrollX = 0.0
+    state.ui.scrollY = 0.0
+    state.ui.lastTextCodepoint = 0
+    state.ui.lastKeyCode = 0
+    return
+}
+
+function foundationHandlePointerMove(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.pointerX = event.pointerX
+    state.ui.pointerY = event.pointerY
+    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    return
+}
+
+function foundationHandlePointerDown(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.pointerX = event.pointerX
+    state.ui.pointerY = event.pointerY
+    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    state.ui.pressedKey = state.ui.hoveredKey
+    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    if regionIndex >= 0 {
+        let region = state.hitRegions[regionIndex]
+        if region.focusable {
+            state.ui.focusedKey = region.key
+            graphicsShowKeyboard(true)
+            return
+        }
+    }
+    state.ui.focusedKey = 0
+    graphicsShowKeyboard(false)
+    return
+}
+
+function foundationHandlePointerUp(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.pointerX = event.pointerX
+    state.ui.pointerY = event.pointerY
+    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    let releasedKey = state.ui.hoveredKey
+    if releasedKey != 0 && releasedKey == state.ui.pressedKey {
+        let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+        if regionIndex >= 0 {
+            let region = state.hitRegions[regionIndex]
+            region.onPress()
+            state.ui.clickedKey = region.key
+        }
+    }
+    state.ui.pressedKey = 0
+    return
+}
+
+function foundationHandleScroll(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.pointerX = event.pointerX
+    state.ui.pointerY = event.pointerY
+    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    state.ui.scrollX = event.scrollX
+    state.ui.scrollY = event.scrollY
+    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    if regionIndex >= 0 {
+        let region = state.hitRegions[regionIndex]
+        region.onScroll(event.scrollX, event.scrollY)
+    }
+    return
+}
+
+function foundationHandleTextInput(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.lastTextCodepoint = event.textCodepoint
+    if state.ui.focusedKey == 0 || event.textCodepoint == 0 {
+        return
+    }
+    var index = 0
+    while index < state.hitRegions.count {
+        let region = state.hitRegions[index]
+        if region.key == state.ui.focusedKey {
+            region.onTextInput(graphicsStringFromCodepoint(event.textCodepoint))
+            return
+        }
+        index = index + 1
+    }
+    return
+}
+
+function foundationHandleKeyDown(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    state.ui.lastKeyCode = event.keyCode
+    if state.ui.focusedKey == 0 {
+        return
+    }
+    var index = 0
+    while index < state.hitRegions.count {
+        let region = state.hitRegions[index]
+        if region.key == state.ui.focusedKey {
+            if event.keyCode == 259 {
+                region.onBackspace()
+            }
+            if event.keyCode == 257 {
+                region.onSubmit()
+            }
+            return
+        }
+        index = index + 1
+    }
+    return
+}
+
+function foundationDispatchGraphicsEvent(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
+    var current = state
+    foundationEventViewport(current, event)
+    let usesPointer = graphicsEventUsesPointerPosition(event.kind)
+    if usesPointer {
+        current.ui.pointerX = event.pointerX
+        current.ui.pointerY = event.pointerY
+        current.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    }
+    if event.kind == GraphicsEventKind.PointerDown {
+        foundationHandlePointerDown(current, event)
+        return
+    }
+    if event.kind == GraphicsEventKind.PointerUp {
+        foundationHandlePointerUp(current, event)
+        return
+    }
+    if event.kind == GraphicsEventKind.PointerExited {
+        current.ui.hoveredKey = 0
+        current.ui.pressedKey = 0
+        return
+    }
+    if event.kind == GraphicsEventKind.Scroll {
+        foundationHandleScroll(current, event)
+        return
+    }
+    if event.kind == GraphicsEventKind.TextInput {
+        foundationHandleTextInput(current, event)
+        return
+    }
+    if event.kind == GraphicsEventKind.KeyDown {
+        foundationHandleKeyDown(current, event)
+        return
+    }
+    return
+}
+
+function RunFoundationInteractiveApp(
+    title: String,
+    width: Int,
+    height: Int,
+    rootBuilder: (borrow FoundationUiContext) -> FoundationView,
+) {
+    let runtimeStorage = nativeState(FoundationAppState {
+        root: foundationEmptyRootView()
+    })
+    let runtimeUser = nativeUserData(runtimeStorage)
+
     var app = GraphicsApplication {
-        title: "Kira UI Foundation"
-        width: 1280
-        height: 720
+        title: title
+        width: width
+        height: height
         sampleCount: 1
     }
 
+    app.onEvent { event in
+        var state = nativeRecover<FoundationAppState>(runtimeUser)
+        if event.windowWidth > 0 && event.windowHeight > 0 {
+            state.ui.viewport = Size {
+                width: intAsFloat(value: event.windowWidth)
+                height: intAsFloat(value: event.windowHeight)
+            }
+        }
+        let usesPointer = graphicsEventUsesPointerPosition(event.kind)
+        if usesPointer {
+            state.ui.pointerX = event.pointerX
+            state.ui.pointerY = event.pointerY
+            state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+        }
+        if event.kind == GraphicsEventKind.PointerDown {
+            state.ui.pressedKey = state.ui.hoveredKey
+            let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+            if regionIndex >= 0 {
+                let region = state.hitRegions[regionIndex]
+                if region.focusable {
+                    state.ui.focusedKey = region.key
+                    graphicsShowKeyboard(true)
+                    return
+                }
+            }
+            state.ui.focusedKey = 0
+            graphicsShowKeyboard(false)
+            return
+        }
+        if event.kind == GraphicsEventKind.PointerUp {
+            let releasedKey = state.ui.hoveredKey
+            if releasedKey != 0 && releasedKey == state.ui.pressedKey {
+                let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+                if regionIndex >= 0 {
+                    let region = state.hitRegions[regionIndex]
+                    region.onPress()
+                    state.ui.clickedKey = region.key
+                }
+            }
+            state.ui.pressedKey = 0
+            return
+        }
+        if event.kind == GraphicsEventKind.PointerExited {
+            state.ui.hoveredKey = 0
+            state.ui.pressedKey = 0
+            return
+        }
+        if event.kind == GraphicsEventKind.Scroll {
+            state.ui.scrollX = event.scrollX
+            state.ui.scrollY = event.scrollY
+            let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+            if regionIndex >= 0 {
+                let region = state.hitRegions[regionIndex]
+                region.onScroll(event.scrollX, event.scrollY)
+            }
+            return
+        }
+        if event.kind == GraphicsEventKind.TextInput {
+            state.ui.lastTextCodepoint = event.textCodepoint
+            if state.ui.focusedKey != 0 && event.textCodepoint != 0 {
+                var regionIndex = 0
+                while regionIndex < state.hitRegions.count {
+                    let region = state.hitRegions[regionIndex]
+                    if region.key == state.ui.focusedKey {
+                        region.onTextInput(graphicsStringFromCodepoint(event.textCodepoint))
+                        region.onTextCodepoint(event.textCodepoint)
+                        return
+                    }
+                    regionIndex = regionIndex + 1
+                }
+            }
+            return
+        }
+        if event.kind == GraphicsEventKind.KeyDown {
+            state.ui.lastKeyCode = event.keyCode
+            if state.ui.focusedKey != 0 {
+                var regionIndex = 0
+                while regionIndex < state.hitRegions.count {
+                    let region = state.hitRegions[regionIndex]
+                    if region.key == state.ui.focusedKey {
+                        if event.keyCode == 259 {
+                            region.onBackspace()
+                        }
+                        if event.keyCode == 257 {
+                            region.onSubmit()
+                        }
+                        return
+                    }
+                    regionIndex = regionIndex + 1
+                }
+            }
+            return
+        }
+        return
+    }
+
     app.onFrame { frame in
+        var state = nativeRecover<FoundationAppState>(frame.userData)
+        state.ui.frameCount = state.frameCount
+        if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
+            state.ui.viewport = rootViewportSize()
+        }
+        if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
+            state.ui.viewport = Size {
+                width: 1280.0
+                height: 720.0
+            }
+        }
+        let build = rootBuilder
+        let root = build(state.ui)
+
         let encoder = frame.beginPass(Color {
-            r: 0.04
-            g: 0.05
-            b: 0.07
+            r: 0.96
+            g: 0.95
+            b: 0.93
             a: 1.0
         })
-        let state = nativeRecover<FoundationAppState>(frame.userData)
         var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
         }
-        let viewport = rootViewportSize()
+        let viewport = state.ui.viewport
         if state.frameCount == 0 {
             state.retainedTree = foundationRetainedMount(root)
         } else {
@@ -92,6 +445,7 @@ function RunFoundationApp(root: FoundationView) {
 
         backend.beginFrame(rootViewportWidth(), rootViewportHeight())
         let renderCount = foundationRender(root, laidOut, backend)
+        state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
             state.announcedRenderCommands = true
@@ -101,11 +455,80 @@ function RunFoundationApp(root: FoundationView) {
         backend.endFrame()
         frame.endPass()
         backend.submit()
+        state.ui.clickedKey = 0
+        state.ui.scrollX = 0.0
+        state.ui.scrollY = 0.0
+        state.ui.lastTextCodepoint = 0
+        state.ui.lastKeyCode = 0
         return
     }
 
     kiraGraphicsLiveUiFoundationAppStarted()
-    app.run(nativeUserData(nativeState(FoundationAppState {})))
+    app.run(runtimeUser)
+    return
+}
+
+function RunFoundationApp(root: FoundationView) {
+    let runtimeStorage = nativeState(FoundationAppState {
+        root: root
+    })
+    let runtimeUser = nativeUserData(runtimeStorage)
+
+    var app = GraphicsApplication {
+        title: "Kira UI Foundation"
+        width: 1280
+        height: 720
+        sampleCount: 1
+    }
+
+    app.onFrame { frame in
+        var state = nativeRecover<FoundationAppState>(frame.userData)
+        state.ui.frameCount = state.frameCount
+        state.ui.viewport = rootViewportSize()
+
+        let encoder = frame.beginPass(Color {
+            r: 0.96
+            g: 0.95
+            b: 0.93
+            a: 1.0
+        })
+        var backend = KiraGraphicsFoundationBackend {
+            encoder: encoder
+        }
+        let viewport = state.ui.viewport
+        if !state.announcedTree && foundationRenderableViewCount(state.root) > 0 {
+            kiraGraphicsLiveUiFoundationTreeBuilt()
+            state.announcedTree = true
+        }
+
+        let laidOut = FoundationLayoutPass().run(root: state.root, available: viewport)
+        if foundationLayoutHasNonEmptyFrame(laidOut) && !state.announcedLayout {
+            kiraGraphicsLiveUiFoundationLayoutNonEmpty()
+            state.announcedLayout = true
+        }
+
+        backend.beginFrame(rootViewportWidth(), rootViewportHeight())
+        let renderCount = foundationRender(state.root, laidOut, backend)
+        state.hitRegions = backend.hitRegions
+        if renderCount > 0 && !state.announcedRenderCommands {
+            kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
+            state.announcedRenderCommands = true
+        }
+
+        state.frameCount = state.frameCount + 1
+        backend.endFrame()
+        frame.endPass()
+        backend.submit()
+        state.ui.clickedKey = 0
+        state.ui.scrollX = 0.0
+        state.ui.scrollY = 0.0
+        state.ui.lastTextCodepoint = 0
+        state.ui.lastKeyCode = 0
+        return
+    }
+
+    kiraGraphicsLiveUiFoundationAppStarted()
+    app.run(runtimeUser)
     return
 }
 
@@ -144,6 +567,13 @@ function RunFoundationSurfaceTextApp(
     if surfaceBounds.width > 0.0 && surfaceBounds.height > 0.0 {
         print("KIRA_UI_LAYOUT_NON_EMPTY")
     }
+    let runtimeStorage = nativeState(FoundationSurfaceTextAppState {
+        surfaceBounds: move surfaceBounds
+        surfacePaint: move surfacePaint
+        textBounds: move textBounds
+        textPaint: move textPaint
+    })
+    let runtimeUser = nativeUserData(runtimeStorage)
     var app = GraphicsApplication {
         title: "Kira UI Foundation"
         width: 1280
@@ -152,19 +582,19 @@ function RunFoundationSurfaceTextApp(
     }
 
     app.onFrame { frame in
+        var state = nativeRecover<FoundationSurfaceTextAppState>(frame.userData)
         let encoder = frame.beginPass(Color {
             r: 0.04
             g: 0.05
             b: 0.07
             a: 1.0
         })
-        let state = nativeRecover<FoundationAppState>(frame.userData)
         let backend = KiraGraphicsFoundationBackend {
             encoder: encoder
         }
         backend.beginFrame(1280, 720)
-        backend.drawSurface(surfaceBounds, surfacePaint)
-        backend.drawText(textBounds, textPaint)
+        backend.drawSurface(state.surfaceBounds, state.surfacePaint)
+        backend.drawText(state.textBounds, state.textPaint)
         state.frameCount = state.frameCount + 1
         backend.endFrame()
         frame.endPass()
@@ -172,6 +602,6 @@ function RunFoundationSurfaceTextApp(
         return
     }
 
-    app.run(nativeUserData(nativeState(FoundationAppState {})))
+    app.run(runtimeUser)
     return
 }

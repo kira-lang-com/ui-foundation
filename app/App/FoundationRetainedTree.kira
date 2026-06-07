@@ -84,7 +84,7 @@ function foundationShapeCode(shape: FoundationShape) -> Int {
 function foundationLayoutSignature(view: borrow FoundationView) -> Int {
     return foundationViewKindCode(view.kind) * 100000 +
         view.key * 1013 +
-        foundationViewChildren(view).count * 97 +
+        view.children.count * 97 +
         view.flex * 31 +
         view.content.count * 17 +
         foundationBoolCode(view.clipContent) * 7
@@ -102,7 +102,12 @@ function foundationRenderSignature(view: borrow FoundationView) -> Int {
 }
 
 function foundationAppendPath(path: borrow [Int], childOrdinal: Int) -> [Int] {
-    var next = path
+    var next: [Int] = []
+    var index = 0
+    while index < path.count {
+        next.append(path[index])
+        index = index + 1
+    }
     next.append(childOrdinal)
     return next
 }
@@ -225,7 +230,6 @@ function foundationRetainedAppendFreshNode(
     let stateResult = foundationRetainedEnsureStateSlot(move next, nodeId)
     next = stateResult.tree
     let nodeIndex = next.nodes.count
-    let children = foundationViewChildren(view)
     next.nodes.append(FoundationRetainedNode {
         id: nodeId
         parentId: parentId
@@ -233,7 +237,7 @@ function foundationRetainedAppendFreshNode(
         childOrdinal: childOrdinal
         kind: view.kind
         childIds: []
-        childCount: children.count
+        childCount: view.children.count
         layoutSignature: foundationLayoutSignature(view)
         renderSignature: foundationRenderSignature(view)
         layoutDirty: true
@@ -247,8 +251,8 @@ function foundationRetainedAppendFreshNode(
 
     var childIds: [Int] = []
     var childOffset = 0
-    while childOffset < children.count {
-        let childResult = foundationRetainedAppendFreshNode(move next, children[childOffset], nodeId, childOffset, foundationAppendPath(path, childOffset))
+    while childOffset < view.children.count {
+        let childResult = foundationRetainedAppendFreshNode(move next, view.children[childOffset], nodeId, childOffset, foundationAppendPath(path, childOffset))
         next = childResult.tree
         childIds.append(childResult.nodeId)
         childOffset = childOffset + 1
@@ -373,7 +377,6 @@ function foundationRetainedReconcileNode(
         let stateResult = foundationRetainedEnsureStateSlot(move next, reusableId)
         next = stateResult.tree
         let nodeIndex = next.nodes.count
-        let children = foundationViewChildren(view)
         next.nodes.append(FoundationRetainedNode {
             id: reusableId
             parentId: parentId
@@ -381,7 +384,7 @@ function foundationRetainedReconcileNode(
             childOrdinal: childOrdinal
             kind: view.kind
             childIds: []
-            childCount: children.count
+            childCount: view.children.count
             layoutSignature: layoutSignature
             renderSignature: renderSignature
             layoutDirty: layoutDirty
@@ -392,8 +395,8 @@ function foundationRetainedReconcileNode(
 
         var childIds: [Int] = []
         var childOffset = 0
-        while childOffset < children.count {
-            let childResult = foundationRetainedReconcileNode(move next, children[childOffset], reusableId, childOffset, previous, foundationAppendPath(path, childOffset))
+        while childOffset < view.children.count {
+            let childResult = foundationRetainedReconcileNode(move next, view.children[childOffset], reusableId, childOffset, previous, foundationAppendPath(path, childOffset))
             next = childResult.tree
             childIds.append(childResult.nodeId)
             childOffset = childOffset + 1

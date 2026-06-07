@@ -5,7 +5,8 @@ class FoundationTextMeasurer {
         if characterCount <= 0 {
             return 0.0
         }
-        return intAsFloat(value: characterCount) * glyphWidth + intAsFloat(value: characterCount - 1) * gap
+        let measured = intAsFloat(value: characterCount) * glyphWidth + intAsFloat(value: characterCount - 1) * gap
+        return measured + size * 0.02  // small epsilon prevents floating-point clipping of last glyph
     }
 
     function intrinsicHeight(size: Float) -> Float {

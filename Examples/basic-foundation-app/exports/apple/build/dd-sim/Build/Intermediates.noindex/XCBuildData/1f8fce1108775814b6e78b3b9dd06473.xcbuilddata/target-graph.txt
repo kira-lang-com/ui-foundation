@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'KiraApp-iOS' in project 'KiraApp' (no dependencies)

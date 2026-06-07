@@ -1,0 +1,7 @@
+function foundationAppendCodepoint(base: String, codepoint: Int) -> String {
+    return graphicsAppendCodepoint(move base, codepoint)
+}
+
+function foundationDropLastScalar(base: String) -> String {
+    return graphicsDropLastScalar(move base)
+}
