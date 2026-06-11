@@ -222,7 +222,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         Text -> {
-            let measured = FoundationTextMeasurer {}.measure(content: view.content, size: view.size)
+            let measured = foundationTextMeasure(content: view.content, size: view.size)
             return LayoutDescriptor {
                 width: SizeMode.Fixed(measured.width)
                 height: SizeMode.Fixed(measured.height)

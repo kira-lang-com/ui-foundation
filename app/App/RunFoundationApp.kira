@@ -21,6 +21,7 @@ struct FoundationAppState {
     var announcedRenderCommands: Bool = false
     var root: FoundationView = FoundationView {}
     var retainedTree: FoundationRetainedTree = FoundationRetainedTree {}
+    var cachedLayoutTree: LayoutTree = LayoutTree { nodes: [] }
     var hitRegions: [FoundationHitRegionRecord] = []
     var ui: FoundationUiContext = FoundationUiContext {}
 }
@@ -160,9 +161,9 @@ function foundationHandlePointerMove(state: borrow mut FoundationAppState, event
 function foundationHandlePointerDown(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
     state.ui.pointerX = event.pointerX
     state.ui.pointerY = event.pointerY
-    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-    state.ui.pressedKey = state.ui.hoveredKey
     let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
+    state.ui.pressedKey = state.ui.hoveredKey
     if regionIndex >= 0 {
         let region = state.hitRegions[regionIndex]
         if region.focusable {
@@ -179,10 +180,10 @@ function foundationHandlePointerDown(state: borrow mut FoundationAppState, event
 function foundationHandlePointerUp(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
     state.ui.pointerX = event.pointerX
     state.ui.pointerY = event.pointerY
-    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
     let releasedKey = state.ui.hoveredKey
     if releasedKey != 0 && releasedKey == state.ui.pressedKey {
-        let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
         if regionIndex >= 0 {
             let region = state.hitRegions[regionIndex]
             region.onPress()
@@ -196,10 +197,10 @@ function foundationHandlePointerUp(state: borrow mut FoundationAppState, event: 
 function foundationHandleScroll(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
     state.ui.pointerX = event.pointerX
     state.ui.pointerY = event.pointerY
-    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
     state.ui.scrollX = event.scrollX
     state.ui.scrollY = event.scrollY
     let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
     if regionIndex >= 0 {
         let region = state.hitRegions[regionIndex]
         region.onScroll(event.scrollX, event.scrollY)
@@ -249,11 +250,10 @@ function foundationHandleKeyDown(state: borrow mut FoundationAppState, event: bo
 function foundationDispatchGraphicsEvent(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
     var current = state
     foundationEventViewport(current, event)
-    let usesPointer = graphicsEventUsesPointerPosition(event.kind)
-    if usesPointer {
-        current.ui.pointerX = event.pointerX
-        current.ui.pointerY = event.pointerY
-        current.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+    if event.kind == GraphicsEventKind.PointerExited {
+        current.ui.hoveredKey = 0
+        current.ui.pressedKey = 0
+        return
     }
     if event.kind == GraphicsEventKind.PointerDown {
         foundationHandlePointerDown(current, event)
@@ -261,11 +261,6 @@ function foundationDispatchGraphicsEvent(state: borrow mut FoundationAppState, e
     }
     if event.kind == GraphicsEventKind.PointerUp {
         foundationHandlePointerUp(current, event)
-        return
-    }
-    if event.kind == GraphicsEventKind.PointerExited {
-        current.ui.hoveredKey = 0
-        current.ui.pressedKey = 0
         return
     }
     if event.kind == GraphicsEventKind.Scroll {
@@ -279,6 +274,13 @@ function foundationDispatchGraphicsEvent(state: borrow mut FoundationAppState, e
     if event.kind == GraphicsEventKind.KeyDown {
         foundationHandleKeyDown(current, event)
         return
+    }
+    // Pointer move and other events: just update position
+    let usesPointer = graphicsEventUsesPointerPosition(event.kind)
+    if usesPointer {
+        current.ui.pointerX = event.pointerX
+        current.ui.pointerY = event.pointerY
+        current.ui.hoveredKey = foundationHitRegionKeyAtPoint(current.hitRegions, event.pointerX, event.pointerY)
     }
     return
 }
@@ -310,16 +312,17 @@ function RunFoundationInteractiveApp(
             }
         }
         let usesPointer = graphicsEventUsesPointerPosition(event.kind)
+        var pointerRegionIndex = -1
         if usesPointer {
             state.ui.pointerX = event.pointerX
             state.ui.pointerY = event.pointerY
-            state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+            pointerRegionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+            state.ui.hoveredKey = pointerRegionIndex >= 0 ? state.hitRegions[pointerRegionIndex].key : 0
         }
         if event.kind == GraphicsEventKind.PointerDown {
             state.ui.pressedKey = state.ui.hoveredKey
-            let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-            if regionIndex >= 0 {
-                let region = state.hitRegions[regionIndex]
+            if pointerRegionIndex >= 0 {
+                let region = state.hitRegions[pointerRegionIndex]
                 if region.focusable {
                     state.ui.focusedKey = region.key
                     graphicsShowKeyboard(true)
@@ -332,13 +335,10 @@ function RunFoundationInteractiveApp(
         }
         if event.kind == GraphicsEventKind.PointerUp {
             let releasedKey = state.ui.hoveredKey
-            if releasedKey != 0 && releasedKey == state.ui.pressedKey {
-                let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-                if regionIndex >= 0 {
-                    let region = state.hitRegions[regionIndex]
-                    region.onPress()
-                    state.ui.clickedKey = region.key
-                }
+            if releasedKey != 0 && releasedKey == state.ui.pressedKey && pointerRegionIndex >= 0 {
+                let region = state.hitRegions[pointerRegionIndex]
+                region.onPress()
+                state.ui.clickedKey = region.key
             }
             state.ui.pressedKey = 0
             return
@@ -351,9 +351,9 @@ function RunFoundationInteractiveApp(
         if event.kind == GraphicsEventKind.Scroll {
             state.ui.scrollX = event.scrollX
             state.ui.scrollY = event.scrollY
-            let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-            if regionIndex >= 0 {
-                let region = state.hitRegions[regionIndex]
+            let scrollRegion = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
+            if scrollRegion >= 0 {
+                let region = state.hitRegions[scrollRegion]
                 region.onScroll(event.scrollX, event.scrollY)
             }
             return
@@ -436,7 +436,14 @@ function RunFoundationInteractiveApp(
             state.announcedRetainedTree = true
         }
 
-        let laidOut = FoundationLayoutPass().run(root: root, available: viewport)
+        let needsLayout = state.frameCount == 0 || state.retainedTree.layoutInvalidations > 0
+        var laidOut: LayoutTree
+        if needsLayout {
+            laidOut = FoundationLayoutPass().run(root: root, available: viewport)
+            state.cachedLayoutTree = laidOut
+        } else {
+            laidOut = state.cachedLayoutTree
+        }
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()

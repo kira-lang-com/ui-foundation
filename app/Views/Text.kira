@@ -1,23 +1,35 @@
+function foundationTextIntrinsicWidth(size: Float, characterCount: Int) -> Float {
+    let glyphWidth = size * 0.48
+    let gap = size * 0.18
+    if characterCount <= 0 {
+        return 0.0
+    }
+    let measured = intAsFloat(value: characterCount) * glyphWidth + intAsFloat(value: characterCount - 1) * gap
+    return measured + size * 0.02
+}
+
+function foundationTextIntrinsicHeight(size: Float) -> Float {
+    return size * 1.20
+}
+
+function foundationTextMeasure(content: borrow String, size: Float) -> Size {
+    return Size {
+        width: foundationTextIntrinsicWidth(size: size, characterCount: content.count)
+        height: foundationTextIntrinsicHeight(size: size)
+    }
+}
+
 class FoundationTextMeasurer {
     function intrinsicWidth(size: Float, characterCount: Int) -> Float {
-        let glyphWidth = size * 0.48
-        let gap = size * 0.18
-        if characterCount <= 0 {
-            return 0.0
-        }
-        let measured = intAsFloat(value: characterCount) * glyphWidth + intAsFloat(value: characterCount - 1) * gap
-        return measured + size * 0.02  // small epsilon prevents floating-point clipping of last glyph
+        return foundationTextIntrinsicWidth(size: size, characterCount: characterCount)
     }
 
     function intrinsicHeight(size: Float) -> Float {
-        return size * 1.20
+        return foundationTextIntrinsicHeight(size: size)
     }
 
     function measure(content: borrow String, size: Float) -> Size {
-        return Size {
-            width: intrinsicWidth(size: size, characterCount: content.count)
-            height: intrinsicHeight(size: size)
-        }
+        return foundationTextMeasure(content: content, size: size)
     }
 }
 

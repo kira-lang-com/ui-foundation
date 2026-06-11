@@ -25,7 +25,9 @@ struct FoundationRetainedTree {
     var rootId: Int = 0
     var nodes: [FoundationRetainedNode] = []
     var stateSlots: [FoundationRetainedStateSlot] = []
+    var stateSlotIds: [Int] = []
     var reusedIds: [Int] = []
+    var reusedIdBits: [Bool] = []
     var removedIds: [Int] = []
     var mountCount: Int = 0
     var updateCount: Int = 0
@@ -123,6 +125,29 @@ function foundationIntArrayContains(values: borrow [Int], value: Int) -> Bool {
     return false
 }
 
+function foundationRetainedEnsureBitsCapacity(bits: [Bool], minSize: Int) -> [Bool] {
+    var result = bits
+    while result.count <= minSize {
+        result.append(false)
+    }
+    return result
+}
+
+function foundationRetainedMarkReused(tree: FoundationRetainedTree, id: Int) -> FoundationRetainedTree {
+    var next = tree
+    next.reusedIds.append(id)
+    next.reusedIdBits = foundationRetainedEnsureBitsCapacity(next.reusedIdBits, id)
+    next.reusedIdBits[id] = true
+    return next
+}
+
+function foundationRetainedIsReused(tree: borrow FoundationRetainedTree, id: Int) -> Bool {
+    if id < 0 || id >= tree.reusedIdBits.count {
+        return false
+    }
+    return tree.reusedIdBits[id]
+}
+
 function foundationChildIdsChanged(previous: borrow [Int], next: borrow [Int]) -> Bool {
     if previous.count != next.count {
         return true
@@ -173,45 +198,45 @@ function foundationRetainedNodeFromList(nodes: borrow [FoundationRetainedNode], 
 
 function foundationRetainedEnsureStateSlot(tree: FoundationRetainedTree, nodeId: Int) -> FoundationRetainedStateSlotResult {
     var next = tree
-    var index = 0
-    while index < next.stateSlots.count {
-        if next.stateSlots[index].nodeId == nodeId {
-            next.stateSlots[index] = FoundationRetainedStateSlot {
-                nodeId: nodeId
-                value: next.stateSlots[index].value
-                active: true
-            }
-            return FoundationRetainedStateSlotResult {
-                tree: move next
-                slot: index
-            }
+    if nodeId < next.stateSlotIds.count && next.stateSlotIds[nodeId] != -1 {
+        let index = next.stateSlotIds[nodeId]
+        next.stateSlots[index] = FoundationRetainedStateSlot {
+            nodeId: nodeId
+            value: next.stateSlots[index].value
+            active: true
         }
-        index = index + 1
-    }
-    next.stateSlots.append(FoundationRetainedStateSlot {
-        nodeId: nodeId
-        value: 0
-        active: true
-    })
-    let slotIndex = next.stateSlots.count - 1
-    return FoundationRetainedStateSlotResult {
-        tree: move next
-        slot: slotIndex
+        return FoundationRetainedStateSlotResult {
+            tree: move next
+            slot: index
+        }
+    } else {
+        next.stateSlots.append(FoundationRetainedStateSlot {
+            nodeId: nodeId
+            value: 0
+            active: true
+        })
+        let slotIndex = next.stateSlots.count - 1
+        while next.stateSlotIds.count <= nodeId {
+            next.stateSlotIds.append(-1)
+        }
+        next.stateSlotIds[nodeId] = slotIndex
+        return FoundationRetainedStateSlotResult {
+            tree: move next
+            slot: slotIndex
+        }
     }
 }
 
 function foundationRetainedDeactivateStateForNode(tree: FoundationRetainedTree, nodeId: Int) -> FoundationRetainedTree {
     var next = tree
-    var index = 0
-    while index < next.stateSlots.count {
-        if next.stateSlots[index].nodeId == nodeId {
-            next.stateSlots[index] = FoundationRetainedStateSlot {
-                nodeId: nodeId
-                value: next.stateSlots[index].value
-                active: false
-            }
+    if nodeId < next.stateSlotIds.count && next.stateSlotIds[nodeId] != -1 {
+        let index = next.stateSlotIds[nodeId]
+        next.stateSlots[index] = FoundationRetainedStateSlot {
+            nodeId: nodeId
+            value: next.stateSlots[index].value
+            active: false
         }
-        index = index + 1
+        next.stateSlotIds[nodeId] = -1
     }
     return next
 }
@@ -280,7 +305,7 @@ function foundationRetainedFindReusableNodeId(
                 node.parentId == parentId &&
                 node.key == view.key &&
                 node.kind == view.kind &&
-                !foundationIntArrayContains(tree.reusedIds, node.id)
+                !foundationRetainedIsReused(tree, node.id)
             ) {
                 return node.id
             }
@@ -297,7 +322,7 @@ function foundationRetainedFindReusableNodeId(
             node.childOrdinal == childOrdinal &&
             node.key == 0 &&
             node.kind == view.kind &&
-            !foundationIntArrayContains(tree.reusedIds, node.id)
+            !foundationRetainedIsReused(tree, node.id)
         ) {
             return node.id
         }
@@ -321,20 +346,12 @@ function foundationRetainedReconcileNode(
         var keyedIndex = 0
         while keyedIndex < previous.count {
             let candidate = previous[keyedIndex]
-            var alreadyReused = false
-            var reusedIndex = 0
-            while reusedIndex < next.reusedIds.count {
-                if next.reusedIds[reusedIndex] == candidate.id {
-                    alreadyReused = true
-                }
-                reusedIndex = reusedIndex + 1
-            }
             if (
                 reusableId == 0 &&
                 candidate.parentId == parentId &&
                 candidate.key == view.key &&
-                foundationViewKindCode(candidate.kind) == foundationViewKindCode(view.kind) &&
-                !alreadyReused
+                candidate.kind == view.kind &&
+                !foundationRetainedIsReused(next, candidate.id)
             ) {
                 reusableId = candidate.id
             }
@@ -344,21 +361,13 @@ function foundationRetainedReconcileNode(
         var index = 0
         while index < previous.count {
             let candidate = previous[index]
-            var alreadyReused = false
-            var reusedIndex = 0
-            while reusedIndex < next.reusedIds.count {
-                if next.reusedIds[reusedIndex] == candidate.id {
-                    alreadyReused = true
-                }
-                reusedIndex = reusedIndex + 1
-            }
             if (
                 reusableId == 0 &&
                 candidate.parentId == parentId &&
                 candidate.childOrdinal == childOrdinal &&
                 candidate.key == 0 &&
-                foundationViewKindCode(candidate.kind) == foundationViewKindCode(view.kind) &&
-                !alreadyReused
+                candidate.kind == view.kind &&
+                !foundationRetainedIsReused(next, candidate.id)
             ) {
                 reusableId = candidate.id
             }
@@ -368,7 +377,7 @@ function foundationRetainedReconcileNode(
     if reusableId == 0 {
         return foundationRetainedAppendFreshNode(move next, view, parentId, childOrdinal, path)
     } else {
-        next.reusedIds.append(reusableId)
+        next = foundationRetainedMarkReused(move next, reusableId)
         let previousNode = foundationRetainedNodeFromList(previous, reusableId)
         let layoutSignature = foundationLayoutSignature(view)
         let renderSignature = foundationRenderSignature(view)
@@ -426,7 +435,7 @@ function foundationRetainedCollectRemoved(tree: FoundationRetainedTree, previous
     var index = 0
     while index < previous.count {
         let node = previous[index]
-        if (!foundationIntArrayContains(next.reusedIds, node.id)) {
+        if (!foundationRetainedIsReused(next, node.id)) {
             next.removedIds.append(node.id)
             next.teardownCount = next.teardownCount + 1
             next = foundationRetainedDeactivateStateForNode(move next, node.id)
@@ -442,7 +451,9 @@ function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetai
         rootId: 0
         nodes: []
         stateSlots: []
+        stateSlotIds: []
         reusedIds: []
+        reusedIdBits: []
         removedIds: []
         mountCount: 0
         updateCount: 0
@@ -461,6 +472,7 @@ function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow Fou
     var next = tree
     next.nodes = []
     next.reusedIds = []
+    next.reusedIdBits = []
     next.removedIds = []
     next.updateCount = next.updateCount + 1
     let result = foundationRetainedReconcileNode(move next, root, 0, 0, previous, [])
@@ -481,12 +493,11 @@ function foundationRetainedSetState(tree: FoundationRetainedTree, nodeId: Int, v
 }
 
 function foundationRetainedStateValue(tree: borrow FoundationRetainedTree, nodeId: Int) -> Int {
-    var index = 0
-    while index < tree.stateSlots.count {
-        if tree.stateSlots[index].nodeId == nodeId && tree.stateSlots[index].active {
+    if nodeId < tree.stateSlotIds.count && tree.stateSlotIds[nodeId] != -1 {
+        let index = tree.stateSlotIds[nodeId]
+        if tree.stateSlots[index].active {
             return tree.stateSlots[index].value
         }
-        index = index + 1
     }
     return 0
 }
@@ -518,7 +529,7 @@ function foundationRetainedHitTargetIdAtIndex(tree: borrow FoundationRetainedTre
     var currentTarget = 0
     var index = 0
     while index < tree.nodes.count {
-        if (foundationViewKindCode(tree.nodes[index].kind) == foundationViewKindCode(FoundationViewKind.HitArea)) {
+        if tree.nodes[index].kind == FoundationViewKind.HitArea {
             if currentTarget == targetIndex {
                 return tree.nodes[index].id
             }
