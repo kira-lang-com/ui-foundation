@@ -101,6 +101,18 @@ int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepo
  * probe call. This exercises real behavior; it is not a success marker. */
 const char* kira_text_probe_report(const char* font_path);
 
+/* Render a UTF-8 string into the active kira-graphics UI pass: shape it left to
+ * right (FreeType advances + kerning), rasterize each glyph, and blit its
+ * coverage as anti-aliased quads. The text is vertically centered within the
+ * (x, y, w, h) box and left-aligned at x; color is linear RGBA. `font_path` may
+ * be NULL/empty to auto-discover a system font. Faces are cached by (path,size)
+ * across calls. This must be called while a kira-graphics UI pass is active. */
+void kira_text_draw_run(const char* font_path,
+                        const char* utf8,
+                        double x, double y, double w, double h,
+                        double r, double g, double b, double a,
+                        double pixel_size);
+
 #ifdef __cplusplus
 }
 #endif

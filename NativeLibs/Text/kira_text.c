@@ -312,6 +312,123 @@ const char* kira_text_probe_report(const char* font_path) {
     return report;
 }
 
+/* Forward declaration of the kira-graphics GPU primitive. Both libraries are
+ * static and linked into the same executable, so this resolves at final link
+ * without ui-foundation taking a build-time include dependency on kira-graphics.
+ */
+extern void kg_ui_blit_coverage(double x, double y, int width, int rows,
+                                int pitch, const unsigned char* coverage,
+                                double r, double g, double b, double a);
+
+/* Face cache: FT_New_Face parses the whole font, far too slow to repeat per
+ * draw call. Cache a handful of faces keyed by (path, quantized pixel size). */
+#define KIRA_TEXT_DRAW_CACHE_SLOTS 16
+
+typedef struct {
+    char            path[260];
+    int             pixel_size_q; /* pixel_size rounded to 0.5px units */
+    kira_text_face* face;
+} kira_text_draw_cache_slot;
+
+static kira_text_engine* g_draw_engine = NULL;
+static kira_text_draw_cache_slot g_draw_cache[KIRA_TEXT_DRAW_CACHE_SLOTS];
+static int g_draw_cache_count = 0;
+
+static kira_text_face* kira_text_cached_face(const char* path, float pixel_size) {
+    if (g_draw_engine == NULL) {
+        g_draw_engine = kira_text_engine_create();
+        if (g_draw_engine == NULL) {
+            return NULL;
+        }
+    }
+    int quantized = (int)(pixel_size * 2.0f + 0.5f);
+
+    for (int i = 0; i < g_draw_cache_count; i += 1) {
+        if (g_draw_cache[i].pixel_size_q == quantized &&
+            strcmp(g_draw_cache[i].path, path) == 0) {
+            return g_draw_cache[i].face;
+        }
+    }
+
+    kira_text_face* face = kira_text_face_load(g_draw_engine, path, 0);
+    if (face == NULL) {
+        return NULL;
+    }
+    kira_text_face_set_pixel_size(face, pixel_size);
+
+    kira_text_draw_cache_slot* slot;
+    if (g_draw_cache_count < KIRA_TEXT_DRAW_CACHE_SLOTS) {
+        slot = &g_draw_cache[g_draw_cache_count++];
+    } else {
+        /* Evict the oldest slot. */
+        kira_text_face_destroy(g_draw_cache[0].face);
+        for (int i = 1; i < KIRA_TEXT_DRAW_CACHE_SLOTS; i += 1) {
+            g_draw_cache[i - 1] = g_draw_cache[i];
+        }
+        slot = &g_draw_cache[KIRA_TEXT_DRAW_CACHE_SLOTS - 1];
+    }
+    snprintf(slot->path, sizeof(slot->path), "%s", path);
+    slot->pixel_size_q = quantized;
+    slot->face = face;
+    return face;
+}
+
+void kira_text_draw_run(const char* font_path,
+                        const char* utf8,
+                        double x, double y, double w, double h,
+                        double r, double g, double b, double a,
+                        double pixel_size) {
+    if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0 || a <= 0.0) {
+        return;
+    }
+    if (font_path == NULL || font_path[0] == '\0') {
+        font_path = kira_text_discover_font();
+        if (font_path == NULL) {
+            return;
+        }
+    }
+
+    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    if (face == NULL) {
+        return;
+    }
+
+    kira_text_vmetrics vmetrics;
+    kira_text_face_vmetrics(face, &vmetrics);
+    double text_height = (double)vmetrics.ascender + (double)vmetrics.descender;
+    double baseline = y + (h - text_height) * 0.5 + (double)vmetrics.ascender;
+
+    double pen_x = x;
+    int byte_len = (int)strlen(utf8);
+    int index = 0;
+    uint32_t codepoint = 0;
+    uint32_t previous_glyph = 0;
+
+    while (kira_text_utf8_next(utf8, byte_len, &index, &codepoint)) {
+        uint32_t glyph = (uint32_t)FT_Get_Char_Index(face->face, (FT_ULong)codepoint);
+
+        if (face->has_kerning && previous_glyph != 0 && glyph != 0) {
+            FT_Vector kerning;
+            if (FT_Get_Kerning(face->face, previous_glyph, glyph,
+                               FT_KERNING_DEFAULT, &kerning) == 0) {
+                pen_x += kira_text_f26dot6(kerning.x);
+            }
+        }
+
+        kira_text_glyph_bitmap bitmap;
+        if (kira_text_face_render_glyph(face, glyph, &bitmap)) {
+            if (bitmap.width > 0 && bitmap.rows > 0) {
+                kg_ui_blit_coverage(pen_x + (double)bitmap.bearing_x,
+                                    baseline - (double)bitmap.bearing_y,
+                                    bitmap.width, bitmap.rows, bitmap.pitch,
+                                    bitmap.buffer, r, g, b, a);
+            }
+            pen_x += (double)bitmap.advance;
+        }
+        previous_glyph = glyph;
+    }
+}
+
 int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepoint) {
     if (s == NULL || index == NULL || codepoint == NULL) {
         return 0;

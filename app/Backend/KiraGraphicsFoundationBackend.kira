@@ -20,6 +20,16 @@ function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
     }
 }
 
+// Real text rendering via the FreeType-backed Kira text engine. The engine
+// rasterizes actual glyph outlines and blits their coverage through the active
+// kira-graphics UI pass, replacing the legacy 5x7 bitmap path. An empty font
+// path lets the engine auto-discover a system font.
+@Native
+function foundationDrawText(content: borrow String, bounds: borrow Rect, color: borrow Color, size: Float) {
+    kira_text_draw_run("", content, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a, size)
+    return
+}
+
 class KiraGraphicsFoundationBackend {
     var encoder: RenderEncoder
     var hitRegions: [FoundationHitRegionRecord] = []
@@ -110,13 +120,13 @@ class KiraGraphicsFoundationBackend {
 
     function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
         self.drewVisibleUi = true
-        self.encoder.drawText(graphicsRect(bounds), paint.content, paint.color, paint.size)
+        foundationDrawText(paint.content, bounds, paint.color, paint.size)
         return
     }
 
     function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float) {
         self.drewVisibleUi = true
-        self.encoder.drawText(graphicsRect(bounds), content, color, size)
+        foundationDrawText(content, bounds, color, size)
         return
     }
 
