@@ -1,0 +1,44 @@
+[library]
+name = "kiratext"
+link_mode = "static"
+abi = "c"
+
+[headers]
+entrypoint = "Text/kira_text.h"
+include_dirs = ["Text"]
+
+[autobinding]
+module = "text"
+output = "../Bindings/text/text.kira"
+headers = ["Text/kira_text.h"]
+
+[bindings]
+mode = "all_public"
+
+# Stage 1: FreeType-backed rasterization + metrics. The vendored FreeType tree is
+# compiled directly through the Kira native-lib source path (no system dependency).
+# Only the module subset registered in Text/kira_ftmodules.h is compiled, so
+# FT_CONFIG_MODULES_H must point at that trimmed registry or ftinit.c references
+# uncompiled drivers at link time. HarfBuzz shaping (C++) is a later stage.
+#
+# NOTE: the native-lib manifest parser is line-based; array values must stay on a
+# single line.
+[build]
+sources = ["Text/vendor/freetype/src/base/ftbase.c", "Text/vendor/freetype/src/base/ftmm.c", "Text/vendor/freetype/src/base/ftinit.c", "Text/vendor/freetype/src/base/ftsystem.c", "Text/vendor/freetype/src/base/ftdebug.c", "Text/vendor/freetype/src/base/ftbbox.c", "Text/vendor/freetype/src/base/ftbitmap.c", "Text/vendor/freetype/src/base/ftglyph.c", "Text/vendor/freetype/src/base/ftstroke.c", "Text/vendor/freetype/src/sfnt/sfnt.c", "Text/vendor/freetype/src/truetype/truetype.c", "Text/vendor/freetype/src/cff/cff.c", "Text/vendor/freetype/src/psaux/psaux.c", "Text/vendor/freetype/src/psnames/psnames.c", "Text/vendor/freetype/src/pshinter/pshinter.c", "Text/vendor/freetype/src/smooth/smooth.c", "Text/vendor/freetype/src/autofit/autofit.c", "Text/vendor/freetype/src/raster/raster.c", "Text/vendor/freetype/src/gzip/ftgzip.c", "Text/kira_text.c"]
+include_dirs = ["Text", "Text/vendor/freetype/include"]
+defines = ["FT2_BUILD_LIBRARY", "FT_CONFIG_MODULES_H=<kira_ftmodules.h>"]
+
+[target.x86_64-windows-msvc]
+static_lib = "../generated/native/x86_64-windows-msvc/kiratext.lib"
+
+[target.x86_64-linux-gnu]
+static_lib = "../generated/native/x86_64-linux-gnu/libkiratext.a"
+
+[target.aarch64-macos-none]
+static_lib = "../generated/native/aarch64-macos/libkiratext.a"
+
+[target.aarch64-ios-none]
+static_lib = "../generated/native/aarch64-ios/libkiratext.a"
+
+[target.aarch64-ios-simulator]
+static_lib = "../generated/native/aarch64-ios-simulator/libkiratext.a"

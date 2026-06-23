@@ -1,0 +1,12 @@
+[package]
+name = "text-engine-smoke"
+version = "0.1.0"
+kind = "app"
+kira = "0.1.0"
+
+[defaults]
+execution_mode = "vm"
+build_target = "host"
+
+[dependencies]
+KiraUIFoundation = { path = "../.." }

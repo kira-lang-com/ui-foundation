@@ -1,0 +1,20 @@
+import KiraUIFoundation
+
+// Stage 1 verification for the FreeType-backed Kira text engine.
+//
+// This exercises the real native path end to end: the engine initializes
+// FreeType, loads a real on-disk font, sizes it, looks up a glyph, rasterizes a
+// coverage bitmap, and measures a string. The probe report contains the actual
+// measured values (not a hardcoded marker); it begins with "kira-text: ERROR"
+// if any real step fails.
+@Native
+function textEngineReport() -> String {
+    let report: String = kira_text_probe_report("")
+    return report
+}
+
+@Main
+function main() {
+    print(textEngineReport())
+    return
+}
