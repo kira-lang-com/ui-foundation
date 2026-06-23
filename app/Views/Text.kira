@@ -12,10 +12,40 @@ function foundationTextIntrinsicHeight(size: Float) -> Float {
     return size * 1.20
 }
 
+// Real measurement from the FreeType engine, using the same (path,size) face
+// cache as rasterization so measured advances match what gets drawn. Falls back
+// to the proportional estimate if the engine is unavailable (e.g. no font found).
+@Native
+function foundationTextRunWidth(content: borrow String, size: Float) -> Float {
+    return kira_text_measure_run("", content, size)
+}
+
+@Native
+function foundationTextRunLineHeight(size: Float) -> Float {
+    return kira_text_line_height("", size)
+}
+
 function foundationTextMeasure(content: borrow String, size: Float) -> Size {
+    if content.count <= 0 {
+        return Size {
+            width: 0.0
+            height: foundationTextIntrinsicHeight(size: size)
+        }
+    }
+
+    var width = foundationTextRunWidth(content: content, size: size)
+    if width <= 0.0 {
+        width = foundationTextIntrinsicWidth(size: size, characterCount: content.count)
+    }
+
+    var height = foundationTextRunLineHeight(size: size)
+    if height <= 0.0 {
+        height = foundationTextIntrinsicHeight(size: size)
+    }
+
     return Size {
-        width: foundationTextIntrinsicWidth(size: size, characterCount: content.count)
-        height: foundationTextIntrinsicHeight(size: size)
+        width: width
+        height: height
     }
 }
 

@@ -429,6 +429,42 @@ void kira_text_draw_run(const char* font_path,
     }
 }
 
+double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size) {
+    if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0) {
+        return 0.0;
+    }
+    if (font_path == NULL || font_path[0] == '\0') {
+        font_path = kira_text_discover_font();
+        if (font_path == NULL) {
+            return 0.0;
+        }
+    }
+    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    if (face == NULL) {
+        return 0.0;
+    }
+    return (double)kira_text_measure_utf8(face, utf8, -1);
+}
+
+double kira_text_line_height(const char* font_path, double pixel_size) {
+    if (pixel_size <= 0.0) {
+        return 0.0;
+    }
+    if (font_path == NULL || font_path[0] == '\0') {
+        font_path = kira_text_discover_font();
+        if (font_path == NULL) {
+            return 0.0;
+        }
+    }
+    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    if (face == NULL) {
+        return 0.0;
+    }
+    kira_text_vmetrics vmetrics;
+    kira_text_face_vmetrics(face, &vmetrics);
+    return (double)vmetrics.line_height;
+}
+
 int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepoint) {
     if (s == NULL || index == NULL || codepoint == NULL) {
         return 0;

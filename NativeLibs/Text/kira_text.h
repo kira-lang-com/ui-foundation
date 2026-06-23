@@ -113,6 +113,12 @@ void kira_text_draw_run(const char* font_path,
                         double r, double g, double b, double a,
                         double pixel_size);
 
+/* Layout helpers that reuse the same (path,size) face cache as kira_text_draw_run
+ * so measured advances match what is later rasterized. `font_path` may be
+ * NULL/empty to auto-discover. Both return 0 if no face is available. */
+double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size);
+double kira_text_line_height(const char* font_path, double pixel_size);
+
 #ifdef __cplusplus
 }
 #endif
