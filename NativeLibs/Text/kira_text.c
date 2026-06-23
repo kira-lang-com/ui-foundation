@@ -12,6 +12,9 @@
 #include FT_FREETYPE_H
 #include FT_MODULE_H
 
+#include <hb.h>
+#include <hb-ft.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -25,7 +28,24 @@ struct kira_text_face {
     unsigned char* owned_blob; /* non-NULL when loaded from memory */
     float          pixel_size;
     int            has_kerning;
+    hb_font_t*     hb_font;    /* lazily created HarfBuzz font over `face` */
 };
+
+/* Lazily create (and cache) a HarfBuzz font wrapping the FreeType face. The
+ * face's pixel size must already be set; HarfBuzz reads its scale from FreeType,
+ * so advances come back in 26.6 pixels matching the rasterized glyphs. */
+static hb_font_t* kira_text_hb_font(kira_text_face* face) {
+    if (face == NULL || face->face == NULL) {
+        return NULL;
+    }
+    if (face->hb_font == NULL) {
+        face->hb_font = hb_ft_font_create_referenced(face->face);
+    } else {
+        /* Pick up any size change since the font was created. */
+        hb_ft_font_changed(face->hb_font);
+    }
+    return face->hb_font;
+}
 
 /* 26.6 fixed-point -> float pixels. */
 static float kira_text_f26dot6(FT_Pos value) {
@@ -120,6 +140,9 @@ void kira_text_face_destroy(kira_text_face* face) {
     if (face == NULL) {
         return;
     }
+    if (face->hb_font != NULL) {
+        hb_font_destroy(face->hb_font);
+    }
     if (face->face != NULL) {
         FT_Done_Face(face->face);
     }
@@ -176,29 +199,24 @@ float kira_text_measure_utf8(kira_text_face* face, const char* utf8, int byte_le
         return 0.0f;
     }
 
-    FT_Face ft = face->face;
-    float pen_x = 0.0f;
-    int index = 0;
-    unsigned int previous_glyph = 0;
-    unsigned int codepoint = 0;
-
-    while (kira_text_utf8_next(utf8, byte_len, &index, &codepoint)) {
-        FT_UInt glyph = FT_Get_Char_Index(ft, (FT_ULong)codepoint);
-
-        if (face->has_kerning && previous_glyph != 0 && glyph != 0) {
-            FT_Vector kerning;
-            if (FT_Get_Kerning(ft, previous_glyph, glyph,
-                               FT_KERNING_DEFAULT, &kerning) == 0) {
-                pen_x += kira_text_f26dot6(kerning.x);
-            }
-        }
-
-        if (FT_Load_Glyph(ft, glyph, FT_LOAD_DEFAULT) == 0) {
-            pen_x += kira_text_f26dot6(ft->glyph->advance.x);
-        }
-        previous_glyph = glyph;
+    hb_font_t* hb = kira_text_hb_font(face);
+    if (hb == NULL) {
+        return 0.0f;
     }
-    return pen_x;
+
+    hb_buffer_t* buffer = hb_buffer_create();
+    hb_buffer_add_utf8(buffer, utf8, byte_len, 0, byte_len);
+    hb_buffer_guess_segment_properties(buffer);
+    hb_shape(hb, buffer, NULL, 0);
+
+    unsigned int count = hb_buffer_get_length(buffer);
+    hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, NULL);
+    double width = 0.0;
+    for (unsigned int i = 0; i < count; i += 1) {
+        width += (double)positions[i].x_advance / 64.0;
+    }
+    hb_buffer_destroy(buffer);
+    return (float)width;
 }
 
 int kira_text_face_render_glyph(kira_text_face* face,
@@ -398,35 +416,39 @@ void kira_text_draw_run(const char* font_path,
     double text_height = (double)vmetrics.ascender + (double)vmetrics.descender;
     double baseline = y + (h - text_height) * 0.5 + (double)vmetrics.ascender;
 
-    double pen_x = x;
+    hb_font_t* hb = kira_text_hb_font(face);
+    if (hb == NULL) {
+        return;
+    }
+
     int byte_len = (int)strlen(utf8);
-    int index = 0;
-    uint32_t codepoint = 0;
-    uint32_t previous_glyph = 0;
+    hb_buffer_t* buffer = hb_buffer_create();
+    hb_buffer_add_utf8(buffer, utf8, byte_len, 0, byte_len);
+    hb_buffer_guess_segment_properties(buffer);
+    hb_shape(hb, buffer, NULL, 0);
 
-    while (kira_text_utf8_next(utf8, byte_len, &index, &codepoint)) {
-        uint32_t glyph = (uint32_t)FT_Get_Char_Index(face->face, (FT_ULong)codepoint);
+    unsigned int count = hb_buffer_get_length(buffer);
+    hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, NULL);
+    hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, NULL);
 
-        if (face->has_kerning && previous_glyph != 0 && glyph != 0) {
-            FT_Vector kerning;
-            if (FT_Get_Kerning(face->face, previous_glyph, glyph,
-                               FT_KERNING_DEFAULT, &kerning) == 0) {
-                pen_x += kira_text_f26dot6(kerning.x);
-            }
-        }
+    double pen_x = x;
+    for (unsigned int i = 0; i < count; i += 1) {
+        uint32_t glyph = infos[i].codepoint; /* glyph id after shaping */
+        double x_offset = (double)positions[i].x_offset / 64.0;
+        double y_offset = (double)positions[i].y_offset / 64.0;
 
         kira_text_glyph_bitmap bitmap;
         if (kira_text_face_render_glyph(face, glyph, &bitmap)) {
             if (bitmap.width > 0 && bitmap.rows > 0) {
-                kg_ui_blit_coverage(pen_x + (double)bitmap.bearing_x,
-                                    baseline - (double)bitmap.bearing_y,
+                kg_ui_blit_coverage(pen_x + x_offset + (double)bitmap.bearing_x,
+                                    baseline - y_offset - (double)bitmap.bearing_y,
                                     bitmap.width, bitmap.rows, bitmap.pitch,
                                     bitmap.buffer, r, g, b, a);
             }
-            pen_x += (double)bitmap.advance;
         }
-        previous_glyph = glyph;
+        pen_x += (double)positions[i].x_advance / 64.0;
     }
+    hb_buffer_destroy(buffer);
 }
 
 double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size) {

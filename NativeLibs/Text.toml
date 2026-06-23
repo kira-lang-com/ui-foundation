@@ -24,9 +24,9 @@ mode = "all_public"
 # NOTE: the native-lib manifest parser is line-based; array values must stay on a
 # single line.
 [build]
-sources = ["Text/vendor/freetype/src/base/ftbase.c", "Text/vendor/freetype/src/base/ftmm.c", "Text/vendor/freetype/src/base/ftinit.c", "Text/vendor/freetype/src/base/ftsystem.c", "Text/vendor/freetype/src/base/ftdebug.c", "Text/vendor/freetype/src/base/ftbbox.c", "Text/vendor/freetype/src/base/ftbitmap.c", "Text/vendor/freetype/src/base/ftglyph.c", "Text/vendor/freetype/src/base/ftstroke.c", "Text/vendor/freetype/src/sfnt/sfnt.c", "Text/vendor/freetype/src/truetype/truetype.c", "Text/vendor/freetype/src/cff/cff.c", "Text/vendor/freetype/src/psaux/psaux.c", "Text/vendor/freetype/src/psnames/psnames.c", "Text/vendor/freetype/src/pshinter/pshinter.c", "Text/vendor/freetype/src/smooth/smooth.c", "Text/vendor/freetype/src/autofit/autofit.c", "Text/vendor/freetype/src/raster/raster.c", "Text/vendor/freetype/src/gzip/ftgzip.c", "Text/kira_text.c"]
-include_dirs = ["Text", "Text/vendor/freetype/include"]
-defines = ["FT2_BUILD_LIBRARY", "FT_CONFIG_MODULES_H=<kira_ftmodules.h>"]
+sources = ["Text/vendor/freetype/src/base/ftbase.c", "Text/vendor/freetype/src/base/ftmm.c", "Text/vendor/freetype/src/base/ftinit.c", "Text/vendor/freetype/src/base/ftsystem.c", "Text/vendor/freetype/src/base/ftdebug.c", "Text/vendor/freetype/src/base/ftbbox.c", "Text/vendor/freetype/src/base/ftbitmap.c", "Text/vendor/freetype/src/base/ftglyph.c", "Text/vendor/freetype/src/base/ftstroke.c", "Text/vendor/freetype/src/sfnt/sfnt.c", "Text/vendor/freetype/src/truetype/truetype.c", "Text/vendor/freetype/src/cff/cff.c", "Text/vendor/freetype/src/psaux/psaux.c", "Text/vendor/freetype/src/psnames/psnames.c", "Text/vendor/freetype/src/pshinter/pshinter.c", "Text/vendor/freetype/src/smooth/smooth.c", "Text/vendor/freetype/src/autofit/autofit.c", "Text/vendor/freetype/src/raster/raster.c", "Text/vendor/freetype/src/gzip/ftgzip.c", "Text/vendor/harfbuzz/src/harfbuzz.cc", "Text/kira_text.c"]
+include_dirs = ["Text", "Text/vendor/freetype/include", "Text/vendor/harfbuzz/src"]
+defines = ["FT2_BUILD_LIBRARY", "FT_CONFIG_MODULES_H=<kira_ftmodules.h>", "HAVE_FREETYPE=1"]
 
 [target.x86_64-windows-msvc]
 static_lib = "../generated/native/x86_64-windows-msvc/kiratext.lib"
