@@ -15,7 +15,7 @@ function Surface(
 ) -> FoundationView {
     return FoundationView {
         kind: FoundationViewKind.Surface
-        children: children
+        children: move children
         width: width
         height: height
         flex: flex
@@ -25,7 +25,7 @@ function Surface(
         radius: radius
         shape: shape
         material: material
-        effects: effects
+        effects: move effects
         padding: padding
         clipContent: clipContent
     }

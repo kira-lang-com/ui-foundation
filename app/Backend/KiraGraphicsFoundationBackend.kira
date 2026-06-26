@@ -9,6 +9,7 @@ struct FoundationHitRegionRecord {
     let onBackspace: () -> Void = foundationNoopPress
     let onSubmit: () -> Void = foundationNoopPress
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
+    let interaction: FoundationInteraction = FoundationInteraction {}
 }
 
 function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
@@ -208,6 +209,7 @@ class KiraGraphicsFoundationBackend {
         onBackspace: () -> Void,
         onSubmit: () -> Void,
         onScroll: (Float, Float) -> Void,
+        interaction: FoundationInteraction,
     ) {
         self.hitRegions.append(FoundationHitRegionRecord {
             key: key
@@ -220,6 +222,7 @@ class KiraGraphicsFoundationBackend {
             onBackspace: onBackspace
             onSubmit: onSubmit
             onScroll: onScroll
+            interaction: interaction
         })
         return
     }

@@ -11,6 +11,16 @@ struct FoundationUiContext {
     var scrollY: Float = 0.0
     var lastTextCodepoint: Int = 0
     var lastKeyCode: Int = 0
+    // Drag tracking: the press origin, whether a drag is in progress, and which
+    // region owns it (so move/end keep targeting the press region even if the
+    // pointer leaves it).
+    var pressX: Float = 0.0
+    var pressY: Float = 0.0
+    var dragging: Bool = false
+    var dragKey: Int = 0
+    // Active input-method composition (pinyin buffer + Hanzi candidates). Read by
+    // the view builder to render the preedit/candidate bar; mutated by dispatch.
+    var ime: ImeComposition = ImeComposition {}
 }
 
 struct FoundationAppState {
@@ -105,185 +115,6 @@ function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
     return false
 }
 
-function foundationRectContains(bounds: borrow Rect, x: Float, y: Float) -> Bool {
-    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
-}
-
-function foundationHitRegionIndexAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
-    var index = regions.count
-    while index > 0 {
-        index = index - 1
-        let region = regions[index]
-        let contains = foundationRectContains(region.bounds, x, y)
-        if region.disabled == false {
-            if contains {
-                return index
-            }
-        }
-    }
-    return -1
-}
-
-function foundationHitRegionKeyAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
-    let index = foundationHitRegionIndexAtPoint(regions, x, y)
-    if index < 0 {
-        return 0
-    }
-    return regions[index].key
-}
-
-function foundationEventViewport(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    if event.windowWidth > 0 && event.windowHeight > 0 {
-        state.ui.viewport = Size {
-            width: intAsFloat(value: event.windowWidth)
-            height: intAsFloat(value: event.windowHeight)
-        }
-    }
-    return
-}
-
-function foundationClearTransientInput(state: borrow mut FoundationAppState) {
-    state.ui.clickedKey = 0
-    state.ui.scrollX = 0.0
-    state.ui.scrollY = 0.0
-    state.ui.lastTextCodepoint = 0
-    state.ui.lastKeyCode = 0
-    return
-}
-
-function foundationHandlePointerMove(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.pointerX = event.pointerX
-    state.ui.pointerY = event.pointerY
-    state.ui.hoveredKey = foundationHitRegionKeyAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-    return
-}
-
-function foundationHandlePointerDown(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.pointerX = event.pointerX
-    state.ui.pointerY = event.pointerY
-    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
-    state.ui.pressedKey = state.ui.hoveredKey
-    if regionIndex >= 0 {
-        let region = state.hitRegions[regionIndex]
-        if region.focusable {
-            state.ui.focusedKey = region.key
-            graphicsShowKeyboard(true)
-            return
-        }
-    }
-    state.ui.focusedKey = 0
-    graphicsShowKeyboard(false)
-    return
-}
-
-function foundationHandlePointerUp(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.pointerX = event.pointerX
-    state.ui.pointerY = event.pointerY
-    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
-    let releasedKey = state.ui.hoveredKey
-    if releasedKey != 0 && releasedKey == state.ui.pressedKey {
-        if regionIndex >= 0 {
-            let region = state.hitRegions[regionIndex]
-            region.onPress()
-            state.ui.clickedKey = region.key
-        }
-    }
-    state.ui.pressedKey = 0
-    return
-}
-
-function foundationHandleScroll(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.pointerX = event.pointerX
-    state.ui.pointerY = event.pointerY
-    state.ui.scrollX = event.scrollX
-    state.ui.scrollY = event.scrollY
-    let regionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-    state.ui.hoveredKey = regionIndex >= 0 ? state.hitRegions[regionIndex].key : 0
-    if regionIndex >= 0 {
-        let region = state.hitRegions[regionIndex]
-        region.onScroll(event.scrollX, event.scrollY)
-    }
-    return
-}
-
-function foundationHandleTextInput(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.lastTextCodepoint = event.textCodepoint
-    if state.ui.focusedKey == 0 || event.textCodepoint == 0 {
-        return
-    }
-    var index = 0
-    while index < state.hitRegions.count {
-        let region = state.hitRegions[index]
-        if region.key == state.ui.focusedKey {
-            region.onTextInput(graphicsStringFromCodepoint(event.textCodepoint))
-            return
-        }
-        index = index + 1
-    }
-    return
-}
-
-function foundationHandleKeyDown(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    state.ui.lastKeyCode = event.keyCode
-    if state.ui.focusedKey == 0 {
-        return
-    }
-    var index = 0
-    while index < state.hitRegions.count {
-        let region = state.hitRegions[index]
-        if region.key == state.ui.focusedKey {
-            if event.keyCode == 259 {
-                region.onBackspace()
-            }
-            if event.keyCode == 257 {
-                region.onSubmit()
-            }
-            return
-        }
-        index = index + 1
-    }
-    return
-}
-
-function foundationDispatchGraphicsEvent(state: borrow mut FoundationAppState, event: borrow GraphicsEvent) {
-    var current = state
-    foundationEventViewport(current, event)
-    if event.kind == GraphicsEventKind.PointerExited {
-        current.ui.hoveredKey = 0
-        current.ui.pressedKey = 0
-        return
-    }
-    if event.kind == GraphicsEventKind.PointerDown {
-        foundationHandlePointerDown(current, event)
-        return
-    }
-    if event.kind == GraphicsEventKind.PointerUp {
-        foundationHandlePointerUp(current, event)
-        return
-    }
-    if event.kind == GraphicsEventKind.Scroll {
-        foundationHandleScroll(current, event)
-        return
-    }
-    if event.kind == GraphicsEventKind.TextInput {
-        foundationHandleTextInput(current, event)
-        return
-    }
-    if event.kind == GraphicsEventKind.KeyDown {
-        foundationHandleKeyDown(current, event)
-        return
-    }
-    // Pointer move and other events: just update position
-    let usesPointer = graphicsEventUsesPointerPosition(event.kind)
-    if usesPointer {
-        current.ui.pointerX = event.pointerX
-        current.ui.pointerY = event.pointerY
-        current.ui.hoveredKey = foundationHitRegionKeyAtPoint(current.hitRegions, event.pointerX, event.pointerY)
-    }
-    return
-}
 
 function RunFoundationInteractiveApp(
     title: String,
@@ -304,96 +135,7 @@ function RunFoundationInteractiveApp(
     }
 
     app.onEvent { event in
-        var state = nativeRecover<FoundationAppState>(runtimeUser)
-        if event.windowWidth > 0 && event.windowHeight > 0 {
-            state.ui.viewport = Size {
-                width: intAsFloat(value: event.windowWidth)
-                height: intAsFloat(value: event.windowHeight)
-            }
-        }
-        let usesPointer = graphicsEventUsesPointerPosition(event.kind)
-        var pointerRegionIndex = -1
-        if usesPointer {
-            state.ui.pointerX = event.pointerX
-            state.ui.pointerY = event.pointerY
-            pointerRegionIndex = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-            state.ui.hoveredKey = pointerRegionIndex >= 0 ? state.hitRegions[pointerRegionIndex].key : 0
-        }
-        if event.kind == GraphicsEventKind.PointerDown {
-            state.ui.pressedKey = state.ui.hoveredKey
-            if pointerRegionIndex >= 0 {
-                let region = state.hitRegions[pointerRegionIndex]
-                if region.focusable {
-                    state.ui.focusedKey = region.key
-                    graphicsShowKeyboard(true)
-                    return
-                }
-            }
-            state.ui.focusedKey = 0
-            graphicsShowKeyboard(false)
-            return
-        }
-        if event.kind == GraphicsEventKind.PointerUp {
-            let releasedKey = state.ui.hoveredKey
-            if releasedKey != 0 && releasedKey == state.ui.pressedKey && pointerRegionIndex >= 0 {
-                let region = state.hitRegions[pointerRegionIndex]
-                region.onPress()
-                state.ui.clickedKey = region.key
-            }
-            state.ui.pressedKey = 0
-            return
-        }
-        if event.kind == GraphicsEventKind.PointerExited {
-            state.ui.hoveredKey = 0
-            state.ui.pressedKey = 0
-            return
-        }
-        if event.kind == GraphicsEventKind.Scroll {
-            state.ui.scrollX = event.scrollX
-            state.ui.scrollY = event.scrollY
-            let scrollRegion = foundationHitRegionIndexAtPoint(state.hitRegions, event.pointerX, event.pointerY)
-            if scrollRegion >= 0 {
-                let region = state.hitRegions[scrollRegion]
-                region.onScroll(event.scrollX, event.scrollY)
-            }
-            return
-        }
-        if event.kind == GraphicsEventKind.TextInput {
-            state.ui.lastTextCodepoint = event.textCodepoint
-            if state.ui.focusedKey != 0 && event.textCodepoint != 0 {
-                var regionIndex = 0
-                while regionIndex < state.hitRegions.count {
-                    let region = state.hitRegions[regionIndex]
-                    if region.key == state.ui.focusedKey {
-                        region.onTextInput(graphicsStringFromCodepoint(event.textCodepoint))
-                        region.onTextCodepoint(event.textCodepoint)
-                        return
-                    }
-                    regionIndex = regionIndex + 1
-                }
-            }
-            return
-        }
-        if event.kind == GraphicsEventKind.KeyDown {
-            state.ui.lastKeyCode = event.keyCode
-            if state.ui.focusedKey != 0 {
-                var regionIndex = 0
-                while regionIndex < state.hitRegions.count {
-                    let region = state.hitRegions[regionIndex]
-                    if region.key == state.ui.focusedKey {
-                        if event.keyCode == 259 {
-                            region.onBackspace()
-                        }
-                        if event.keyCode == 257 {
-                            region.onSubmit()
-                        }
-                        return
-                    }
-                    regionIndex = regionIndex + 1
-                }
-            }
-            return
-        }
+        foundationDispatchEvent(runtimeUser, event)
         return
     }
 

@@ -29,6 +29,21 @@ function foundationNoopScroll(dx: Float, dy: Float) {
     return
 }
 
+// Extended pointer/touch interaction callbacks, bundled so a view carries them
+// as a single Copy value. Hover enter/exit fire as the pointer (or primary
+// touch) crosses a region boundary; drag start/move/end fire once a held
+// pointer moves past the drag threshold. `imeEnabled` opts a focusable region
+// into the Kira-owned input method (pinyin composition + Hanzi prediction);
+// when false, text codepoints commit directly for Latin input.
+struct FoundationInteraction {
+    let onHoverEnter: () -> Void = foundationNoopPress
+    let onHoverExit: () -> Void = foundationNoopPress
+    let onDragStart: (Float, Float) -> Void = foundationNoopScroll
+    let onDragMove: (Float, Float) -> Void = foundationNoopScroll
+    let onDragEnd: (Float, Float) -> Void = foundationNoopScroll
+    let imeEnabled: Bool = false
+}
+
 struct FoundationView {
     let kind: FoundationViewKind
     let key: Int = 0
@@ -76,43 +91,9 @@ struct FoundationView {
     let onSubmit: () -> Void = foundationNoopPress
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
     let minLength: Float = 0.0
+    let interaction: FoundationInteraction = FoundationInteraction {}
 }
 
-function KeyedView(key: Int, child: FoundationView) -> FoundationView {
-    return FoundationView {
-        kind: child.kind
-        key: key
-        children: child.children
-        width: child.width
-        height: child.height
-        flex: child.flex
-        gap: child.gap
-        padding: child.padding
-        crossAxisAlignment: child.crossAxisAlignment
-        alignment: child.alignment
-        fill: child.fill
-        border: child.border
-        borderWidth: child.borderWidth
-        radius: child.radius
-        shape: child.shape
-        material: child.material
-        effects: child.effects
-        clipContent: child.clipContent
-        content: child.content
-        color: child.color
-        size: child.size
-        weight: child.weight
-        disabled: child.disabled
-        focusable: child.focusable
-        onPress: child.onPress
-        onTextInput: child.onTextInput
-        onTextCodepoint: child.onTextCodepoint
-        onBackspace: child.onBackspace
-        onSubmit: child.onSubmit
-        onScroll: child.onScroll
-        minLength: child.minLength
-    }
-}
 
 function foundationViewChildren(view: borrow FoundationView) -> [FoundationView] {
     return view.children

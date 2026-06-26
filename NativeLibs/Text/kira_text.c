@@ -19,6 +19,13 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Bundled Figtree variable font data. */
+#include "kira_figtree_font.h"
+
+/* Forward declaration: embedded Figtree face loaded from the byte array above.
+ * Defined further below alongside the draw-cache infrastructure. */
+static kira_text_face* kira_text_embedded_face(float pixel_size);
+
 struct kira_text_engine {
     FT_Library library;
 };
@@ -248,23 +255,128 @@ int kira_text_face_render_glyph(kira_text_face* face,
 }
 
 static const char* kira_text_discover_font(void) {
+    /* Prefer the bundled Figtree font file shipped alongside the library. */
+    static const char* const bundled_candidates[] = {
+        "fonts/Figtree-VariableFont_wght.ttf",
+        "../fonts/Figtree-VariableFont_wght.ttf",
+    };
+    for (size_t i = 0; i < sizeof(bundled_candidates) / sizeof(bundled_candidates[0]); i += 1) {
+        FILE* probe = fopen(bundled_candidates[i], "rb");
+        if (probe != NULL) {
+            fclose(probe);
+            return bundled_candidates[i];
+        }
+    }
+
+    /* Figtree may be installed as a system font. */
+    static const char* const figtree_candidates[] = {
+        "C:/Windows/Fonts/Figtree-VariableFont_wght.ttf",
+        "/System/Library/Fonts/Figtree-VariableFont_wght.ttf",
+        "/usr/share/fonts/truetype/figtree/Figtree-VariableFont_wght.ttf",
+        "/usr/share/fonts/opentype/figtree/Figtree-VariableFont_wght.ttf",
+        "~/.fonts/Figtree-VariableFont_wght.ttf",
+    };
+    for (size_t i = 0; i < sizeof(figtree_candidates) / sizeof(figtree_candidates[0]); i += 1) {
+        FILE* probe = fopen(figtree_candidates[i], "rb");
+        if (probe != NULL) {
+            fclose(probe);
+            return figtree_candidates[i];
+        }
+    }
+
     /* Common system fonts across the host platforms this engine targets. */
-    static const char* const candidates[] = {
-        "C:/Windows/Fonts/arial.ttf",
+    static const char* const sys_candidates[] = {
         "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
     };
-    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i += 1) {
-        FILE* probe = fopen(candidates[i], "rb");
+    for (size_t i = 0; i < sizeof(sys_candidates) / sizeof(sys_candidates[0]); i += 1) {
+        FILE* probe = fopen(sys_candidates[i], "rb");
         if (probe != NULL) {
             fclose(probe);
-            return candidates[i];
+            return sys_candidates[i];
+        }
+    }
+
+    /* No system font is available — use the embedded Figtree variable font.
+     * The sentinel value "<builtin>" is handled by kira_text_cached_face(). */
+    return "<builtin>";
+}
+
+/* Locate a CJK-capable system font. The bundled Figtree face (and Segoe/Arial)
+ * have no CJK coverage, so committed Hanzi would render as .notdef tofu. These
+ * fonts also carry Latin glyphs, so a mixed Latin+Hanzi run can be shaped
+ * entirely with the CJK face. Returns NULL when none is installed. */
+static const char* kira_text_discover_cjk_font(void) {
+    static const char* const cjk_candidates[] = {
+        "C:/Windows/Fonts/msyh.ttc",   /* Microsoft YaHei */
+        "C:/Windows/Fonts/msyh.ttf",
+        "C:/Windows/Fonts/simsun.ttc", /* SimSun */
+        "C:/Windows/Fonts/msgothic.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    };
+    for (size_t i = 0; i < sizeof(cjk_candidates) / sizeof(cjk_candidates[0]); i += 1) {
+        FILE* probe = fopen(cjk_candidates[i], "rb");
+        if (probe != NULL) {
+            fclose(probe);
+            return cjk_candidates[i];
         }
     }
     return NULL;
+}
+
+/* Decode UTF-8 and report whether any scalar lands in a CJK/Kana/Hangul block
+ * (>= U+3000), i.e. text that the default Latin face cannot render. */
+static int kira_text_utf8_has_cjk(const char* utf8) {
+    const unsigned char* p = (const unsigned char*)utf8;
+    while (*p != '\0') {
+        uint32_t cp;
+        int len;
+        if (p[0] < 0x80) {
+            cp = p[0];
+            len = 1;
+        } else if ((p[0] & 0xE0) == 0xC0 && (p[1] & 0xC0) == 0x80) {
+            cp = ((uint32_t)(p[0] & 0x1F) << 6) | (uint32_t)(p[1] & 0x3F);
+            len = 2;
+        } else if ((p[0] & 0xF0) == 0xE0 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+            cp = ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (uint32_t)(p[2] & 0x3F);
+            len = 3;
+        } else if ((p[0] & 0xF8) == 0xF0 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
+            cp = ((uint32_t)(p[0] & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) | ((uint32_t)(p[2] & 0x3F) << 6) | (uint32_t)(p[3] & 0x3F);
+            len = 4;
+        } else {
+            /* Malformed byte — skip it. */
+            p += 1;
+            continue;
+        }
+        if (cp >= 0x3000) {
+            return 1;
+        }
+        p += len;
+    }
+    return 0;
+}
+
+/* Choose the face path for a run: when the caller left the path unset, prefer a
+ * CJK font for runs that contain CJK scalars, otherwise the default Latin face. */
+static const char* kira_text_resolve_font(const char* font_path, const char* utf8) {
+    if (font_path != NULL && font_path[0] != '\0') {
+        return font_path;
+    }
+    if (utf8 != NULL && kira_text_utf8_has_cjk(utf8)) {
+        const char* cjk = kira_text_discover_cjk_font();
+        if (cjk != NULL) {
+            return cjk;
+        }
+    }
+    return kira_text_discover_font();
 }
 
 const char* kira_text_probe_report(const char* font_path) {
@@ -286,16 +398,28 @@ const char* kira_text_probe_report(const char* font_path) {
         return report;
     }
 
-    kira_text_face* face = kira_text_face_load(engine, font_path, 0);
-    if (face == NULL) {
-        snprintf(report, sizeof(report),
-                 "kira-text: ERROR could not load face '%s'", font_path);
-        kira_text_engine_destroy(engine);
-        return report;
+    const float px = 32.0f;
+
+    kira_text_face* face = NULL;
+    if (strcmp(font_path, "<builtin>") == 0) {
+        face = kira_text_embedded_face(px);
+        if (face == NULL) {
+            snprintf(report, sizeof(report),
+                     "kira-text: ERROR could not load embedded Figtree font");
+            kira_text_engine_destroy(engine);
+            return report;
+        }
+    } else {
+        face = kira_text_face_load(engine, font_path, 0);
+        if (face == NULL) {
+            snprintf(report, sizeof(report),
+                     "kira-text: ERROR could not load face '%s'", font_path);
+            kira_text_engine_destroy(engine);
+            return report;
+        }
     }
 
-    const float px = 32.0f;
-    if (!kira_text_face_set_pixel_size(face, px)) {
+    if (face->pixel_size != px && !kira_text_face_set_pixel_size(face, px)) {
         snprintf(report, sizeof(report),
                  "kira-text: ERROR could not size face '%s'", font_path);
         kira_text_face_destroy(face);
@@ -325,7 +449,9 @@ const char* kira_text_probe_report(const char* font_path) {
                  bitmap.bearing_x, bitmap.bearing_y, hello);
     }
 
-    kira_text_face_destroy(face);
+    if (strcmp(font_path, "<builtin>") != 0) {
+        kira_text_face_destroy(face);
+    }
     kira_text_engine_destroy(engine);
     return report;
 }
@@ -337,6 +463,40 @@ const char* kira_text_probe_report(const char* font_path) {
 extern void kg_ui_blit_coverage(double x, double y, int width, int rows,
                                 int pitch, const unsigned char* coverage,
                                 double r, double g, double b, double a);
+
+/* Embedded Figtree font face — lazily loaded from the bundled byte array. */
+static kira_text_engine* g_embedded_engine = NULL;
+static kira_text_face*   g_embedded_face   = NULL;
+static float             g_embedded_ps     = 0.0f;
+
+static kira_text_face* kira_text_embedded_face(float pixel_size) {
+    if (g_embedded_face != NULL && g_embedded_ps == pixel_size) {
+        return g_embedded_face;
+    }
+    if (g_embedded_face != NULL) {
+        kira_text_face_destroy(g_embedded_face);
+        g_embedded_face = NULL;
+        g_embedded_ps = 0.0f;
+    }
+    if (g_embedded_engine == NULL) {
+        g_embedded_engine = kira_text_engine_create();
+        if (g_embedded_engine == NULL) return NULL;
+    }
+    g_embedded_face = kira_text_face_load_memory(
+        g_embedded_engine,
+        kira_figtree_font_data,
+        (long)KIRA_FIGTREE_FONT_SIZE,
+        0
+    );
+    if (g_embedded_face == NULL) return NULL;
+    if (!kira_text_face_set_pixel_size(g_embedded_face, pixel_size)) {
+        kira_text_face_destroy(g_embedded_face);
+        g_embedded_face = NULL;
+        return NULL;
+    }
+    g_embedded_ps = pixel_size;
+    return g_embedded_face;
+}
 
 /* Face cache: FT_New_Face parses the whole font, far too slow to repeat per
  * draw call. Cache a handful of faces keyed by (path, quantized pixel size). */
@@ -353,6 +513,11 @@ static kira_text_draw_cache_slot g_draw_cache[KIRA_TEXT_DRAW_CACHE_SLOTS];
 static int g_draw_cache_count = 0;
 
 static kira_text_face* kira_text_cached_face(const char* path, float pixel_size) {
+    /* The embedded Figtree font is loaded from the bundled byte array. */
+    if (strcmp(path, "<builtin>") == 0) {
+        return kira_text_embedded_face(pixel_size);
+    }
+
     if (g_draw_engine == NULL) {
         g_draw_engine = kira_text_engine_create();
         if (g_draw_engine == NULL) {
@@ -399,11 +564,9 @@ void kira_text_draw_run(const char* font_path,
     if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0 || a <= 0.0) {
         return;
     }
-    if (font_path == NULL || font_path[0] == '\0') {
-        font_path = kira_text_discover_font();
-        if (font_path == NULL) {
-            return;
-        }
+    font_path = kira_text_resolve_font(font_path, utf8);
+    if (font_path == NULL) {
+        return;
     }
 
     kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
@@ -455,11 +618,9 @@ double kira_text_measure_run(const char* font_path, const char* utf8, double pix
     if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0) {
         return 0.0;
     }
-    if (font_path == NULL || font_path[0] == '\0') {
-        font_path = kira_text_discover_font();
-        if (font_path == NULL) {
-            return 0.0;
-        }
+    font_path = kira_text_resolve_font(font_path, utf8);
+    if (font_path == NULL) {
+        return 0.0;
     }
     kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
     if (face == NULL) {

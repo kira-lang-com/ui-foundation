@@ -1,0 +1,324 @@
+// Centralised pointer / touch / keyboard event dispatch for the interactive
+// Foundation app loop. `foundationDispatchEvent` recovers the app state from the
+// native user-data pointer and fans out to the leaf handlers below, passing the
+// mutable UI context and the (immutable) hit-region list as separate borrows.
+// It translates raw Kira Graphics events into the higher-level interaction
+// model: hover enter/exit, press + click, drag (start/move/end past a
+// threshold), scroll, and text input. Touch events reuse the pointer path (Kira
+// Graphics routes the primary touch into pointerX/Y), so the same widgets
+// respond to mouse and touch. Text input is fed through the Kira-owned input
+// method when the focused region opts in, giving Latin direct-commit and CJK
+// pinyin composition with Hanzi prediction.
+//
+// Ownership note: the value returned by `nativeRecover` cannot be passed whole
+// to a `borrow mut` parameter, but its fields can. Handlers therefore take
+// `ui: borrow mut FoundationUiContext` plus `regions: borrow [...]` and never
+// re-pass a `borrow mut` parameter onward.
+
+function foundationDragThreshold() -> Float {
+    return 6.0
+}
+
+function foundationRectContains(bounds: borrow Rect, x: Float, y: Float) -> Bool {
+    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
+}
+
+function foundationHitRegionIndexAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    var index = regions.count
+    while index > 0 {
+        index = index - 1
+        let region = regions[index]
+        if region.disabled == false {
+            if foundationRectContains(region.bounds, x, y) {
+                return index
+            }
+        }
+    }
+    return -1
+}
+
+function foundationHitRegionKeyAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    let index = foundationHitRegionIndexAtPoint(regions, x, y)
+    if index < 0 {
+        return 0
+    }
+    return regions[index].key
+}
+
+function foundationRegionIndexByKey(regions: borrow [FoundationHitRegionRecord], key: Int) -> Int {
+    if key == 0 {
+        return -1
+    }
+    var index = 0
+    while index < regions.count {
+        if regions[index].key == key {
+            return index
+        }
+        index = index + 1
+    }
+    return -1
+}
+
+// Update the cached pointer position, recompute the hovered region, fire hover
+// exit on the region left and hover enter on the region entered, and return the
+// hit region index (-1 when over nothing).
+function foundationUpdatePointer(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    ui.pointerX = x
+    ui.pointerY = y
+    let index = foundationHitRegionIndexAtPoint(regions, x, y)
+    var newKey = 0
+    if index >= 0 {
+        newKey = regions[index].key
+    }
+    let oldKey = ui.hoveredKey
+    if oldKey != newKey {
+        if oldKey != 0 {
+            let oldIndex = foundationRegionIndexByKey(regions, oldKey)
+            if oldIndex >= 0 {
+                regions[oldIndex].interaction.onHoverExit()
+            }
+        }
+        if newKey != 0 {
+            let newIndex = foundationRegionIndexByKey(regions, newKey)
+            if newIndex >= 0 {
+                regions[newIndex].interaction.onHoverEnter()
+            }
+        }
+    }
+    ui.hoveredKey = newKey
+    return index
+}
+
+// Fire hover exit on the currently hovered region and clear all pointer state.
+function foundationClearHover(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord]) {
+    let oldKey = ui.hoveredKey
+    if oldKey != 0 {
+        let oldIndex = foundationRegionIndexByKey(regions, oldKey)
+        if oldIndex >= 0 {
+            regions[oldIndex].interaction.onHoverExit()
+        }
+    }
+    ui.hoveredKey = 0
+    ui.pressedKey = 0
+    ui.dragging = false
+    ui.dragKey = 0
+    return
+}
+
+function foundationBeginPress(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], index: Int) {
+    ui.pressedKey = ui.hoveredKey
+    ui.pressX = ui.pointerX
+    ui.pressY = ui.pointerY
+    ui.dragging = false
+    ui.dragKey = ui.hoveredKey
+    if index >= 0 {
+        let region = regions[index]
+        if region.focusable {
+            ui.focusedKey = region.key
+            ui.ime = imeReset()
+            graphicsShowKeyboard(true)
+            return
+        }
+    }
+    ui.focusedKey = 0
+    ui.ime = imeReset()
+    graphicsShowKeyboard(false)
+    return
+}
+
+function foundationUpdateDrag(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord]) {
+    if ui.pressedKey == 0 {
+        return
+    }
+    let dx = ui.pointerX - ui.pressX
+    let dy = ui.pointerY - ui.pressY
+    let index = foundationRegionIndexByKey(regions, ui.dragKey)
+    if index < 0 {
+        return
+    }
+    let region = regions[index]
+    if ui.dragging == false {
+        let distSquared = dx * dx + dy * dy
+        let threshold = foundationDragThreshold()
+        if distSquared >= threshold * threshold {
+            ui.dragging = true
+            region.interaction.onDragStart(ui.pressX, ui.pressY)
+        }
+    }
+    if ui.dragging {
+        region.interaction.onDragMove(dx, dy)
+    }
+    return
+}
+
+function foundationEndPress(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], index: Int) {
+    if ui.dragging {
+        let dragIndex = foundationRegionIndexByKey(regions, ui.dragKey)
+        if dragIndex >= 0 {
+            regions[dragIndex].interaction.onDragEnd(ui.pointerX, ui.pointerY)
+        }
+    } else {
+        let releasedKey = ui.hoveredKey
+        if releasedKey != 0 && releasedKey == ui.pressedKey && index >= 0 {
+            let region = regions[index]
+            region.onPress()
+            ui.clickedKey = region.key
+        }
+    }
+    ui.pressedKey = 0
+    ui.dragging = false
+    ui.dragKey = 0
+    return
+}
+
+function foundationHandleScroll(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], dx: Float, dy: Float) {
+    ui.scrollX = dx
+    ui.scrollY = dy
+    let index = foundationHitRegionIndexAtPoint(regions, ui.pointerX, ui.pointerY)
+    if index >= 0 {
+        regions[index].onScroll(dx, dy)
+    }
+    return
+}
+
+// Route a committed text codepoint for the focused region. IME-enabled regions
+// compose pinyin into Hanzi candidates; Latin regions commit directly.
+function foundationHandleTextInputEvent(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], codepoint: Int) {
+    ui.lastTextCodepoint = codepoint
+    if ui.focusedKey == 0 || codepoint == 0 {
+        return
+    }
+    let index = foundationRegionIndexByKey(regions, ui.focusedKey)
+    if index < 0 {
+        return
+    }
+    let region = regions[index]
+    if region.interaction.imeEnabled == false {
+        region.onTextInput(graphicsStringFromCodepoint(codepoint))
+        region.onTextCodepoint(codepoint)
+        return
+    }
+    // Pinyin letters extend the composition buffer.
+    if imeIsPinyinLetter(codepoint) {
+        let next = imeAppendLetter(ui.ime, codepoint)
+        ui.ime = move next
+        return
+    }
+    // Space commits the highlighted candidate, or inserts a literal space.
+    if codepoint == 32 {
+        if imeIsComposing(ui.ime) {
+            let chosen = imeCommitActive(ui.ime)
+            if chosen != 0 {
+                region.onTextInput(graphicsStringFromCodepoint(chosen))
+            }
+            ui.ime = imeReset()
+            return
+        }
+        region.onTextInput(graphicsStringFromCodepoint(32))
+        return
+    }
+    // Digits 1-9 pick a candidate by position while composing.
+    if codepoint >= 49 && codepoint <= 57 {
+        if imeIsComposing(ui.ime) {
+            let chosen = imeCandidateAt(ui.ime, codepoint - 49)
+            if chosen != 0 {
+                region.onTextInput(graphicsStringFromCodepoint(chosen))
+                ui.ime = imeReset()
+                return
+            }
+        }
+        region.onTextInput(graphicsStringFromCodepoint(codepoint))
+        return
+    }
+    // Any other character commits a pending candidate, then inserts itself.
+    if imeIsComposing(ui.ime) {
+        let chosen = imeCommitActive(ui.ime)
+        if chosen != 0 {
+            region.onTextInput(graphicsStringFromCodepoint(chosen))
+        }
+        ui.ime = imeReset()
+    }
+    region.onTextInput(graphicsStringFromCodepoint(codepoint))
+    return
+}
+
+function foundationHandleKeyEvent(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], keyCode: Int) {
+    ui.lastKeyCode = keyCode
+    if ui.focusedKey == 0 {
+        return
+    }
+    let index = foundationRegionIndexByKey(regions, ui.focusedKey)
+    if index < 0 {
+        return
+    }
+    let region = regions[index]
+    let composing = region.interaction.imeEnabled && imeIsComposing(ui.ime)
+    if keyCode == 259 {
+        if composing {
+            let next = imeBackspace(ui.ime)
+            ui.ime = move next
+        } else {
+            region.onBackspace()
+        }
+        return
+    }
+    if keyCode == 257 {
+        if composing {
+            let chosen = imeCommitActive(ui.ime)
+            if chosen != 0 {
+                region.onTextInput(graphicsStringFromCodepoint(chosen))
+            }
+            ui.ime = imeReset()
+        } else {
+            region.onSubmit()
+        }
+        return
+    }
+    return
+}
+
+// Single entry point used by the interactive app's `onEvent` hook. Owns the
+// recovered `var` so it can hand mutable borrows of its fields to the handlers.
+function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) {
+    var state = nativeRecover<FoundationAppState>(userData)
+    if event.windowWidth > 0 && event.windowHeight > 0 {
+        state.ui.viewport = Size {
+            width: intAsFloat(value: event.windowWidth)
+            height: intAsFloat(value: event.windowHeight)
+        }
+    }
+    let kind = event.kind
+    if kind == GraphicsEventKind.PointerDown || kind == GraphicsEventKind.TouchesBegan {
+        let index = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
+        foundationBeginPress(state.ui, state.hitRegions, index)
+        return
+    }
+    if kind == GraphicsEventKind.PointerMoved || kind == GraphicsEventKind.TouchesMoved || kind == GraphicsEventKind.PointerEntered {
+        let ignored = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
+        foundationUpdateDrag(state.ui, state.hitRegions)
+        return
+    }
+    if kind == GraphicsEventKind.PointerUp || kind == GraphicsEventKind.TouchesEnded {
+        let index = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
+        foundationEndPress(state.ui, state.hitRegions, index)
+        return
+    }
+    if kind == GraphicsEventKind.PointerExited || kind == GraphicsEventKind.TouchesCancelled {
+        foundationClearHover(state.ui, state.hitRegions)
+        return
+    }
+    if kind == GraphicsEventKind.Scroll {
+        let ignored = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
+        foundationHandleScroll(state.ui, state.hitRegions, event.scrollX, event.scrollY)
+        return
+    }
+    if kind == GraphicsEventKind.TextInput {
+        foundationHandleTextInputEvent(state.ui, state.hitRegions, event.textCodepoint)
+        return
+    }
+    if kind == GraphicsEventKind.KeyDown {
+        foundationHandleKeyEvent(state.ui, state.hitRegions, event.keyCode)
+        return
+    }
+    return
+}

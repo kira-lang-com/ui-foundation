@@ -158,7 +158,7 @@ Kira UI Foundation is part of the Kira language ecosystem:
 
 - [Kira](https://github.com/kira-lang-com/kira) — the language compiler & VM
 - [KiraGraphics](https://github.com/kira-lang-com/kira-graphics) — GPU graphics backend
-- [KiraLayout](https://github.com/kira-lang-com/kira-layout) — flexbox layout engine
+- [KiraLayout](https://github.com/kira-lang-com/kira-layout) — two-pass layout engine
 - [Foundation](https://github.com/kira-lang-com/foundation) — core utilities
 
 ## License

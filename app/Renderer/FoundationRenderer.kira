@@ -50,7 +50,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             return 1
         }
         HitArea -> {
-            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll)
+            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll, view.interaction)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current);

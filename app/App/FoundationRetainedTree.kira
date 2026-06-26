@@ -168,14 +168,15 @@ function foundationRetainedNodeWithChildren(
     layoutDirty: Bool,
     renderDirty: Bool,
 ) -> FoundationRetainedNode {
+    let count = childIds.count
     return FoundationRetainedNode {
         id: node.id
         parentId: node.parentId
         key: node.key
         childOrdinal: node.childOrdinal
         kind: node.kind
-        childIds: childIds
-        childCount: childIds.count
+        childIds: move childIds
+        childCount: count
         layoutSignature: node.layoutSignature
         renderSignature: node.renderSignature
         layoutDirty: layoutDirty
@@ -468,8 +469,8 @@ function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetai
 }
 
 function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow FoundationView) -> FoundationRetainedTree {
-    let previous = tree.nodes
     var next = tree
+    let previous = next.nodes
     next.nodes = []
     next.reusedIds = []
     next.reusedIdBits = []
@@ -557,10 +558,21 @@ function foundationRetainedTestColor() -> Color {
 }
 
 function foundationRetainedTreeRoot(firstText: String, secondText: String, includeHitArea: Bool, hitFirst: Bool) -> FoundationView {
-    let textNode = KeyedView(10, Text(move firstText, foundationRetainedTestColor(), 16.0, 400.0))
-    let hitNode = KeyedView(20, HitArea(foundationNoopPress, [
-        Text(move secondText, foundationRetainedTestColor(), 14.0, 400.0)
-    ], false))
+    let textNode = FoundationView {
+        kind: FoundationViewKind.Text
+        key: 10
+        content: move firstText
+        color: foundationRetainedTestColor()
+        size: 16.0
+        weight: 400.0
+    }
+    let hitNode = FoundationView {
+        kind: FoundationViewKind.HitArea
+        key: 20
+        disabled: false
+        onPress: foundationNoopPress
+        children: [Text(move secondText, foundationRetainedTestColor(), 14.0, 400.0)]
+    }
     if includeHitArea && hitFirst {
         return Column(
             children: [hitNode, textNode],

@@ -1,0 +1,366 @@
+import KiraUIFoundation
+
+// Showcase for the Foundation interaction model: hover-reactive buttons, a
+// draggable card, and a CJK text field driven by the Kira-owned pinyin -> Hanzi
+// input method. All wiring is callback based (no reactive state): each widget
+// captures the shared native state handle and mutates it from its callbacks.
+
+struct ShowcaseState {
+    var hoverEnters: Int = 0
+    var clicks: Int = 0
+    var dragX: Float = 0.0
+    var dragY: Float = 0.0
+    var dragBaseX: Float = 0.0
+    var dragBaseY: Float = 0.0
+    var dragging: Bool = false
+    var textValue: String = ""
+}
+
+function appBackground() -> Color {
+    return Color { r: 0.05 g: 0.06 b: 0.09 a: 1.0 }
+}
+
+function primaryText() -> Color {
+    return Color { r: 0.96 g: 0.97 b: 0.99 a: 1.0 }
+}
+
+function secondaryText() -> Color {
+    return Color { r: 0.74 g: 0.80 b: 0.88 a: 1.0 }
+}
+
+function accentText() -> Color {
+    return Color { r: 0.62 g: 0.86 b: 1.0 a: 1.0 }
+}
+
+function buttonFill(hovered: Bool, pressed: Bool) -> Color {
+    if pressed {
+        return Color { r: 0.16 g: 0.45 b: 0.78 a: 1.0 }
+    }
+    if hovered {
+        return Color { r: 0.24 g: 0.40 b: 0.66 a: 1.0 }
+    }
+    return Color { r: 0.14 g: 0.16 b: 0.23 a: 1.0 }
+}
+
+function panelFill(active: Bool) -> Color {
+    if active {
+        return Color { r: 0.20 g: 0.34 b: 0.58 a: 1.0 }
+    }
+    return Color { r: 0.12 g: 0.14 b: 0.20 a: 1.0 }
+}
+
+function panelBorder(active: Bool) -> Color {
+    if active {
+        return Color { r: 0.80 g: 0.90 b: 1.0 a: 0.55 }
+    }
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.12 }
+}
+
+// Concatenate Unicode codepoints into a UTF-8 string for display.
+function codepointsToString(cps: borrow [Int]) -> String {
+    var out = ""
+    var index = 0
+    while index < cps.count {
+        out = foundationAppendCodepoint(out, cps[index])
+        index = index + 1
+    }
+    return out
+}
+
+// Render the active candidate list as "1.X 2.Y 3.Z" (up to four).
+function candidateBarText(cps: borrow [Int]) -> String {
+    if cps.count == 0 {
+        return "type pinyin: ni hao / wo shi / zhong guo"
+    }
+    var out = ""
+    var index = 0
+    while index < cps.count && index < 4 {
+        if index > 0 {
+            out = foundationAppendCodepoint(out, 32)
+        }
+        out = foundationAppendCodepoint(out, 49 + index)
+        out = foundationAppendCodepoint(out, 46)
+        out = foundationAppendCodepoint(out, cps[index])
+        index = index + 1
+    }
+    return out
+}
+
+function intToFloatText(value: Int) -> String {
+    var out = ""
+    if value == 0 {
+        return foundationAppendCodepoint(out, 48)
+    }
+    var digits: [Int] = []
+    var n = value
+    while n > 0 {
+        digits.append(48 + n % 10)
+        n = n / 10
+    }
+    var index = digits.count
+    while index > 0 {
+        index = index - 1
+        out = foundationAppendCodepoint(out, digits[index])
+    }
+    return out
+}
+
+function hoverStatus(enters: Int, clicks: Int) -> String {
+    var out = foundationConcat("hovers: ", intToFloatText(enters))
+    out = foundationConcat(out, "   clicks: ")
+    out = foundationConcat(out, intToFloatText(clicks))
+    return out
+}
+
+// Compose the IME status line: while composing, show "[pinyin] candidates",
+// otherwise just the candidate hint.
+function statusLine(preedit: borrow String, candidates: borrow String) -> String {
+    if preedit.count == 0 {
+        return foundationConcat("", candidates)
+    }
+    let head = foundationConcat("[", preedit)
+    let opened = foundationConcat(head, "] ")
+    return foundationConcat(opened, candidates)
+}
+
+function displayText(value: borrow String) -> String {
+    if value.count == 0 {
+        return "type here (CJK via pinyin)"
+    }
+    return foundationConcat("", value)
+}
+
+function card(key: Int, title: String, status: String, active: Bool, interaction: FoundationInteraction, focusable: Bool, onPress: () -> Void, onTextInput: (String) -> Void, onBackspace: () -> Void) -> FoundationView {
+    return InteractiveHitArea(
+        key: key,
+        focusable: focusable,
+        disabled: false,
+        onPress: move onPress,
+        onTextInput: move onTextInput,
+        onTextCodepoint: foundationNoopTextCodepoint,
+        onBackspace: move onBackspace,
+        onSubmit: foundationNoopPress,
+        onScroll: foundationNoopScroll,
+        children: [
+            Surface(
+                children: [
+                    Column(
+                        children: [
+                            Text(move title, primaryText(), 18.0, 680.0),
+                            Text(move status, secondaryText(), 15.0, 450.0)
+                        ],
+                        width: SizeMode.Fill,
+                        height: SizeMode.Hug,
+                        spacing: 10.0,
+                        padding: EdgeInsets {},
+                        crossAxisAlignment: CrossAlignment.Start
+                    )
+                ],
+                width: SizeMode.Fill,
+                height: SizeMode.Hug,
+                flex: 0,
+                fill: panelFill(active),
+                border: panelBorder(active),
+                borderWidth: 1.0,
+                radius: 18.0,
+                shape: FoundationShape.RegularRoundedRect,
+                material: FoundationMaterial.Flat,
+                effects: [],
+                padding: EdgeInsets { top: 18.0 trailing: 18.0 bottom: 18.0 leading: 18.0 },
+                clipContent: true
+            )
+        ],
+        interaction: move interaction
+    )
+}
+
+function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, hoverEnters: Int, clicks: Int, dragX: Float, dragY: Float, textValue: String) -> FoundationView {
+    let hoverButtonActive = context.hoveredKey == 1001 || context.pressedKey == 1001
+    let dragActive = context.dragging && context.dragKey == 2001
+    let textActive = context.focusedKey == 3001
+
+    let onHoverEnter: () -> Void = { in
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.hoverEnters = s.hoverEnters + 1
+        return
+    }
+    let onButtonPress: () -> Void = { in
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.clicks = s.clicks + 1
+        return
+    }
+    let onDragStart: (Float, Float) -> Void = { px, py in
+        let ignored = px + py
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.dragBaseX = s.dragX
+        s.dragBaseY = s.dragY
+        s.dragging = true
+        return
+    }
+    let onDragMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.dragX = s.dragBaseX + dx
+        s.dragY = s.dragBaseY + dy
+        return
+    }
+    let onDragEnd: (Float, Float) -> Void = { ex, ey in
+        let ignored = ex + ey
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.dragging = false
+        return
+    }
+    let onTextInput: (String) -> Void = { committed in
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.textValue = foundationConcat(s.textValue, committed)
+        return
+    }
+    let onBackspace: () -> Void = { in
+        var s = nativeRecover<ShowcaseState>(stateUser)
+        s.textValue = foundationDropLastScalar(s.textValue)
+        return
+    }
+
+    let buttonInteraction = FoundationInteraction {
+        onHoverEnter: move onHoverEnter
+        onHoverExit: foundationNoopPress
+        onDragStart: foundationNoopScroll
+        onDragMove: foundationNoopScroll
+        onDragEnd: foundationNoopScroll
+        imeEnabled: false
+    }
+    let dragInteraction = FoundationInteraction {
+        onHoverEnter: foundationNoopPress
+        onHoverExit: foundationNoopPress
+        onDragStart: move onDragStart
+        onDragMove: move onDragMove
+        onDragEnd: move onDragEnd
+        imeEnabled: false
+    }
+    let textInteraction = FoundationInteraction {
+        onHoverEnter: foundationNoopPress
+        onHoverExit: foundationNoopPress
+        onDragStart: foundationNoopScroll
+        onDragMove: foundationNoopScroll
+        onDragEnd: foundationNoopScroll
+        imeEnabled: true
+    }
+
+    let dragOffsetX = dragX < 0.0 ? 0.0 : dragX
+    let dragOffsetY = dragY < 0.0 ? 0.0 : dragY
+
+    let imePreedit = codepointsToString(context.ime.letters)
+    let imeCandidates = candidateBarText(context.ime.candidates)
+    let textLine = displayText(textValue)
+
+    // Hover button.
+    let hoverButton = InteractiveHitArea(
+        key: 1001,
+        focusable: false,
+        disabled: false,
+        onPress: move onButtonPress,
+        onTextInput: foundationNoopTextInput,
+        onTextCodepoint: foundationNoopTextCodepoint,
+        onBackspace: foundationNoopPress,
+        onSubmit: foundationNoopPress,
+        onScroll: foundationNoopScroll,
+        children: [
+            Surface(
+                children: [
+                    Column(
+                        children: [
+                            Text("HOVER + CLICK BUTTON", primaryText(), 18.0, 680.0),
+                            Text(hoverStatus(hoverEnters, clicks), secondaryText(), 15.0, 450.0)
+                        ],
+                        width: SizeMode.Fill, height: SizeMode.Hug, spacing: 10.0,
+                        padding: EdgeInsets {}, crossAxisAlignment: CrossAlignment.Start
+                    )
+                ],
+                width: SizeMode.Fill, height: SizeMode.Hug, flex: 0,
+                fill: buttonFill(context.hoveredKey == 1001, context.pressedKey == 1001),
+                border: panelBorder(hoverButtonActive), borderWidth: 1.0, radius: 18.0,
+                shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
+                effects: [], padding: EdgeInsets { top: 18.0 trailing: 18.0 bottom: 18.0 leading: 18.0 },
+                clipContent: true
+            )
+        ],
+        interaction: move buttonInteraction
+    )
+
+    // Draggable card, offset by accumulated drag translation.
+    let draggable = Frame(
+        GestureHitArea(
+            key: 2001,
+            disabled: false,
+            onPress: foundationNoopPress,
+            interaction: move dragInteraction,
+            children: [
+                Surface(
+                    children: [
+                        Text("DRAG ME", primaryText(), 17.0, 680.0)
+                    ],
+                    width: SizeMode.Fixed(220.0), height: SizeMode.Fixed(72.0), flex: 0,
+                    fill: panelFill(dragActive), border: panelBorder(dragActive), borderWidth: 1.0,
+                    radius: 16.0, shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
+                    effects: [], padding: EdgeInsets { top: 24.0 trailing: 18.0 bottom: 24.0 leading: 18.0 },
+                    clipContent: true
+                )
+            ]
+        ),
+        SizeMode.Fill,
+        SizeMode.Fixed(120.0),
+        0,
+        Alignment.TopLeading,
+        EdgeInsets { top: dragOffsetY leading: dragOffsetX trailing: 0.0 bottom: 0.0 }
+    )
+
+    // IME text field.
+    let textField = card(
+        key: 3001,
+        title: foundationConcat("INPUT: ", textLine),
+        status: statusLine(imePreedit, imeCandidates),
+        active: textActive,
+        interaction: move textInteraction,
+        focusable: true,
+        onPress: foundationNoopPress,
+        onTextInput: move onTextInput,
+        onBackspace: move onBackspace
+    )
+
+    return Surface(
+        children: [
+            Column(
+                children: [
+                    Text("FOUNDATION INPUT SHOWCASE", primaryText(), 28.0, 720.0),
+                    Text("HOVER, CLICK, DRAG, AND TYPE LATIN OR PINYIN->HANZI", accentText(), 14.0, 450.0),
+                    move hoverButton,
+                    move draggable,
+                    move textField
+                ],
+                width: SizeMode.Fill, height: SizeMode.Hug, spacing: 18.0,
+                padding: EdgeInsets {}, crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Fill, height: SizeMode.Fill, flex: 0,
+        fill: appBackground(), border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }, borderWidth: 0.0,
+        radius: 0.0, shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
+        effects: [], padding: EdgeInsets { top: 32.0 trailing: 32.0 bottom: 32.0 leading: 32.0 },
+        clipContent: true
+    )
+}
+
+@Main
+function main() {
+    let stateStorage = nativeState(ShowcaseState {})
+    let stateUser = nativeUserData(stateStorage)
+
+    RunFoundationInteractiveApp(
+        title: "Foundation Input Showcase",
+        width: 960,
+        height: 720,
+        rootBuilder: { context in
+            var state = nativeRecover<ShowcaseState>(stateUser)
+            return showcaseRoot(context, stateUser, state.hoverEnters, state.clicks, state.dragX, state.dragY, state.textValue)
+        }
+    )
+    return
+}
