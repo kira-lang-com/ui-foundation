@@ -291,45 +291,107 @@ function foundationRetainedAppendFreshNode(
     }
 }
 
-function foundationRetainedFindReusableNodeId(
+// Flat O(n) index over the previous frame's nodes. `indexById` maps a node id
+// to its slot in `previous` (id space is dense from `nextId`). The CSR triple
+// (`childStart`/`childCount`/`childList`) groups previous nodes by their
+// parentId so reconciliation matches a view child against only its parent's
+// former children instead of scanning the whole previous tree -- turning the
+// old O(n^2) reconcile into roughly O(n).
+struct FoundationRetainedPrevIndex {
+    var indexById: [Int] = []
+    var childStart: [Int] = []
+    var childCount: [Int] = []
+    var childList: [Int] = []
+}
+
+function foundationRetainedBuildPrevIndex(previous: borrow [FoundationRetainedNode], capacity: Int) -> FoundationRetainedPrevIndex {
+    var idx = FoundationRetainedPrevIndex {}
+    var slot = 0
+    while slot < capacity {
+        idx.indexById.append(-1)
+        idx.childStart.append(0)
+        idx.childCount.append(0)
+        slot = slot + 1
+    }
+    // Pass 1: record id -> slot and tally children per parent.
+    var i = 0
+    while i < previous.count {
+        let node = previous[i]
+        if node.id >= 0 && node.id < capacity {
+            idx.indexById[node.id] = i
+        }
+        if node.parentId >= 0 && node.parentId < capacity {
+            idx.childCount[node.parentId] = idx.childCount[node.parentId] + 1
+        }
+        i = i + 1
+    }
+    // Pass 2: prefix-sum the counts into per-parent start offsets.
+    var acc = 0
+    var p = 0
+    while p < capacity {
+        idx.childStart[p] = acc
+        acc = acc + idx.childCount[p]
+        p = p + 1
+    }
+    // Pass 3: scatter each previous slot into its parent's contiguous run.
+    var cursor: [Int] = []
+    p = 0
+    while p < capacity {
+        cursor.append(idx.childStart[p])
+        p = p + 1
+    }
+    i = 0
+    while i < previous.count {
+        idx.childList.append(0)
+        i = i + 1
+    }
+    i = 0
+    while i < previous.count {
+        let node = previous[i]
+        if node.parentId >= 0 && node.parentId < capacity {
+            let pos = cursor[node.parentId]
+            idx.childList[pos] = i
+            cursor[node.parentId] = pos + 1
+        }
+        i = i + 1
+    }
+    return idx
+}
+
+// Find a reusable previous node id for a view child, scanning only the former
+// children of `parentId`. Returns 0 when no compatible, not-yet-reused match
+// exists.
+function foundationRetainedMatchReusableId(
     tree: borrow FoundationRetainedTree,
+    idx: borrow FoundationRetainedPrevIndex,
+    previous: borrow [FoundationRetainedNode],
     view: borrow FoundationView,
     parentId: Int,
     childOrdinal: Int,
-    previous: borrow [FoundationRetainedNode],
 ) -> Int {
-    if view.key != 0 {
-        var keyedIndex = 0
-        while keyedIndex < previous.count {
-            let node = previous[keyedIndex]
-            if (
-                node.parentId == parentId &&
-                node.key == view.key &&
-                node.kind == view.kind &&
-                !foundationRetainedIsReused(tree, node.id)
-            ) {
-                return node.id
-            }
-            keyedIndex = keyedIndex + 1
-        }
+    if parentId < 0 || parentId >= idx.childStart.count {
         return 0
     }
-
-    var index = 0
-    while index < previous.count {
-        let node = previous[index]
-        if (
-            node.parentId == parentId &&
-            node.childOrdinal == childOrdinal &&
-            node.key == 0 &&
-            node.kind == view.kind &&
-            !foundationRetainedIsReused(tree, node.id)
-        ) {
-            return node.id
+    let start = idx.childStart[parentId]
+    let count = idx.childCount[parentId]
+    var reusableId = 0
+    var c = 0
+    while c < count {
+        let node = previous[idx.childList[start + c]]
+        if reusableId == 0 && node.kind == view.kind && !foundationRetainedIsReused(tree, node.id) {
+            if view.key != 0 {
+                if node.key == view.key {
+                    reusableId = node.id
+                }
+            } else {
+                if node.key == 0 && node.childOrdinal == childOrdinal {
+                    reusableId = node.id
+                }
+            }
         }
-        index = index + 1
+        c = c + 1
     }
-    return 0
+    return reusableId
 }
 
 function foundationRetainedReconcileNode(
@@ -338,48 +400,17 @@ function foundationRetainedReconcileNode(
     parentId: Int,
     childOrdinal: Int,
     previous: borrow [FoundationRetainedNode],
+    idx: borrow FoundationRetainedPrevIndex,
     path: borrow [Int],
 ) -> FoundationRetainedNodeResult {
     let ignored = path.count
     var next = tree
-    var reusableId = 0
-    if view.key != 0 {
-        var keyedIndex = 0
-        while keyedIndex < previous.count {
-            let candidate = previous[keyedIndex]
-            if (
-                reusableId == 0 &&
-                candidate.parentId == parentId &&
-                candidate.key == view.key &&
-                candidate.kind == view.kind &&
-                !foundationRetainedIsReused(next, candidate.id)
-            ) {
-                reusableId = candidate.id
-            }
-            keyedIndex = keyedIndex + 1
-        }
-    } else {
-        var index = 0
-        while index < previous.count {
-            let candidate = previous[index]
-            if (
-                reusableId == 0 &&
-                candidate.parentId == parentId &&
-                candidate.childOrdinal == childOrdinal &&
-                candidate.key == 0 &&
-                candidate.kind == view.kind &&
-                !foundationRetainedIsReused(next, candidate.id)
-            ) {
-                reusableId = candidate.id
-            }
-            index = index + 1
-        }
-    }
+    let reusableId = foundationRetainedMatchReusableId(next, idx, previous, view, parentId, childOrdinal)
     if reusableId == 0 {
         return foundationRetainedAppendFreshNode(move next, view, parentId, childOrdinal, path)
     } else {
         next = foundationRetainedMarkReused(move next, reusableId)
-        let previousNode = foundationRetainedNodeFromList(previous, reusableId)
+        let previousNode = previous[idx.indexById[reusableId]]
         let layoutSignature = foundationLayoutSignature(view)
         let renderSignature = foundationRenderSignature(view)
         var layoutDirty = previousNode.layoutSignature != layoutSignature
@@ -406,7 +437,7 @@ function foundationRetainedReconcileNode(
         var childIds: [Int] = []
         var childOffset = 0
         while childOffset < view.children.count {
-            let childResult = foundationRetainedReconcileNode(move next, view.children[childOffset], reusableId, childOffset, previous, foundationAppendPath(path, childOffset))
+            let childResult = foundationRetainedReconcileNode(move next, view.children[childOffset], reusableId, childOffset, previous, idx, foundationAppendPath(path, childOffset))
             next = childResult.tree
             childIds.append(childResult.nodeId)
             childOffset = childOffset + 1
@@ -476,7 +507,8 @@ function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow Fou
     next.reusedIdBits = []
     next.removedIds = []
     next.updateCount = next.updateCount + 1
-    let result = foundationRetainedReconcileNode(move next, root, 0, 0, previous, [])
+    let prevIndex = foundationRetainedBuildPrevIndex(previous, next.nextId)
+    let result = foundationRetainedReconcileNode(move next, root, 0, 0, previous, prevIndex, [])
     next = result.tree
     next.rootId = result.nodeId
     return foundationRetainedCollectRemoved(move next, previous)
@@ -551,6 +583,98 @@ function foundationRetainedNodeRenderDirty(tree: borrow FoundationRetainedTree, 
 
 function foundationRetainedWasRemoved(tree: borrow FoundationRetainedTree, nodeId: Int) -> Bool {
     return foundationIntArrayContains(tree.removedIds, nodeId)
+}
+
+// Build a Row of keyed Text children from a list of keys. Used to stress the
+// O(n) reconcile with many siblings under one parent (the case the old
+// quadratic scan and the new CSR sibling index differ on).
+function foundationRetainedKeyedRow(keys: borrow [Int]) -> FoundationView {
+    var children: [FoundationView] = []
+    var i = 0
+    while i < keys.count {
+        children.append(FoundationView {
+            kind: FoundationViewKind.Text
+            key: keys[i]
+            content: "ITEM"
+            color: foundationRetainedTestColor()
+            size: 14.0
+            weight: 400.0
+        })
+        i = i + 1
+    }
+    return Column(
+        children: move children,
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 2.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+}
+
+function foundationRetainedAllKeysStable(tree: borrow FoundationRetainedTree, keys: borrow [Int], expected: borrow [Int]) -> Bool {
+    if keys.count != expected.count {
+        return false
+    }
+    var i = 0
+    while i < keys.count {
+        if foundationRetainedNodeIdForKey(tree, keys[i]) != expected[i] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// Exercises reconcile across reorder / remove / insert with many keyed siblings.
+// Keyed nodes must keep their identity (id) regardless of position, removed keys
+// must tear down exactly once, and inserted keys must mount fresh -- proving the
+// CSR sibling index matches the previous semantics at scale.
+function FoundationRetainedReconcileScaleSmoke() -> Int {
+    var passed = 0
+
+    var tree = foundationRetainedMount(foundationRetainedKeyedRow([1, 2, 3, 4, 5]))
+    let id1 = foundationRetainedNodeIdForKey(tree, 1)
+    let id2 = foundationRetainedNodeIdForKey(tree, 2)
+    let id3 = foundationRetainedNodeIdForKey(tree, 3)
+    let id4 = foundationRetainedNodeIdForKey(tree, 4)
+    let id5 = foundationRetainedNodeIdForKey(tree, 5)
+    passed = passed + smokePass(id1 != 0 && id2 != 0 && id3 != 0 && id4 != 0 && id5 != 0)
+
+    // Reorder: every keyed child keeps its id, nothing torn down.
+    tree = foundationRetainedUpdate(move tree, foundationRetainedKeyedRow([5, 3, 1, 4, 2]))
+    passed = passed + smokePass(
+        foundationRetainedAllKeysStable(tree, [1, 2, 3, 4, 5], [id1, id2, id3, id4, id5]) &&
+        tree.teardownCount == 0 &&
+        tree.removedIds.count == 0
+    )
+
+    // Remove keys 2 and 4: exactly two teardowns, survivors keep their ids.
+    tree = foundationRetainedUpdate(move tree, foundationRetainedKeyedRow([5, 3, 1]))
+    passed = passed + smokePass(
+        foundationRetainedNodeIdForKey(tree, 1) == id1 &&
+        foundationRetainedNodeIdForKey(tree, 3) == id3 &&
+        foundationRetainedNodeIdForKey(tree, 5) == id5 &&
+        foundationRetainedNodeIdForKey(tree, 2) == 0 &&
+        foundationRetainedNodeIdForKey(tree, 4) == 0 &&
+        foundationRetainedWasRemoved(tree, id2) &&
+        foundationRetainedWasRemoved(tree, id4) &&
+        tree.removedIds.count == 2
+    )
+
+    // Insert a new key 9: survivors stable, key 9 is a fresh mount.
+    tree = foundationRetainedUpdate(move tree, foundationRetainedKeyedRow([5, 9, 3, 1]))
+    let id9 = foundationRetainedNodeIdForKey(tree, 9)
+    passed = passed + smokePass(
+        foundationRetainedNodeIdForKey(tree, 1) == id1 &&
+        foundationRetainedNodeIdForKey(tree, 3) == id3 &&
+        foundationRetainedNodeIdForKey(tree, 5) == id5 &&
+        id9 != 0 &&
+        id9 != id1 && id9 != id3 && id9 != id5 &&
+        tree.removedIds.count == 0
+    )
+
+    return passed
 }
 
 function foundationRetainedTestColor() -> Color {

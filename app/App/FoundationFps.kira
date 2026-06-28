@@ -1,0 +1,188 @@
+// Live FPS indicator for the interactive Foundation runner.
+//
+// The frame duration comes from sokol's filtered (rolling-average)
+// `sapp_frame_duration`, so the displayed number is stable rather than jittery.
+// The number is rendered as real Kira text: the integer is converted to a
+// String one digit at a time via the Foundation codepoint helper, and the badge
+// is overlaid bottom-right on top of the application's own view tree.
+
+@Native
+function rootFrameDuration() -> Float {
+    return sapp_frame_duration()
+}
+
+// Frames per second from a frame duration in seconds. Uses the `Int(...)`
+// numeric cast to round to the nearest whole frame; a non-positive duration
+// (first frame, paused) reports 0.
+function foundationFpsFromDuration(duration: Float) -> Int {
+    if duration <= 0.0 {
+        return 0
+    }
+    return Int(1.0 / duration + 0.5)
+}
+
+// Decimal digits of a non-negative integer as a Kira String. Built by appending
+// each digit's ASCII codepoint ('0' == 48) to a growing string.
+function foundationIntToString(value: Int) -> String {
+    if value <= 0 {
+        return foundationAppendCodepoint("", 48)
+    }
+    var digits: [Int] = []
+    var remaining = value
+    while remaining > 0 {
+        digits.append(48 + (remaining % 10))
+        remaining = remaining / 10
+    }
+    var text = ""
+    var index = digits.count - 1
+    while index >= 0 {
+        text = foundationAppendCodepoint(text, digits[index])
+        index = index - 1
+    }
+    return text
+}
+
+function foundationFpsBadgeFill() -> Color {
+    return Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.55
+    }
+}
+
+function foundationFpsBadgeBorder() -> Color {
+    return Color {
+        r: 1.0
+        g: 1.0
+        b: 1.0
+        a: 0.14
+    }
+}
+
+function foundationFpsTextColor() -> Color {
+    return Color {
+        r: 0.80
+        g: 1.0
+        b: 0.85
+        a: 1.0
+    }
+}
+
+// The small rounded badge holding the "<n> FPS" label.
+function foundationFpsBadge(fps: Int) -> FoundationView {
+    let label = foundationConcat(foundationIntToString(fps), " FPS")
+    return Surface(
+        children: [Text(move label, foundationFpsTextColor(), 13.0, 600.0)],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        flex: 0,
+        fill: foundationFpsBadgeFill(),
+        border: foundationFpsBadgeBorder(),
+        borderWidth: 1.0,
+        radius: 8.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {
+            top: 4.0
+            trailing: 9.0
+            bottom: 4.0
+            leading: 9.0
+        },
+        clipContent: false
+    )
+}
+
+// A fixed composed view (a full-bleed app surface + the FPS badge) used by the
+// overlay smoke so layout and path lookups see identical structure.
+function foundationFpsSmokeView() -> FoundationView {
+    let appRoot = Surface(
+        children: [],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.1 g: 0.1 b: 0.12 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+    return foundationComposeWithFps(move appRoot, 60)
+}
+
+// Proves the FPS overlay: the converted/formatted number is correct, the app
+// view still fills the whole viewport, and the badge is placed in the
+// bottom-right corner inset by the layer padding.
+function FoundationFpsOverlaySmoke() -> Int {
+    var passed = 0
+
+    // Frame-duration -> rounded FPS via the Int() cast.
+    passed = passed + smokePass(
+        foundationFpsFromDuration(1.0 / 60.0) == 60 &&
+        foundationFpsFromDuration(1.0 / 30.0) == 30 &&
+        foundationFpsFromDuration(0.0) == 0
+    )
+
+    // Int -> decimal String.
+    passed = passed + smokePass(
+        foundationIntToString(0).count == 1 &&
+        foundationIntToString(60).count == 2 &&
+        foundationIntToString(120).count == 3
+    )
+
+    let viewport = Size { width: 1280.0 height: 720.0 }
+    let laidOut = runFoundationLayout(foundationFpsSmokeView(), viewport)
+
+    // App view fills the whole surface; the FPS layer does too (transparent).
+    let appFrame = foundationFrameAtPath(foundationFpsSmokeView(), laidOut, [0])
+    passed = passed + smokePass(
+        approxEqual(appFrame.x, 0.0) &&
+        approxEqual(appFrame.y, 0.0) &&
+        approxEqual(appFrame.width, 1280.0) &&
+        approxEqual(appFrame.height, 720.0)
+    )
+
+    // Badge sits in the bottom-left corner, inset 12pt from each edge.
+    let badge = foundationFrameAtPath(foundationFpsSmokeView(), laidOut, [1, 0])
+    passed = passed + smokePass(
+        badge.width > 0.0 &&
+        badge.height > 0.0 &&
+        badge.x < 640.0 &&
+        badge.y > 360.0 &&
+        approxEqual(badge.x, 12.0) &&
+        approxEqual(badge.y + badge.height, 720.0 - 12.0)
+    )
+
+    return passed
+}
+
+// Overlay the FPS badge bottom-left on top of `root`. The badge lives inside a
+// full-size, transparent Frame so the application view keeps the whole surface
+// and the badge is inset 12pt from the bottom-left corner.
+function foundationComposeWithFps(root: FoundationView, fps: Int) -> FoundationView {
+    let fpsLayer = Frame(
+        child: foundationFpsBadge(fps),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.BottomLeading,
+        padding: EdgeInsets {
+            top: 12.0
+            trailing: 12.0
+            bottom: 12.0
+            leading: 12.0
+        }
+    )
+    return FoundationView {
+        kind: FoundationViewKind.Frame
+        width: SizeMode.Fill
+        height: SizeMode.Fill
+        alignment: Alignment.TopLeading
+        children: [move root, fpsLayer]
+    }
+}

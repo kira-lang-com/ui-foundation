@@ -53,6 +53,205 @@ function foundationFrameAtPathStep(root: borrow FoundationView, tree: borrow Lay
     return foundationFrameAtPathStep(root.children[childOffset], tree, node.firstChild + childOffset, path, pathOffset + 1)
 }
 
+function foundationIncrementalSampleView(label: String) -> FoundationView {
+    return Column(
+        children: [
+            Text("HEADER", smokeTextColor(), 20.0, 600.0),
+            Row(
+                children: [
+                    Text("LEFT", smokeTextColor(), 16.0, 400.0),
+                    Text(move label, smokeTextColor(), 16.0, 400.0)
+                ],
+                width: SizeMode.Hug,
+                height: SizeMode.Hug,
+                spacing: 8.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Start
+            )
+        ],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 10.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+}
+
+// Proves the retained incremental layout path: a repeated identical frame does
+// zero measure/place work, and a localized text change recomputes only its
+// ancestor chain while sibling subtrees are reused with pixel-identical frames.
+function FoundationIncrementalLayoutSmoke() -> Int {
+    var passed = 0
+    let viewport = Size {
+        width: 1280.0
+        height: 720.0
+    }
+    let pass = FoundationLayoutPass()
+
+    // Frame 1: cold start, full layout.
+    var tree = pass.runIncremental(root: foundationIncrementalSampleView("ALPHA"), available: viewport, cached: LayoutTree { nodes: [] })
+    let firstComputes = tree.measureComputes
+    let rootWidthFirst = layoutFrame(tree, 0).width
+
+    // Frame 2: identical view -> no recompute at all, geometry unchanged.
+    tree = pass.runIncremental(root: foundationIncrementalSampleView("ALPHA"), available: viewport, cached: move tree)
+    let headerBefore = layoutFrame(tree, 1)
+    let leftBefore = layoutFrame(tree, 3)
+    passed = passed + smokePass(
+        firstComputes > 0 &&
+        tree.measureComputes == 0 &&
+        tree.placeComputes == 0 &&
+        tree.measureSkips > 0 &&
+        tree.placeSkips > 0 &&
+        layoutFrame(tree, 0).width == rootWidthFirst
+    )
+
+    // Frame 3: change only the right-hand label. Its subtree recomputes; the
+    // header and the unchanged "LEFT" sibling are reused.
+    tree = pass.runIncremental(root: foundationIncrementalSampleView("OMEGA-LONGER-LABEL"), available: viewport, cached: move tree)
+    let headerAfter = layoutFrame(tree, 1)
+    let leftAfter = layoutFrame(tree, 3)
+    passed = passed + smokePass(
+        tree.measureComputes > 0 &&
+        tree.measureComputes < firstComputes &&
+        tree.measureSkips > 0 &&
+        headerAfter.x == headerBefore.x &&
+        headerAfter.y == headerBefore.y &&
+        headerAfter.width == headerBefore.width &&
+        headerAfter.height == headerBefore.height &&
+        leftAfter.x == leftBefore.x &&
+        leftAfter.width == leftBefore.width
+    )
+
+    // Frame 4: full-correctness guard. A from-scratch layout of the same final
+    // view must produce byte-identical geometry to the incrementally updated
+    // tree -- retention must never drift from a clean recompute.
+    let fromScratch = pass.run(root: foundationIncrementalSampleView("OMEGA-LONGER-LABEL"), available: viewport)
+    var allMatch = fromScratch.nodes.count == tree.nodes.count
+    var index = 0
+    while index < tree.nodes.count && allMatch {
+        let a = layoutFrame(tree, index)
+        let b = layoutFrame(fromScratch, index)
+        if a.x != b.x || a.y != b.y || a.width != b.width || a.height != b.height {
+            allMatch = false
+        }
+        index = index + 1
+    }
+    passed = passed + smokePass(allMatch)
+
+    return passed
+}
+
+// A Fill/flex-heavy nested view: a Fill sidebar beside a Fill content column
+// that holds a fixed-height Frame wrapping a stretched Row. This exercises the
+// flexible/placeResized path -- the cases the retained cache must never let
+// drift from a clean layout.
+function foundationIncrementalDeepView(label: String) -> FoundationView {
+    let sidebar = Frame(
+        child: Column(
+            children: [Text("NAV", smokeTextColor(), 16.0, 600.0)],
+            width: SizeMode.Fill,
+            height: SizeMode.Hug,
+            spacing: 6.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        width: SizeMode.Fixed(220.0),
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {}
+    )
+    let content = Frame(
+        child: Column(
+            children: [
+                Text("TITLE", smokeTextColor(), 28.0, 700.0),
+                Row(
+                    children: [
+                        Text("LEFT", smokeTextColor(), 16.0, 400.0),
+                        Text(move label, smokeTextColor(), 16.0, 400.0)
+                    ],
+                    width: SizeMode.Fill,
+                    height: SizeMode.Fixed(40.0),
+                    spacing: 12.0,
+                    padding: EdgeInsets {},
+                    crossAxisAlignment: CrossAlignment.Stretch
+                )
+            ],
+            width: SizeMode.Fill,
+            height: SizeMode.Hug,
+            spacing: 18.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {}
+    )
+    return Row(
+        children: [sidebar, content],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        spacing: 24.0,
+        padding: EdgeInsets {
+            top: 16.0
+            trailing: 16.0
+            bottom: 16.0
+            leading: 16.0
+        },
+        crossAxisAlignment: CrossAlignment.Stretch
+    )
+}
+
+function foundationTreesGeometryEqual(a: borrow LayoutTree, b: borrow LayoutTree) -> Bool {
+    if a.nodes.count != b.nodes.count {
+        return false
+    }
+    var i = 0
+    while i < a.nodes.count {
+        let fa = layoutFrame(a, i)
+        let fb = layoutFrame(b, i)
+        if fa.x != fb.x || fa.y != fb.y || fa.width != fb.width || fa.height != fb.height {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// Strong correctness guard for the flexible path: at every step the
+// incrementally updated tree must be geometry-identical to a from-scratch
+// layout of the same view -- through a deep leaf change and a viewport resize,
+// both of which cascade through Fill/stretch nodes.
+function FoundationIncrementalDeepSmoke() -> Int {
+    var passed = 0
+    let pass = FoundationLayoutPass()
+    let viewport = Size { width: 1280.0 height: 720.0 }
+
+    var tree = pass.runIncremental(root: foundationIncrementalDeepView("ALPHA"), available: viewport, cached: LayoutTree { nodes: [] })
+
+    // Static repeat: zero recompute, identical to from-scratch.
+    tree = pass.runIncremental(root: foundationIncrementalDeepView("ALPHA"), available: viewport, cached: move tree)
+    let scratchA = pass.run(root: foundationIncrementalDeepView("ALPHA"), available: viewport)
+    passed = passed + smokePass(tree.measureComputes == 0 && tree.placeComputes == 0 && foundationTreesGeometryEqual(tree, scratchA))
+
+    // Deep leaf change cascading through Fill/stretch ancestors.
+    tree = pass.runIncremental(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: viewport, cached: move tree)
+    let scratchB = pass.run(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: viewport)
+    passed = passed + smokePass(tree.measureSkips > 0 && foundationTreesGeometryEqual(tree, scratchB))
+
+    // Viewport resize: same descriptors, new constraints -- everything Fill
+    // must re-resolve, and the result must still match from-scratch.
+    let smaller = Size { width: 900.0 height: 500.0 }
+    tree = pass.runIncremental(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: smaller, cached: move tree)
+    let scratchC = pass.run(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: smaller)
+    passed = passed + smokePass(foundationTreesGeometryEqual(tree, scratchC))
+
+    return passed
+}
+
 function FoundationPrimitiveLayoutSmoke() -> Int {
     var passed = 0
 

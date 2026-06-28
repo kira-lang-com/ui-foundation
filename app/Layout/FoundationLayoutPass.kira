@@ -88,9 +88,44 @@ class FoundationLayoutPass {
         var tree = LayoutTree {
             nodes: collect(root)
         }
+        tree = layoutResetCounters(move tree)
         engine.measure(tree: tree, index: 0, available: available)
         engine.place(tree: tree, index: 0, origin: Point {})
         return tree
+    }
+
+    // Incremental, retained layout. Reuses the previous frame's laid-out tree
+    // when the view structure is unchanged: it patches only the descriptors that
+    // actually changed, marks exactly those nodes (and their ancestors) dirty,
+    // and lets the engine reuse cached geometry for every untouched subtree. A
+    // structural change (added/removed/reordered nodes) falls back to a full
+    // rebuild. The result is identical geometry to `run` but with the engine's
+    // measure/place skip counters reflecting the avoided work.
+    function runIncremental(root: borrow FoundationView, available: borrow Size, cached: LayoutTree) -> LayoutTree {
+        var fresh = LayoutTree {
+            nodes: collect(root)
+        }
+        if !layoutStructureMatches(fresh, cached) {
+            fresh = layoutResetCounters(move fresh)
+            engine.measure(tree: fresh, index: 0, available: available)
+            engine.place(tree: fresh, index: 0, origin: Point {})
+            return fresh
+        }
+
+        var result = cached
+        var changed: [Bool] = []
+        var index = 0
+        while index < result.nodes.count {
+            let same = layoutDescriptorEqual(result.nodes[index].descriptor, fresh.nodes[index].descriptor)
+            changed.append(!same)
+            result.nodes[index].descriptor = fresh.nodes[index].descriptor
+            index = index + 1
+        }
+        result = layoutPropagateDirty(move result, changed)
+        result = layoutResetCounters(move result)
+        engine.measure(tree: result, index: 0, available: available)
+        engine.place(tree: result, index: 0, origin: Point {})
+        return result
     }
 
     function collect(root: borrow FoundationView) -> [LayoutNode] {

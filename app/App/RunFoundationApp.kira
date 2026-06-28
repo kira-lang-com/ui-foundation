@@ -152,7 +152,12 @@ function RunFoundationInteractiveApp(
             }
         }
         let build = rootBuilder
-        let root = build(state.ui)
+        let appRoot = build(state.ui)
+        // Overlay a live FPS indicator bottom-right. The composed tree is what
+        // the retained tree, layout, and render all operate on; only the FPS
+        // badge changes each frame, so the incremental layout keeps the
+        // application's own subtree cached.
+        let root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(rootFrameDuration()))
 
         let encoder = frame.beginPass(Color {
             r: 0.96
@@ -178,14 +183,16 @@ function RunFoundationInteractiveApp(
             state.announcedRetainedTree = true
         }
 
-        let needsLayout = state.frameCount == 0 || state.retainedTree.layoutInvalidations > 0
-        var laidOut: LayoutTree
-        if needsLayout {
-            laidOut = FoundationLayoutPass().run(root: root, available: viewport)
-            state.cachedLayoutTree = laidOut
-        } else {
-            laidOut = state.cachedLayoutTree
-        }
+        // Retained, incremental layout: reuse the previous frame's laid-out
+        // tree and recompute only the subtrees whose descriptors actually
+        // changed (or whose offered size changed). A static frame does no
+        // measure/place work; a localized change touches only its ancestor
+        // chain. This replaces the previous all-or-nothing gate, which either
+        // reused the entire cached tree or rebuilt it from scratch and could go
+        // stale when a layout-affecting field changed without moving the lossy
+        // invalidation signature.
+        let laidOut = FoundationLayoutPass().runIncremental(root: root, available: viewport, cached: state.cachedLayoutTree)
+        state.cachedLayoutTree = laidOut
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()
@@ -250,14 +257,16 @@ function RunFoundationApp(root: FoundationView) {
             state.announcedTree = true
         }
 
-        let laidOut = FoundationLayoutPass().run(root: state.root, available: viewport)
+        // Overlay a live FPS indicator bottom-right on top of the app view.
+        let composed = foundationComposeWithFps(state.root, foundationFpsFromDuration(rootFrameDuration()))
+        let laidOut = FoundationLayoutPass().run(root: composed, available: viewport)
         if foundationLayoutHasNonEmptyFrame(laidOut) && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()
             state.announcedLayout = true
         }
 
         backend.beginFrame(rootViewportWidth(), rootViewportHeight())
-        let renderCount = foundationRender(state.root, laidOut, backend)
+        let renderCount = foundationRender(composed, laidOut, backend)
         state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
