@@ -36,6 +36,7 @@ static_lib = "../generated/native/x86_64-linux-gnu/libkiratext.a"
 
 [target.aarch64-macos-none]
 static_lib = "../generated/native/aarch64-macos/libkiratext.a"
+system_libs = ["c++"]
 
 [target.aarch64-ios-none]
 static_lib = "../generated/native/aarch64-ios/libkiratext.a"
