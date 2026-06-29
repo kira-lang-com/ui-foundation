@@ -4,12 +4,14 @@ function foundationRender(root: borrow FoundationView, tree: borrow LayoutTree, 
 }
 
 function foundationRenderChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
-    let node = tree.nodes[nodeIndex]
+    // Read only the scalar we need through the array (borrow-elided) instead of
+    // cloning the whole ~40-field node per rendered container.
+    let firstChild = tree.nodes[nodeIndex].firstChild
     var current = backend
     var rendered = 0
     var childOffset = 0
     while childOffset < view.children.count {
-        rendered = rendered + foundationRenderView(view.children[childOffset], tree, node.firstChild + childOffset, current)
+        rendered = rendered + foundationRenderView(view.children[childOffset], tree, firstChild + childOffset, current)
         childOffset = childOffset + 1
     }
     return rendered

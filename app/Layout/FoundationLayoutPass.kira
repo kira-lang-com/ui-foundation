@@ -135,7 +135,10 @@ class FoundationLayoutPass {
     // `run` at the same viewport (guarded by FoundationResizeLayoutSmoke); the win
     // is avoiding the full fresh `[LayoutNode]` allocation and the tree copy every
     // resize frame.
-    function relayout(tree: LayoutTree, available: borrow Size) -> LayoutTree {
+    function relayout(tree: borrow mut LayoutTree, available: borrow Size) {
+        // Mutate the retained tree in place. Taking it by `borrow mut` (rather than
+        // by value) avoids deep-copying the entire `nodes` + `descriptors` arrays —
+        // hundreds of LayoutNode/LayoutDescriptor clones — on every resize frame.
         var t = tree
         t.measureComputes = 0
         t.measureSkips = 0
@@ -143,7 +146,7 @@ class FoundationLayoutPass {
         t.placeSkips = 0
         engine.measure(tree: t, index: 0, available: available)
         engine.place(tree: t, index: 0, origin: Point {})
-        return t
+        return
     }
 
 }

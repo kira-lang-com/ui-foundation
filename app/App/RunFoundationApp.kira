@@ -521,7 +521,7 @@ function RunFoundationApp(root: FoundationView) {
             state.cachedLayoutTree = FoundationLayoutPass().run(root: state.root, available: viewport)
             state.hasAppLayout = true
         } else {
-            state.cachedLayoutTree = FoundationLayoutPass().relayout(state.cachedLayoutTree, viewport)
+            FoundationLayoutPass().relayout(state.cachedLayoutTree, viewport)
         }
         if foundationLayoutHasNonEmptyFrame(state.cachedLayoutTree) && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()
