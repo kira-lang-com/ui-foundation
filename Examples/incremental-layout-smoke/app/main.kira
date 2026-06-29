@@ -2,6 +2,6 @@ import KiraUIFoundation
 
 @Main
 function main() {
-    print(FoundationIncrementalLayoutSmoke() + FoundationIncrementalDeepSmoke())
+    print(FoundationIncrementalLayoutSmoke() + FoundationIncrementalDeepSmoke() + FoundationResizeLayoutSmoke())
     return
 }

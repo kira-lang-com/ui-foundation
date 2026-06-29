@@ -161,6 +161,26 @@ function FoundationFpsOverlaySmoke() -> Int {
     return passed
 }
 
+// The FPS badge wrapped in a full-size, transparent Frame that pins it to the
+// bottom-left corner (inset 12pt). Rendered as a standalone overlay on top of the
+// application view at the same viewport, so the badge can be re-rendered each frame
+// without recomposing — and without cloning — the whole application tree.
+function foundationFpsOverlay(fps: Int) -> FoundationView {
+    return Frame(
+        child: foundationFpsBadge(fps),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.BottomLeading,
+        padding: EdgeInsets {
+            top: 12.0
+            trailing: 12.0
+            bottom: 12.0
+            leading: 12.0
+        }
+    )
+}
+
 // Overlay the FPS badge bottom-left on top of `root`. The badge lives inside a
 // full-size, transparent Frame so the application view keeps the whole surface
 // and the badge is inset 12pt from the bottom-left corner.

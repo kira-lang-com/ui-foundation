@@ -134,4 +134,25 @@ class FoundationLayoutPass {
         return nodes
     }
 
+    // Re-resolve geometry for an already-built tree against a new available size,
+    // in place. Used for the resize path: the view tree (and therefore the tree's
+    // structure and every descriptor) is unchanged, only the offered size differs,
+    // so there is no need to rebuild the node list (`collect`) or compare/patch
+    // descriptors — just re-measure and re-place. The engine's offer-based skip
+    // keeps subtrees whose resolved constraints did not change, so a resize touches
+    // only the nodes that actually move. Geometry is identical to a from-scratch
+    // `run` at the same viewport (guarded by FoundationResizeLayoutSmoke); the win
+    // is avoiding the full fresh `[LayoutNode]` allocation and the tree copy every
+    // resize frame.
+    function relayout(tree: LayoutTree, available: borrow Size) -> LayoutTree {
+        var t = tree
+        t.measureComputes = 0
+        t.measureSkips = 0
+        t.placeComputes = 0
+        t.placeSkips = 0
+        engine.measure(tree: t, index: 0, available: available)
+        engine.place(tree: t, index: 0, origin: Point {})
+        return t
+    }
+
 }

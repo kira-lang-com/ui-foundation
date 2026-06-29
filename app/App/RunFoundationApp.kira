@@ -52,6 +52,22 @@ struct FoundationAppState {
     var lastPresentedViewportW: Int = -1
     var lastPresentedViewportH: Int = -1
     var hasPresentedFrame: Bool = false
+    // Displayed FPS, derived ONLY from re-presented (skipped) frames. A re-present
+    // is GPU/vsync-paced, so its frame duration reflects the true steady cadence; a
+    // rebuild frame is much slower (it does the full tree/layout/render work) and its
+    // duration would read as a low FPS. Feeding the badge from rebuild frames created
+    // a feedback loop: a rebuild -> long duration -> low FPS -> badge changes -> the
+    // next frame must rebuild again, pinning the dashboard at the rebuild rate (the
+    // ~8 FPS flicker observed on screen). Updating the badge only from clean
+    // re-present frames keeps it stable, so a static dashboard keeps re-presenting and
+    // a genuine rate change costs a single rebuild to refresh the number.
+    var displayedFps: Int = 60
+    // Whether `cachedLayoutTree` holds a built layout for `root`. The application
+    // tree is static, so after the first full layout every later frame re-measures
+    // the cached tree in place against the current viewport (a resize) instead of
+    // collecting a fresh node list. The FPS badge is laid out and drawn as a separate
+    // overlay, so `root` is never recomposed or cloned — it is rendered by borrow.
+    var hasAppLayout: Bool = false
 }
 
 // Decide whether the current frame can re-present the retained UiBatch instead of
@@ -432,21 +448,19 @@ function RunFoundationApp(root: FoundationView) {
             batchPtr = state.uiBatchPtr
         }
 
-        let fps = foundationFpsFromDuration(foundationFrameDuration(frame, metalActive))
+        let rawFps = foundationFpsFromDuration(foundationFrameDuration(frame, metalActive))
 
-        // Damage-skip: re-present the retained batch when nothing visible changed.
-        // The dashboard is static, so the only per-frame variation is the FPS badge
-        // (an integer, stable at steady frame rate) and the viewport (resize). When
-        // both match the last presented frame, the previous frame's vertex/index
-        // buffers still describe the exact pixels to draw, so a single re-flush to
-        // this frame's encoder reproduces them without cloning the tree, running
-        // layout, or regenerating any quad. Hit regions persist in state, so input
-        // keeps working across skipped frames.
+        // Re-present fast path: the displayed FPS (`state.displayedFps`, the value
+        // actually drawn into the retained batch is `state.lastPresentedFps`) and the
+        // viewport both match what was last drawn, so the retained vertex/index
+        // buffers already describe this frame's pixels. Re-flush them to this frame's
+        // encoder — no tree clone, no layout, no quad regeneration. Hit regions
+        // persist in state, so input keeps working across re-presented frames.
         if foundationShouldRepresent(
             state.hasPresentedFrame,
             metalActive,
             state.uiBatchReady,
-            fps,
+            state.displayedFps,
             state.lastPresentedFps,
             vpW,
             state.lastPresentedViewportW,
@@ -461,6 +475,12 @@ function RunFoundationApp(root: FoundationView) {
             })
             uiBatchFlush(state.uiBatchPtr, graphics, skipEncoder)
             frame.endPass()
+            // This frame was GPU/vsync-paced, so its duration reflects the true
+            // cadence: refresh the desired FPS from it. `lastPresentedFps` (the value
+            // currently drawn) is left untouched, so if the cadence genuinely shifted
+            // the next frame rebuilds exactly once to redraw the badge; otherwise it
+            // keeps re-presenting.
+            state.displayedFps = rawFps
             state.frameCount = state.frameCount + 1
             state.ui.clickedKey = 0
             state.ui.scrollX = 0.0
@@ -488,16 +508,33 @@ function RunFoundationApp(root: FoundationView) {
             state.announcedTree = true
         }
 
-        // Overlay a live FPS indicator bottom-right on top of the app view.
-        let composed = foundationComposeWithFps(state.root, fps)
-        let laidOut = FoundationLayoutPass().run(root: composed, available: viewport)
-        if foundationLayoutHasNonEmptyFrame(laidOut) && !state.announcedLayout {
+        // Rebuild path. The composed tree (app view + FPS badge) is cached and depends
+        // only on the displayed FPS: rebuild it (and run a full layout) when the badge
+        // value changed or no cache exists; otherwise — a resize, where only the
+        // viewport differs — reuse the cached tree and re-measure the cached layout in
+        // place, avoiding the per-frame tree clone and the fresh node collection.
+        // Lay out the application tree. It is rendered directly by borrow (never
+        // cloned or recomposed), and its structure is constant, so the first frame
+        // runs a full layout and every later frame re-measures the cached tree in
+        // place for the current viewport — a resize avoids the fresh node collection.
+        if !state.hasAppLayout {
+            state.cachedLayoutTree = FoundationLayoutPass().run(root: state.root, available: viewport)
+            state.hasAppLayout = true
+        } else {
+            state.cachedLayoutTree = FoundationLayoutPass().relayout(state.cachedLayoutTree, viewport)
+        }
+        if foundationLayoutHasNonEmptyFrame(state.cachedLayoutTree) && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()
             state.announcedLayout = true
         }
 
         backend.beginFrame(vpW, vpH)
-        let renderCount = foundationRender(composed, laidOut, backend)
+        let appRendered = foundationRender(state.root, state.cachedLayoutTree, backend)
+        // FPS badge: a tiny standalone overlay laid out and drawn on top of the app
+        // each rebuilt frame, so the badge value updates without recomposing the tree.
+        let overlay = foundationFpsOverlay(state.displayedFps)
+        let overlayLayout = FoundationLayoutPass().run(root: overlay, available: viewport)
+        let renderCount = appRendered + foundationRender(overlay, overlayLayout, backend)
         state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
@@ -509,7 +546,7 @@ function RunFoundationApp(root: FoundationView) {
         frame.endPass()
         backend.submit()
         if metalActive {
-            state.lastPresentedFps = fps
+            state.lastPresentedFps = state.displayedFps
             state.lastPresentedViewportW = vpW
             state.lastPresentedViewportH = vpH
             state.hasPresentedFrame = true
