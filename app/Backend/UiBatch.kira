@@ -1,0 +1,643 @@
+// Batched UI compositor — the retained replacement for the immediate-mode draw
+// helpers (kgUiDrawSurface / kira_text_draw_run). Every primitive the UI Foundation
+// renders (rounded-rect / squircle surfaces with borders, and text) is accumulated
+// into one CPU vertex stream and submitted as a SINGLE indexed draw per frame through
+// the Kira Graphics public abstraction — so it runs on any backend that implements
+// that abstraction (today the from-scratch, no-shim Metal path). Rounded shapes are
+// signed-distance-field rasterized in the fragment shader; glyphs are rasterized by
+// the real font engine into a Kira Graphics atlas texture and drawn as textured quads.
+// Nothing here is a host shim: resource creation, uploads and draws all go through
+// Kira + FFI.
+//
+// The persistent state (GPU resource ids, glyph atlas + cache, the CPU vertex stream)
+// lives in a UiBatchState behind a nativeState handle. Per-frame operations take that
+// RawPtr handle and recover the state inside, mutating fields directly — the same
+// handle/recover discipline the Metal context uses, so it survives the begin/draw/end
+// seam identically on the native and hybrid backends.
+//
+// Vertex layout (23 f32, tightly packed; matches the MSL `UiVertex` struct):
+//   posX posY  pxX pxY  localX localY  halfW halfH  radius borderWidth  mode
+//   fillR fillG fillB fillA  borderR borderG borderB borderA  clipMinX clipMinY clipMaxX clipMaxY
+// `mode` 0 = SDF surface (local = pixel offset from centre), 1 = glyph (local = uv).
+
+function uiBatchFloatsPerVertex() -> Int { return 23 }
+function uiBatchVertsPerQuad() -> Int { return 4 }
+function uiBatchCapacityQuads() -> Int { return 16384 }
+function uiBatchAtlasSize() -> Int { return 1024 }
+
+struct UiGlyphSlot {
+    var key: Int = 0
+    var atlasX: Int = 0
+    var atlasY: Int = 0
+    var w: Int = 0
+    var h: Int = 0
+    var bearingX: Int = 0
+    var bearingY: Int = 0
+    var advance: Float = 0.0
+    var valid: Bool = false
+}
+
+struct UiBatchState {
+    var pipelineId: U32 = 0
+    var vertexBufferId: U32 = 0
+    var indexBufferId: U32 = 0
+    var atlasTextureId: U32 = 0
+    var samplerId: U32 = 0
+    var bindGroupId: U32 = 0
+
+    var atlasW: Int = 0
+    var atlasH: Int = 0
+    var cursorX: Int = 0
+    var cursorY: Int = 0
+    var rowHeight: Int = 0
+    var glyphs: [UiGlyphSlot] = []
+
+    var engine: RawPtr
+    var face: RawPtr
+    var fontReady: Bool = false
+    var fontSizeSet: Int = 0
+    var ascender: Float = 0.0
+    var descender: Float = 0.0
+
+    var verts: [Float] = []
+    var quadCount: Int = 0
+    var viewportW: Float = 1.0
+    var viewportH: Float = 1.0
+}
+
+// The single shader (MSL) the compositor pipeline runs: an SDF rounded-rect/border
+// pass plus an atlas-glyph sampling pass, selected per vertex by `mode`. Outputs
+// premultiplied alpha (the pipeline blends One, OneMinusSourceAlpha).
+function uiBatchMslSource() -> String {
+    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
+}
+
+function uiBatchQuadIndices(quadCount: Int) -> [Int] {
+    var indices: [Int] = []
+    var q = 0
+    while q < quadCount {
+        let base = q * 4
+        indices.append(base + 0)
+        indices.append(base + 1)
+        indices.append(base + 2)
+        indices.append(base + 0)
+        indices.append(base + 2)
+        indices.append(base + 3)
+        q = q + 1
+    }
+    return indices
+}
+
+// A candidate font path list; the first that loads wins. The font engine has no
+// auto-discovery for face_load, so a concrete system face is needed.
+function uiBatchFontCandidates() -> [String] {
+    return [
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf"
+    ]
+}
+
+// Load the font into a freshly-built (local) state. Safe to take borrow mut here: the
+// state is a local value during creation, not yet behind a nativeState handle.
+@Native
+function uiBatchStateLoadFont(state: borrow mut UiBatchState) {
+    let engine = uiTextEngineCreate()
+    state.engine = engine
+    if uiPtrIsNull(engine) {
+        state.fontReady = false
+        return
+    }
+    let candidates = uiBatchFontCandidates()
+    var i = 0
+    while i < candidates.count {
+        let face = uiTextFaceLoad(engine, candidates[i], 0)
+        if !uiPtrIsNull(face) {
+            state.face = face
+            state.fontReady = true
+            return
+        }
+        i = i + 1
+    }
+    state.fontReady = false
+    return
+}
+
+// Create the compositor's persistent GPU resources and font, store the state behind a
+// nativeState handle, and return that handle.
+@Native
+function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
+    var state = UiBatchState {
+        engine: uiNullPtr()
+        face: uiNullPtr()
+    }
+
+    let shader = graphics.createShader(ShaderDescriptor {
+        label: "kira-ui-batch"
+        vertexSource: uiBatchMslSource()
+        fragmentSource: ""
+        vertexPath: ""
+        fragmentPath: ""
+    })
+    let pipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-batch-pipeline"
+        shader: shader
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    enabled: true
+                    preset: blendPresetPremultipliedAlpha()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.pipelineId = pipeline.id
+
+    let floatCapacity = uiBatchCapacityQuads() * uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
+    let vbuf = graphics.createDynamicBuffer(floatCapacity)
+    state.vertexBufferId = vbuf.id
+
+    let ibuf = graphics.createIndexBuffer(IndexBufferDescriptor {
+        label: "kira-ui-batch-indices"
+        usage: bufferUsageIndex()
+        data: uiBatchQuadIndices(uiBatchCapacityQuads())
+    })
+    state.indexBufferId = ibuf.id
+
+    let atlasSize = uiBatchAtlasSize()
+    let atlas = graphics.createTexture(TextureDescriptor {
+        label: "kira-ui-glyph-atlas"
+        width: atlasSize
+        height: atlasSize
+        format: textureFormatRgba8Unorm()
+        usage: textureUsageSampled()
+        sampleCount: 1
+        storageMode: 0
+    })
+    state.atlasTextureId = atlas.id
+    state.atlasW = atlasSize
+    state.atlasH = atlasSize
+    state.cursorX = 1
+    state.cursorY = 1
+    state.rowHeight = 0
+
+    let sampler = graphics.createSampler(SamplerDescriptor {
+        label: "kira-ui-glyph-sampler"
+        minFilter: textureFilterLinear()
+        magFilter: textureFilterLinear()
+        addressModeU: textureAddressModeClampToEdge()
+        addressModeV: textureAddressModeClampToEdge()
+    })
+    state.samplerId = sampler.id
+
+    let bindGroup = graphics.createTextureSamplerBindGroup("kira-ui-batch-bind", 0, atlas, 0, sampler)
+    state.bindGroupId = bindGroup.id
+
+    uiBatchStateLoadFont(state)
+
+    let storage = nativeState(state)
+    return nativeUserData(storage)
+}
+
+// Start a frame: clear the CPU vertex stream and record the viewport (pixel) size.
+@Native
+function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    state.verts = []
+    state.quadCount = 0
+    state.viewportW = viewportW
+    if viewportW <= 0.0 {
+        state.viewportW = 1.0
+    }
+    state.viewportH = viewportH
+    if viewportH <= 0.0 {
+        state.viewportH = 1.0
+    }
+    return
+}
+
+// Append one quad (4 vertices) to the stream. (px0,py0)-(px1,py1) is the pixel-space
+// rectangle; (lx0,ly0)-(lx1,ly1) is the per-corner local value (SDF offset, or uv for
+// glyphs). The other attributes are constant across the quad's vertices.
+@Native
+function uiBatchEmitQuad(
+    batchPtr: RawPtr,
+    px0: Float, py0: Float, px1: Float, py1: Float,
+    lx0: Float, ly0: Float, lx1: Float, ly1: Float,
+    halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+    fr: Float, fg: Float, fb: Float, fa: Float,
+    br: Float, bg: Float, bb: Float, ba: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if state.quadCount >= uiBatchCapacityQuads() {
+        return
+    }
+    let vw = state.viewportW
+    let vh = state.viewportH
+    let pxs = [px0, px1, px1, px0]
+    let pys = [py0, py0, py1, py1]
+    let lxs = [lx0, lx1, lx1, lx0]
+    let lys = [ly0, ly0, ly1, ly1]
+    var c = 0
+    while c < 4 {
+        let px = pxs[c]
+        let py = pys[c]
+        state.verts.append(px / vw * 2.0 - 1.0)
+        state.verts.append(1.0 - py / vh * 2.0)
+        state.verts.append(px)
+        state.verts.append(py)
+        state.verts.append(lxs[c])
+        state.verts.append(lys[c])
+        state.verts.append(halfW)
+        state.verts.append(halfH)
+        state.verts.append(radius)
+        state.verts.append(borderWidth)
+        state.verts.append(mode)
+        state.verts.append(fr)
+        state.verts.append(fg)
+        state.verts.append(fb)
+        state.verts.append(fa)
+        state.verts.append(br)
+        state.verts.append(bg)
+        state.verts.append(bb)
+        state.verts.append(ba)
+        state.verts.append(clipMinX)
+        state.verts.append(clipMinY)
+        state.verts.append(clipMaxX)
+        state.verts.append(clipMaxY)
+        c = c + 1
+    }
+    state.quadCount = state.quadCount + 1
+    return
+}
+
+// Push a rounded-rect / squircle surface with an optional border. The quad is padded
+// by 1px so the SDF anti-aliasing band at the edge is not clipped.
+@Native
+function uiBatchPushRect(
+    batchPtr: RawPtr,
+    x: Float, y: Float, w: Float, h: Float,
+    fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return
+    }
+    let pad = 1.0
+    let halfW = w / 2.0
+    let halfH = h / 2.0
+    let cx = x + halfW
+    let cy = y + halfH
+    let lhx = halfW + pad
+    let lhy = halfH + pad
+    var clampedRadius = radius
+    if clampedRadius > halfW {
+        clampedRadius = halfW
+    }
+    if clampedRadius > halfH {
+        clampedRadius = halfH
+    }
+    uiBatchEmitQuad(
+        batchPtr,
+        cx - lhx, cy - lhy, cx + lhx, cy + lhy,
+        0.0 - lhx, 0.0 - lhy, lhx, lhy,
+        halfW, halfH, clampedRadius, borderWidth, 0.0,
+        fill.r, fill.g, fill.b, fill.a,
+        border.r, border.g, border.b, border.a,
+        clipMinX, clipMinY, clipMaxX, clipMaxY
+    )
+    return
+}
+
+// 2^n for any integer n (the only non-trivial part of IEEE-754 float reconstruction;
+// exponents for glyph advances / metrics are small).
+function uiPow2(n: Int) -> Float {
+    var r = 1.0
+    var k = n
+    while k > 0 {
+        r = r * 2.0
+        k = k - 1
+    }
+    while k < 0 {
+        r = r / 2.0
+        k = k + 1
+    }
+    return r
+}
+
+// Decode an IEEE-754 single-precision bit pattern (read as u32) into a Kira Float.
+// Used because F32-return FFI does not lower; the engine's 32-bit float fields are
+// read as u32 and reconstructed here with integer arithmetic only.
+function uiF32FromBits(bits: U32) -> Float {
+    let b = Int(bits)
+    let sign = b / 2147483648
+    let rem = b % 2147483648
+    let exp = rem / 8388608
+    let mant = rem % 8388608
+    if exp == 0 {
+        return 0.0
+    }
+    if exp == 255 {
+        return 0.0
+    }
+    let frac = 1.0 + Float(mant) / 8388608.0
+    var value = frac * uiPow2(exp - 127)
+    if sign == 1 {
+        value = 0.0 - value
+    }
+    return value
+}
+
+@Native
+function uiMemReadFloat(ptr: RawPtr, offset: U64) -> Float {
+    return uiF32FromBits(uiMemReadU32(ptr, offset))
+}
+
+// Read a signed 32-bit int field as u32 and sign-correct (I32-return FFI does not
+// lower).
+@Native
+function uiMemReadInt(ptr: RawPtr, offset: U64) -> Int {
+    let raw = Int(uiMemReadU32(ptr, offset))
+    if raw >= 2147483648 {
+        return raw - 4294967296
+    }
+    return raw
+}
+
+// Read a single coverage byte. The 1-byte field is read through a u32 load (U8-return
+// FFI is not known to lower) and masked to its low 8 bits.
+@Native
+function uiMemReadByte(ptr: RawPtr, offset: U64) -> Int {
+    return Int(uiMemReadU32(ptr, offset)) % 256
+}
+
+function uiBatchSizeKey(sizePx: Float) -> Int {
+    var s = Int(sizePx)
+    if s < 1 {
+        s = 1
+    }
+    return s
+}
+
+function uiBatchGlyphCacheKey(codepoint: Int, sizeKey: Int) -> Int {
+    return codepoint * 1024 + sizeKey
+}
+
+// Ensure the face's working size matches sizeKey (caching the size's vertical
+// metrics). Returns false if no font is available.
+@Native
+function uiBatchSetSize(batchPtr: RawPtr, sizeKey: Int) -> Bool {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if !state.fontReady {
+        return false
+    }
+    if state.fontSizeSet == sizeKey {
+        return true
+    }
+    let pixelSize = Float(sizeKey)
+    let applied = uiTextFaceSetPixelSize(state.face, pixelSize)
+    if applied == 0 {
+        return false
+    }
+    let m = uiMemAlloc(uiVMetricsSize())
+    uiTextFaceVMetrics(state.face, m)
+    state.ascender = uiMemReadFloat(m, 0)
+    state.descender = uiMemReadFloat(m, 4)
+    uiMemFree(m)
+    state.fontSizeSet = sizeKey
+    return true
+}
+
+@Native
+function uiBatchAscender(batchPtr: RawPtr) -> Float {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.ascender
+}
+
+@Native
+function uiBatchDescender(batchPtr: RawPtr) -> Float {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.descender
+}
+
+// Rasterize a glyph (if not already cached), pack its coverage into the atlas, and
+// return the cache slot index (-1 if it could not be produced).
+@Native
+function uiBatchEnsureGlyph(batchPtr: RawPtr, graphics: borrow Graphics, codepoint: Int, sizeKey: Int) -> Int {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    let key = uiBatchGlyphCacheKey(codepoint, sizeKey)
+    var existing = 0
+    while existing < state.glyphs.count {
+        if state.glyphs[existing].key == key {
+            return existing
+        }
+        existing = existing + 1
+    }
+
+    let glyphIndex = uiTextFaceGlyphIndex(state.face, codepoint)
+    let bm = uiMemAlloc(uiGlyphBitmapSize())
+    let rendered = uiTextFaceRenderGlyph(state.face, glyphIndex, bm)
+    if rendered == 0 {
+        uiMemFree(bm)
+        return -1
+    }
+    let gw = uiMemReadInt(bm, uiGlyphOffWidth())
+    let gh = uiMemReadInt(bm, uiGlyphOffRows())
+    let bearingX = uiMemReadInt(bm, uiGlyphOffBearingX())
+    let bearingY = uiMemReadInt(bm, uiGlyphOffBearingY())
+    let advance = uiMemReadFloat(bm, uiGlyphOffAdvance())
+    let pitch = uiMemReadInt(bm, uiGlyphOffPitch())
+    let buffer = uiMemReadPtr(bm, uiGlyphOffBuffer())
+
+    var slot = UiGlyphSlot {
+        key: key
+        advance: advance
+        bearingX: bearingX
+        bearingY: bearingY
+        w: gw
+        h: gh
+        valid: true
+    }
+
+    if gw > 0 && gh > 0 && !uiPtrIsNull(buffer) {
+        if state.cursorX + gw + 1 > state.atlasW {
+            state.cursorX = 1
+            state.cursorY = state.cursorY + state.rowHeight + 1
+            state.rowHeight = 0
+        }
+        if state.cursorY + gh + 1 <= state.atlasH {
+            slot.atlasX = state.cursorX
+            slot.atlasY = state.cursorY
+            var pixels: [Int] = []
+            var row = 0
+            while row < gh {
+                var col = 0
+                while col < gw {
+                    let cov = uiMemReadByte(buffer, row * pitch + col)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    col = col + 1
+                }
+                row = row + 1
+            }
+            graphics.updateTextureRegion(GraphicsTexture {
+                handle: BackendTextureHandle {
+                    id: state.atlasTextureId
+                }
+                id: state.atlasTextureId
+            }, slot.atlasX, slot.atlasY, gw, gh, pixels)
+            state.cursorX = state.cursorX + gw + 1
+            if gh > state.rowHeight {
+                state.rowHeight = gh
+            }
+        } else {
+            slot.valid = false
+        }
+    }
+
+    uiMemFree(bm)
+    state.glyphs.append(move slot)
+    return state.glyphs.count - 1
+}
+
+@Native
+function uiBatchGlyphSlot(batchPtr: RawPtr, index: Int) -> UiGlyphSlot {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if index < 0 || index >= state.glyphs.count {
+        return UiGlyphSlot {}
+    }
+    return state.glyphs[index]
+}
+
+// Lay out and append a UTF-8 string left-to-right, vertically centred in the
+// (x,y,w,h) box. Each glyph is a textured quad sampling its atlas coverage.
+@Native
+function uiBatchPushText(
+    batchPtr: RawPtr,
+    graphics: borrow Graphics,
+    content: borrow String,
+    x: Float, y: Float, w: Float, h: Float,
+    color: borrow Color, sizePx: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    let sizeKey = uiBatchSizeKey(sizePx)
+    if !uiBatchSetSize(batchPtr, sizeKey) {
+        return
+    }
+    let ascender = uiBatchAscender(batchPtr)
+    let descender = uiBatchDescender(batchPtr)
+    let baseline = y + (h - (ascender + descender)) / 2.0 + ascender
+    var penX = x
+
+    let indexSlot = uiMemAlloc(8)
+    let cpSlot = uiMemAlloc(8)
+    uiMemWriteU32(indexSlot, 0, 0)
+    uiMemWriteU32(cpSlot, 0, 0)
+    var guard = 0
+    var more = true
+    while more && guard < 4096 {
+        let produced = uiTextUtf8Next(content, 1000000, indexSlot, cpSlot)
+        if produced == 0 {
+            more = false
+        } else {
+            let codepoint = Int(uiMemReadU32(cpSlot, 0))
+            if codepoint == 0 {
+                more = false
+            } else {
+                let slotIdx = uiBatchEnsureGlyph(batchPtr, graphics, codepoint, sizeKey)
+                if slotIdx >= 0 {
+                    let slot = uiBatchGlyphSlot(batchPtr, slotIdx)
+                    if slot.valid && slot.w > 0 && slot.h > 0 {
+                        let gx = penX + Float(slot.bearingX)
+                        let gy = baseline - Float(slot.bearingY)
+                        let gw = Float(slot.w)
+                        let gh = Float(slot.h)
+                        let atlasW = Float(uiBatchAtlasSize())
+                        let u0 = Float(slot.atlasX) / atlasW
+                        let v0 = Float(slot.atlasY) / atlasW
+                        let u1 = Float(slot.atlasX + slot.w) / atlasW
+                        let v1 = Float(slot.atlasY + slot.h) / atlasW
+                        uiBatchEmitQuad(
+                            batchPtr,
+                            gx, gy, gx + gw, gy + gh,
+                            u0, v0, u1, v1,
+                            0.0, 0.0, 0.0, 0.0, 1.0,
+                            color.r, color.g, color.b, color.a,
+                            0.0, 0.0, 0.0, 0.0,
+                            clipMinX, clipMinY, clipMaxX, clipMaxY
+                        )
+                    }
+                    penX = penX + slot.advance
+                }
+            }
+        }
+        guard = guard + 1
+    }
+    uiMemFree(indexSlot)
+    uiMemFree(cpSlot)
+    return
+}
+
+// Upload the frame's vertex stream and submit the whole UI as one indexed draw on the
+// active render-pass encoder.
+@Native
+function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if state.quadCount <= 0 {
+        return
+    }
+    let vbuf = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.vertexBufferId
+        }
+        id: state.vertexBufferId
+    }
+    graphics.updateDynamicBuffer(vbuf, state.verts)
+
+    let pipeline = RenderPipeline {
+        handle: BackendPipelineHandle {
+            id: state.pipelineId
+        }
+        id: state.pipelineId
+    }
+    let ibuf = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.indexBufferId
+        }
+        id: state.indexBufferId
+    }
+    let bindGroup = BindGroup {
+        handle: BackendBindGroupHandle {
+            id: state.bindGroupId
+        }
+        id: state.bindGroupId
+    }
+    encoder.setPipeline(pipeline)
+    encoder.setVertexBuffer(vbuf)
+    encoder.setIndexBuffer(ibuf, indexFormatUint32())
+    encoder.setBindGroup(0, bindGroup)
+    encoder.drawIndexed(state.quadCount * 6)
+    return
+}

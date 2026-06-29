@@ -21,23 +21,56 @@ function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
     }
 }
 
-// Real text rendering via the FreeType-backed Kira text engine. The engine
-// rasterizes actual glyph outlines and blits their coverage through the active
-// kira-graphics UI pass, replacing the legacy 5x7 bitmap path. An empty font
-// path lets the engine auto-discover a system font.
+// Legacy immediate-mode text blit (Sokol path only). The retained Metal path
+// rasterizes glyphs into a Kira Graphics atlas and draws them as batched textured
+// quads through the abstraction (see UiBatch.kira) — no immediate blit.
 @Native
 function foundationDrawText(content: borrow String, bounds: borrow Rect, color: borrow Color, size: Float) {
     kira_text_draw_run("", content, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a, size)
     return
 }
 
+function foundationDefaultGraphics() -> Graphics {
+    return Graphics {
+        userData: uiBatchNullPtr()
+        backend: GraphicsBackend.Sokol
+        metalContext: uiBatchNullPtr()
+    }
+}
+
+// Drop the last saved clip rect (4 floats) off the stack, returning the shorter array.
+function foundationPopClipStack(stack: [Float]) -> [Float] {
+    var out: [Float] = []
+    let keep = stack.count - 4
+    var i = 0
+    while i < keep {
+        out.append(stack[i])
+        i = i + 1
+    }
+    return out
+}
+
+// The Foundation render backend. On the Metal path every primitive is accumulated
+// into a single batched draw through the Kira Graphics abstraction (UiBatch); on the
+// legacy Sokol path it forwards to the immediate-mode render encoder. The backend is
+// constructed per frame; the batch (atlas, glyph cache, GPU resources) persists in
+// the app state and is reached here through `uiBatchPtr`.
 class KiraGraphicsFoundationBackend {
     var encoder: RenderEncoder
+    var graphics: Graphics
+    var uiBatchPtr: RawPtr
+    var metalActive: Bool = false
     var hitRegions: [FoundationHitRegionRecord] = []
     var clipDepth: Int = 0
     var backdropDepth: Int = 0
     var offscreenDepth: Int = 0
     var drewVisibleUi: Bool = false
+    // Current (intersected) clip rect in pixel space, and the saved-parent stack.
+    var clipMinX: Float = 0.0
+    var clipMinY: Float = 0.0
+    var clipMaxX: Float = 1000000.0
+    var clipMaxY: Float = 1000000.0
+    var clipStack: [Float] = []
 
     function beginFrame(width: Int, height: Int) {
         self.hitRegions = []
@@ -45,6 +78,29 @@ class KiraGraphicsFoundationBackend {
         self.backdropDepth = 0
         self.offscreenDepth = 0
         self.drewVisibleUi = false
+        self.clipStack = []
+        self.clipMinX = 0.0
+        self.clipMinY = 0.0
+        self.clipMaxX = intAsFloat(value: width)
+        self.clipMaxY = intAsFloat(value: height)
+
+        let bg = Color {
+            r: 0.96
+            g: 0.95
+            b: 0.93
+            a: 1.0
+        }
+        let transparent = Color {
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+        }
+        if self.metalActive {
+            uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height))
+            uiBatchPushRect(self.uiBatchPtr, 0.0, 0.0, intAsFloat(value: width), intAsFloat(value: height), bg, transparent, 0.0, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
         self.encoder.drawSurface(
             GraphicsRect {
                 x: 0.0
@@ -52,18 +108,8 @@ class KiraGraphicsFoundationBackend {
                 width: intAsFloat(value: width)
                 height: intAsFloat(value: height)
             },
-            Color {
-                r: 0.96
-                g: 0.95
-                b: 0.93
-                a: 1.0
-            },
-            Color {
-                r: 0.0
-                g: 0.0
-                b: 0.0
-                a: 0.0
-            },
+            bg,
+            transparent,
             0.0,
             0.0
         )
@@ -71,6 +117,10 @@ class KiraGraphicsFoundationBackend {
     }
 
     function endFrame() {
+        if self.metalActive {
+            uiBatchFlush(self.uiBatchPtr, self.graphics, self.encoder)
+            return
+        }
         while self.clipDepth > 0 {
             popClip()
         }
@@ -82,51 +132,96 @@ class KiraGraphicsFoundationBackend {
     }
 
     function pushClip(frame: borrow Rect, radius: Float) {
-        self.encoder.pushClip(graphicsRect(frame), radius)
+        self.clipStack.append(self.clipMinX)
+        self.clipStack.append(self.clipMinY)
+        self.clipStack.append(self.clipMaxX)
+        self.clipStack.append(self.clipMaxY)
+        var nx0 = frame.x
+        if self.clipMinX > nx0 {
+            nx0 = self.clipMinX
+        }
+        var ny0 = frame.y
+        if self.clipMinY > ny0 {
+            ny0 = self.clipMinY
+        }
+        var nx1 = frame.x + frame.width
+        if self.clipMaxX < nx1 {
+            nx1 = self.clipMaxX
+        }
+        var ny1 = frame.y + frame.height
+        if self.clipMaxY < ny1 {
+            ny1 = self.clipMaxY
+        }
+        self.clipMinX = nx0
+        self.clipMinY = ny0
+        self.clipMaxX = nx1
+        self.clipMaxY = ny1
+        if !self.metalActive {
+            self.encoder.pushClip(graphicsRect(frame), radius)
+        }
         self.clipDepth = self.clipDepth + 1
         return
     }
 
     function popClip() {
         if self.clipDepth > 0 {
-            self.encoder.popClip()
+            if !self.metalActive {
+                self.encoder.popClip()
+            }
+            let n = self.clipStack.count
+            if n >= 4 {
+                self.clipMinX = self.clipStack[n - 4]
+                self.clipMinY = self.clipStack[n - 3]
+                self.clipMaxX = self.clipStack[n - 2]
+                self.clipMaxY = self.clipStack[n - 1]
+                self.clipStack = foundationPopClipStack(self.clipStack)
+            }
             self.clipDepth = self.clipDepth - 1
         }
         return
     }
 
     function drawSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
-        self.drewVisibleUi = true
-        self.encoder.drawSurface(graphicsRect(bounds), paint.fill, paint.border, paint.borderWidth, paint.radius)
+        drawSurfaceFields(bounds, paint.fill, paint.border, paint.borderWidth, paint.radius)
         return
     }
 
     function drawSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
+        if self.metalActive {
+            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
         self.encoder.drawSurface(graphicsRect(bounds), fill, border, borderWidth, radius)
         return
     }
 
     function drawSquircleSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
-        self.drewVisibleUi = true
-        self.encoder.drawSquircleSurface(graphicsRect(bounds), paint.fill, paint.border, paint.borderWidth, paint.radius)
+        drawSquircleSurfaceFields(bounds, paint.fill, paint.border, paint.borderWidth, paint.radius)
         return
     }
 
     function drawSquircleSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
+        if self.metalActive {
+            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
         self.encoder.drawSquircleSurface(graphicsRect(bounds), fill, border, borderWidth, radius)
         return
     }
 
     function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
-        self.drewVisibleUi = true
-        foundationDrawText(paint.content, bounds, paint.color, paint.size)
+        drawTextFields(bounds, paint.content, paint.color, paint.size)
         return
     }
 
     function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float) {
         self.drewVisibleUi = true
+        if self.metalActive {
+            uiBatchPushText(self.uiBatchPtr, self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
         foundationDrawText(content, bounds, color, size)
         return
     }
@@ -134,32 +229,51 @@ class KiraGraphicsFoundationBackend {
     function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial) {
         self.backdropDepth = self.backdropDepth + 1
         let tint = materialTint(material: material)
-        self.encoder.drawSurface(
-            graphicsRect(bounds),
-            tint,
-            Color {
-                r: 1.0
-                g: 1.0
-                b: 1.0
-                a: 0.08
-            },
-            1.0,
-            0.0
-        )
+        let hairline = Color {
+            r: 1.0
+            g: 1.0
+            b: 1.0
+            a: 0.08
+        }
+        drawSurfaceFields(bounds, tint, hairline, 1.0, 0.0)
         return
     }
 
     function applyBackdropEffect(bounds: borrow Rect, effect: borrow FoundationEffect) {
         match effect {
             BackdropGlow(glow) -> {
-                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
+                drawGlowFields(bounds, glow.color, glow.radius, glow.intensity)
                 return
             }
             LayerGlow(glow) -> {
-                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
+                drawGlowFields(bounds, glow.color, glow.radius, glow.intensity)
                 return
             }
         }
+    }
+
+    function drawGlowFields(bounds: borrow Rect, color: borrow Color, radius: Float, intensity: Float) {
+        if self.metalActive {
+            // Glow is rendered as a soft translucent rounded surface behind the layer
+            // (a single batched quad). A separable-blur effect pass can refine this
+            // later; the approximation keeps the abstraction backend-agnostic.
+            let glow = Color {
+                r: color.r
+                g: color.g
+                b: color.b
+                a: color.a * intensity * 0.5
+            }
+            let noBorder = Color {
+                r: 0.0
+                g: 0.0
+                b: 0.0
+                a: 0.0
+            }
+            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, glow, noBorder, 0.0, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
+        self.encoder.drawGlow(graphicsRect(bounds), color, radius, intensity)
+        return
     }
 
     function endBackdrop(bounds: borrow Rect) {
@@ -172,18 +286,18 @@ class KiraGraphicsFoundationBackend {
 
     function beginOffscreen(bounds: borrow Rect) {
         self.offscreenDepth = self.offscreenDepth + 1
-        self.encoder.pushClip(graphicsRect(bounds), 0.0)
+        pushClip(bounds, 0.0)
         return
     }
 
     function applyLayerEffect(bounds: borrow Rect, effect: borrow FoundationEffect) {
         match effect {
             LayerGlow(glow) -> {
-                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
+                drawGlowFields(bounds, glow.color, glow.radius, glow.intensity)
                 return
             }
             BackdropGlow(glow) -> {
-                self.encoder.drawGlow(graphicsRect(bounds), glow.color, glow.radius, glow.intensity)
+                drawGlowFields(bounds, glow.color, glow.radius, glow.intensity)
                 return
             }
         }
@@ -191,7 +305,7 @@ class KiraGraphicsFoundationBackend {
 
     function endOffscreen(bounds: borrow Rect) {
         if self.offscreenDepth > 0 {
-            self.encoder.popClip()
+            popClip()
             self.offscreenDepth = self.offscreenDepth - 1
         }
         let ignored = bounds

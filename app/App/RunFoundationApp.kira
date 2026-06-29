@@ -34,7 +34,29 @@ struct FoundationAppState {
     var cachedLayoutTree: LayoutTree = LayoutTree { nodes: [] }
     var hitRegions: [FoundationHitRegionRecord] = []
     var ui: FoundationUiContext = FoundationUiContext {}
+    // Persistent batched-UI compositor (Metal path): created on the first frame and
+    // reached through this handle each frame so the glyph atlas + GPU resources live
+    // across frames. (RawPtr fields carry no default — set at construction.)
+    var uiBatchPtr: RawPtr
+    var uiBatchReady: Bool = false
 }
+
+// Build a Graphics handle from the active frame so the backend can create resources
+// and submit batched draws on whichever backend the runtime selected.
+function foundationFrameGraphics(frame: borrow GraphicsFrame) -> Graphics {
+    return Graphics {
+        userData: frame.userData
+        backend: frame.backend
+        metalContext: frame.metalContext
+    }
+}
+
+// The retained Metal compositor is active whenever the frame carries a Metal context.
+@Native
+function foundationFrameUsesMetal(frame: borrow GraphicsFrame) -> Bool {
+    return !uiBatchPtrIsNull(frame.metalContext)
+}
+
 
 struct FoundationSurfaceTextAppState {
     var frameCount: Int = 0
@@ -124,6 +146,7 @@ function RunFoundationInteractiveApp(
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
+        uiBatchPtr: uiBatchNullPtr()
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -132,6 +155,7 @@ function RunFoundationInteractiveApp(
         width: width
         height: height
         sampleCount: 1
+        backend: GraphicsBackend.Metal
     }
 
     app.onEvent { event in
@@ -142,6 +166,13 @@ function RunFoundationInteractiveApp(
     app.onFrame { frame in
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
+        let metalActive = foundationFrameUsesMetal(frame)
+        if metalActive {
+            state.ui.viewport = Size {
+                width: intAsFloat(value: width)
+                height: intAsFloat(value: height)
+            }
+        }
         if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
             state.ui.viewport = rootViewportSize()
         }
@@ -159,6 +190,15 @@ function RunFoundationInteractiveApp(
         // application's own subtree cached.
         let root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(rootFrameDuration()))
 
+        let graphics = foundationFrameGraphics(frame)
+        var batchPtr = uiBatchNullPtr()
+        if metalActive {
+            if !state.uiBatchReady {
+                state.uiBatchPtr = uiBatchCreate(graphics)
+                state.uiBatchReady = true
+            }
+            batchPtr = state.uiBatchPtr
+        }
         let encoder = frame.beginPass(Color {
             r: 0.96
             g: 0.95
@@ -167,6 +207,9 @@ function RunFoundationInteractiveApp(
         })
         var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
+            graphics: graphics
+            uiBatchPtr: batchPtr
+            metalActive: metalActive
         }
         let viewport = state.ui.viewport
         if state.frameCount == 0 {
@@ -199,7 +242,7 @@ function RunFoundationInteractiveApp(
             state.announcedLayout = true
         }
 
-        backend.beginFrame(rootViewportWidth(), rootViewportHeight())
+        backend.beginFrame(Int(viewport.width), Int(viewport.height))
         let renderCount = foundationRender(root, laidOut, backend)
         state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
@@ -227,6 +270,7 @@ function RunFoundationInteractiveApp(
 function RunFoundationApp(root: FoundationView) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: root
+        uiBatchPtr: uiBatchNullPtr()
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -235,12 +279,33 @@ function RunFoundationApp(root: FoundationView) {
         width: 1280
         height: 720
         sampleCount: 1
+        backend: GraphicsBackend.Metal
     }
 
     app.onFrame { frame in
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
-        state.ui.viewport = rootViewportSize()
+        let metalActive = foundationFrameUsesMetal(frame)
+        var vpW = 1280
+        var vpH = 720
+        if !metalActive {
+            vpW = rootViewportWidth()
+            vpH = rootViewportHeight()
+        }
+        state.ui.viewport = Size {
+            width: intAsFloat(value: vpW)
+            height: intAsFloat(value: vpH)
+        }
+
+        let graphics = foundationFrameGraphics(frame)
+        var batchPtr = uiBatchNullPtr()
+        if metalActive {
+            if !state.uiBatchReady {
+                state.uiBatchPtr = uiBatchCreate(graphics)
+                state.uiBatchReady = true
+            }
+            batchPtr = state.uiBatchPtr
+        }
 
         let encoder = frame.beginPass(Color {
             r: 0.96
@@ -250,6 +315,9 @@ function RunFoundationApp(root: FoundationView) {
         })
         var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
+            graphics: graphics
+            uiBatchPtr: batchPtr
+            metalActive: metalActive
         }
         let viewport = state.ui.viewport
         if !state.announcedTree && foundationRenderableViewCount(state.root) > 0 {
@@ -265,7 +333,7 @@ function RunFoundationApp(root: FoundationView) {
             state.announcedLayout = true
         }
 
-        backend.beginFrame(rootViewportWidth(), rootViewportHeight())
+        backend.beginFrame(vpW, vpH)
         let renderCount = foundationRender(composed, laidOut, backend)
         state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
@@ -349,6 +417,9 @@ function RunFoundationSurfaceTextApp(
         })
         let backend = KiraGraphicsFoundationBackend {
             encoder: encoder
+            graphics: foundationFrameGraphics(frame)
+            uiBatchPtr: uiBatchNullPtr()
+            metalActive: false
         }
         backend.beginFrame(1280, 720)
         backend.drawSurface(state.surfaceBounds, state.surfacePaint)

@@ -1,0 +1,109 @@
+// Foreign surface for the batched UI compositor.
+//
+// The compositor renders the whole UI through the Kira Graphics public abstraction
+// (buffers / pipeline / texture / draw — backend-agnostic, currently the from-scratch
+// Metal path). The only direct FFI here is to the real font engine (glyph
+// rasterization, the cross-platform equivalent of FreeType) and to the kira_runtime
+// raw-memory helpers used to read the C glyph-bitmap struct and decode UTF-8. There
+// is NO rendering shim: glyph coverage is rasterized, packed into a Kira Graphics
+// atlas texture, and drawn as textured quads through the abstraction — the legacy
+// immediate-mode kira_text_draw_run blit path is gone.
+
+// ---------------------------------------------------------------------------
+// kira_runtime raw memory helpers (read the glyph bitmap struct, decode UTF-8).
+//
+// A C symbol must have exactly one Kira @FFI.Extern binding across the whole linked
+// program. Kira Graphics' Metal backend already binds most of the kira_runtime raw
+// helpers (metalMemAlloc / metalMemReadU32 / ...), so the compositor REUSES those
+// through thin @Native wrappers rather than re-declaring the same symbols here (a
+// second binding would be dropped, leaving the call unresolved). Only the two helpers
+// the Metal backend does not bind — read_i32_at and read_f32_at — are declared here.
+// ---------------------------------------------------------------------------
+
+// NOTE: only U32/U64/RawPtr/Bool-return FFI is known to lower in this toolchain;
+// I32-RETURN and F32-RETURN do not. The engine's signed 32-bit int fields are read
+// as u32 and sign-corrected (uiMemReadInt), and its 32-bit float fields are read as
+// u32 and decoded (uiF32FromBits / uiMemReadFloat — see UiBatch.kira).
+
+@Native
+function uiMemAlloc(size: U64) -> RawPtr {
+    return metalMemAlloc(size)
+}
+@Native
+function uiMemFree(ptr: RawPtr) {
+    metalMemFree(ptr)
+    return
+}
+@Native
+function uiMemWriteU32(ptr: RawPtr, offset: U64, value: U32) {
+    metalMemWriteU32(ptr, offset, value)
+    return
+}
+@Native
+function uiMemReadU32(ptr: RawPtr, offset: U64) -> U32 {
+    return metalMemReadU32(ptr, offset)
+}
+@Native
+function uiMemReadPtr(ptr: RawPtr, offset: U64) -> RawPtr {
+    return metalMemReadPtr(ptr, offset)
+}
+@Native
+function uiNullPtr() -> RawPtr {
+    return metalNullPtr()
+}
+@Native
+function uiPtrIsNull(ptr: RawPtr) -> Bool {
+    return metalPtrIsNull(ptr)
+}
+
+// ---------------------------------------------------------------------------
+// Font engine (real glyph rasterization). Declared with RawPtr/primitive shapes so
+// the C glyph-bitmap struct can be read field-by-field through the helpers above.
+// ---------------------------------------------------------------------------
+
+@FFI.Extern { library: kiratext; symbol: kira_text_engine_create; abi: c; }
+function uiTextEngineCreate(): RawPtr;
+@FFI.Extern { library: kiratext; symbol: kira_text_face_load; abi: c; }
+function uiTextFaceLoad(engine: RawPtr, path: CString, faceIndex: I32): RawPtr;
+@FFI.Extern { library: kiratext; symbol: kira_text_face_set_pixel_size; abi: c; }
+function uiTextFaceSetPixelSize(face: RawPtr, pixelSize: F32): I32;
+@FFI.Extern { library: kiratext; symbol: kira_text_face_glyph_index; abi: c; }
+function uiTextFaceGlyphIndex(face: RawPtr, codepoint: U32): U32;
+@FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph; abi: c; }
+function uiTextFaceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
+@FFI.Extern { library: kiratext; symbol: kira_text_face_vmetrics; abi: c; }
+function uiTextFaceVMetrics(face: RawPtr, out: RawPtr): Void;
+@FFI.Extern { library: kiratext; symbol: kira_text_utf8_next; abi: c; }
+function uiTextUtf8Next(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32;
+
+// @Native bridges so non-native code (app wiring, the render backend) can obtain a
+// null RawPtr and test pointers without using the FFI symbols directly.
+@Native
+function uiBatchNullPtr() -> RawPtr {
+    return uiNullPtr()
+}
+
+@Native
+function uiBatchPtrIsNull(ptr: RawPtr) -> Bool {
+    return uiPtrIsNull(ptr)
+}
+
+// kira_text_glyph_bitmap field offsets (C layout):
+//   0  int   width
+//   4  int   rows
+//   8  int   bearing_x
+//  12  int   bearing_y
+//  16  float advance
+//  20  int   pitch
+//  24  const uint8_t* buffer
+function uiGlyphBitmapSize() -> U64 { return 32 }
+function uiGlyphOffWidth() -> U64 { return 0 }
+function uiGlyphOffRows() -> U64 { return 4 }
+function uiGlyphOffBearingX() -> U64 { return 8 }
+function uiGlyphOffBearingY() -> U64 { return 12 }
+function uiGlyphOffAdvance() -> U64 { return 16 }
+function uiGlyphOffPitch() -> U64 { return 20 }
+function uiGlyphOffBuffer() -> U64 { return 24 }
+
+// kira_text_vmetrics: three floats (ascender, descender, line_height).
+function uiVMetricsSize() -> U64 { return 12 }
