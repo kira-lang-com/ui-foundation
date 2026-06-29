@@ -19,9 +19,13 @@ function foundationRenderChildren(view: borrow FoundationView, tree: borrow Layo
 
 function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
     var current = backend
-    let frame = layoutFrame(tree, nodeIndex)
+    // `frame` (the node's laid-out Rect) is only needed by the kinds that draw or
+    // register a hit region; pure layout containers (Row/Column/Frame/...) just
+    // recurse, so building the Rect for them is wasted per-view work. Compute it
+    // inside the branches that use it.
     match view.kind {
         Surface -> {
+            let frame = layoutFrame(tree, nodeIndex)
             if view.material != FoundationMaterial.Flat || view.effects.count > 0 {
                 current.beginBackdrop(frame, view.material)
                 var effectIndex = 0
@@ -48,10 +52,12 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             return foundationRenderChildren(view, tree, nodeIndex, current) + 1
         }
         Text -> {
+            let frame = layoutFrame(tree, nodeIndex)
             current.drawTextFields(frame, view.content, view.color, view.size)
             return 1
         }
         HitArea -> {
+            let frame = layoutFrame(tree, nodeIndex)
             current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll, view.interaction)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
