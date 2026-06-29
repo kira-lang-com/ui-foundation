@@ -1,0 +1,7 @@
+import KiraUIFoundation
+
+@Main
+function main() {
+    print(FoundationFlattenVariantSmoke() ? 1 : 0)
+    return
+}

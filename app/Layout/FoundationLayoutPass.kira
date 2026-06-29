@@ -1,78 +1,66 @@
-function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], node: LayoutNode) {
-    var output = nodes
-    output.append(move node)
-    return
-}
-
-function foundationLayoutReplaceNode(nodes: borrow mut [LayoutNode], index: Int, node: LayoutNode) {
-    var output = nodes
-    output[index] = node
-    return
-}
-
-function foundationLayoutAppendRoot(view: borrow FoundationView, nodes: borrow mut [LayoutNode]) {
-    var output = nodes
-    let layout = foundationViewLayoutDescriptor(view)
-    let parentIndex = output.count
-    foundationLayoutAppendNode(output, LayoutNode {
-        descriptor: layout
+// Append one flattened node plus its descriptor, keeping `nodes` and
+// `descriptors` index-aligned. The descriptor is flattened into the node's
+// inline scalars here (once) and then retained in the parallel `descriptors`
+// array — it never rides on `LayoutNode`, so the engine's per-node binds on the
+// resize hot path stay descriptor-free.
+function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], descriptors: borrow mut [LayoutDescriptor], desc: LayoutDescriptor, firstChild: Int, childCount: Int) {
+    var outNodes = nodes
+    var outDescs = descriptors
+    let node = layoutNodeFlattenDescriptor(LayoutNode {
         measuredSize: Size {}
         placedOrigin: Point {}
-        firstChild: view.children.count > 0 ? parentIndex + 1 : 0
-        childCount: view.children.count
-    })
+        firstChild: firstChild
+        childCount: childCount
+    }, desc)
+    outNodes.append(move node)
+    outDescs.append(move desc)
+    return
+}
+
+function foundationLayoutAppendRoot(view: borrow FoundationView, nodes: borrow mut [LayoutNode], descriptors: borrow mut [LayoutDescriptor]) {
+    var outNodes = nodes
+    var outDescs = descriptors
+    let parentIndex = outNodes.count
+    foundationLayoutAppendNode(outNodes, outDescs, foundationViewLayoutDescriptor(view), view.children.count > 0 ? parentIndex + 1 : 0, view.children.count)
 
     var childOffset = 0
     while childOffset < view.children.count {
-        foundationLayoutAppendNode(output, LayoutNode {
-            descriptor: foundationViewLayoutDescriptor(view.children[childOffset])
-            measuredSize: Size {}
-            placedOrigin: Point {}
-            firstChild: 0
-            childCount: view.children[childOffset].children.count
-        })
+        foundationLayoutAppendNode(outNodes, outDescs, foundationViewLayoutDescriptor(view.children[childOffset]), 0, view.children[childOffset].children.count)
         childOffset = childOffset + 1
     }
 
     var childIndex = parentIndex + 1
     childOffset = 0
     while childOffset < view.children.count {
-        foundationLayoutAppendDescendants(view.children[childOffset], childIndex, output)
+        foundationLayoutAppendDescendants(view.children[childOffset], childIndex, outNodes, outDescs)
         childIndex = childIndex + 1
         childOffset = childOffset + 1
     }
     return
 }
 
-function foundationLayoutAppendDescendants(view: borrow FoundationView, nodeIndex: Int, nodes: borrow mut [LayoutNode]) {
-    var output = nodes
-    let firstChild = output.count
+function foundationLayoutAppendDescendants(view: borrow FoundationView, nodeIndex: Int, nodes: borrow mut [LayoutNode], descriptors: borrow mut [LayoutDescriptor]) {
+    var outNodes = nodes
+    var outDescs = descriptors
+    let firstChild = outNodes.count
 
     var childOffset = 0
     while childOffset < view.children.count {
-        foundationLayoutAppendNode(output, LayoutNode {
-            descriptor: foundationViewLayoutDescriptor(view.children[childOffset])
-            measuredSize: Size {}
-            placedOrigin: Point {}
-            firstChild: 0
-            childCount: view.children[childOffset].children.count
-        })
+        foundationLayoutAppendNode(outNodes, outDescs, foundationViewLayoutDescriptor(view.children[childOffset]), 0, view.children[childOffset].children.count)
         childOffset = childOffset + 1
     }
 
     if view.children.count > 0 {
-        foundationLayoutReplaceNode(output, nodeIndex, LayoutNode {
-            descriptor: output[nodeIndex].descriptor
-            measuredSize: output[nodeIndex].measuredSize
-            placedOrigin: output[nodeIndex].placedOrigin
-            firstChild: firstChild
-            childCount: view.children.count
-        })
+        // firstChild / childCount are structural, not descriptor-derived, so the
+        // already-flattened parent node only needs these two scalars patched in
+        // place — no re-flatten (and no descriptor) required.
+        outNodes[nodeIndex].firstChild = firstChild
+        outNodes[nodeIndex].childCount = view.children.count
 
         var childIndex = firstChild
         childOffset = 0
         while childOffset < view.children.count {
-            foundationLayoutAppendDescendants(view.children[childOffset], childIndex, output)
+            foundationLayoutAppendDescendants(view.children[childOffset], childIndex, outNodes, outDescs)
             childIndex = childIndex + 1
             childOffset = childOffset + 1
         }
@@ -85,9 +73,7 @@ class FoundationLayoutPass {
     let engine: LayoutEngine = LayoutEngine {}
 
     function run(root: borrow FoundationView, available: borrow Size) -> LayoutTree {
-        var tree = LayoutTree {
-            nodes: collect(root)
-        }
+        var tree = collect(root)
         tree = layoutResetCounters(move tree)
         engine.measure(tree: tree, index: 0, available: available)
         engine.place(tree: tree, index: 0, origin: Point {})
@@ -106,9 +92,7 @@ class FoundationLayoutPass {
     // rebuild. The result is identical geometry to `run` but with the engine's
     // measure/place skip counters reflecting the avoided work.
     function runIncremental(root: borrow FoundationView, available: borrow Size, cached: LayoutTree) -> LayoutTree {
-        var fresh = LayoutTree {
-            nodes: collect(root)
-        }
+        var fresh = collect(root)
         if !layoutStructureMatches(fresh, cached) {
             fresh = layoutResetCounters(move fresh)
             engine.measure(tree: fresh, index: 0, available: available)
@@ -120,9 +104,10 @@ class FoundationLayoutPass {
         var changed: [Bool] = []
         var index = 0
         while index < result.nodes.count {
-            let same = layoutDescriptorEqual(result.nodes[index].descriptor, fresh.nodes[index].descriptor)
+            let same = layoutDescriptorEqual(result.descriptors[index], fresh.descriptors[index])
             changed.append(!same)
-            result.nodes[index].descriptor = fresh.nodes[index].descriptor
+            result.descriptors[index] = fresh.descriptors[index]
+            result.nodes[index] = layoutNodeFlattenDescriptor(result.nodes[index], result.descriptors[index])
             index = index + 1
         }
         result = layoutPropagateDirty(move result, changed)
@@ -132,17 +117,14 @@ class FoundationLayoutPass {
         return result
     }
 
-    function collect(root: borrow FoundationView) -> [LayoutNode] {
+    function collect(root: borrow FoundationView) -> LayoutTree {
         var nodes: [LayoutNode] = []
-        foundationLayoutAppendRoot(root, nodes)
-        // Mark offer-independent (Fixed x Fixed) nodes once, so a later retained
-        // re-layout (resize) can skip re-measuring them — their size is invariant.
-        var index = 0
-        while index < nodes.count {
-            nodes[index].offerIndependent = layoutDescriptorOfferIndependent(nodes[index].descriptor)
-            index = index + 1
+        var descriptors: [LayoutDescriptor] = []
+        foundationLayoutAppendRoot(root, nodes, descriptors)
+        return LayoutTree {
+            nodes: move nodes
+            descriptors: move descriptors
         }
-        return nodes
     }
 
     // Re-resolve geometry for an already-built tree against a new available size,

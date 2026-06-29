@@ -1,0 +1,285 @@
+function foundationMatrixInsets(top: Float, trailing: Float, bottom: Float, leading: Float) -> EdgeInsets {
+    return EdgeInsets {
+        top: top
+        trailing: trailing
+        bottom: bottom
+        leading: leading
+    }
+}
+
+function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, margin: EdgeInsets, x: Float, y: Float) -> LayoutNode {
+    return layoutNodeFlattenDescriptor(LayoutNode(
+        measuredSize: Size {},
+        placedOrigin: Point {},
+        firstChild: 0,
+        childCount: 0
+    ), LayoutDescriptor {
+        width: width
+        height: height
+        flex: flex
+        arrange: ArrangeMode.Fill
+        axis: Axis.Vertical
+        alignment: CrossAlignment.Stretch
+        overlayAlignment: Alignment.Center
+        padding: EdgeInsets {}
+        margin: margin
+        x: x
+        y: y
+    })
+}
+
+function foundationMatrixContainer(
+    width: SizeMode,
+    height: SizeMode,
+    flex: Int,
+    arrange: ArrangeMode,
+    axis: Axis,
+    spacing: Float,
+    rowSpacing: Float,
+    alignment: CrossAlignment,
+    overlayAlignment: Alignment,
+    columns: Int,
+    padding: EdgeInsets,
+    margin: EdgeInsets,
+    firstChild: Int,
+    childCount: Int,
+) -> LayoutNode {
+    return layoutNodeFlattenDescriptor(LayoutNode(
+        measuredSize: Size {},
+        placedOrigin: Point {},
+        firstChild: firstChild,
+        childCount: childCount
+    ), LayoutDescriptor {
+        width: width
+        height: height
+        flex: flex
+        arrange: arrange
+        axis: axis
+        spacing: spacing
+        rowSpacing: rowSpacing
+        alignment: alignment
+        overlayAlignment: overlayAlignment
+        columns: columns
+        padding: padding
+        margin: margin
+    })
+}
+
+function foundationMatrixRun(tree: LayoutTree, available: borrow Size) -> LayoutTree {
+    var laidOut = layoutResetCounters(move tree)
+    let engine = LayoutEngine()
+    engine.measure(tree: laidOut, index: 0, available: available)
+    engine.place(tree: laidOut, index: 0, origin: Point {})
+    return layoutMarkAllClean(move laidOut)
+}
+
+function foundationMatrixRelayout(tree: LayoutTree, available: borrow Size) -> LayoutTree {
+    var laidOut = layoutResetCounters(move tree)
+    let engine = LayoutEngine()
+    engine.measure(tree: laidOut, index: 0, available: available)
+    engine.place(tree: laidOut, index: 0, origin: Point {})
+    return laidOut
+}
+
+function foundationMatrixTreeByCode(code: Int) -> LayoutTree {
+    if code == 1 {
+        return foundationMatrixStackTree(CrossAlignment.Start)
+    }
+    if code == 2 {
+        return foundationMatrixStackTree(CrossAlignment.Center)
+    }
+    if code == 3 {
+        return foundationMatrixStackTree(CrossAlignment.End)
+    }
+    if code == 4 {
+        return foundationMatrixStackTree(CrossAlignment.Stretch)
+    }
+    if code == 5 {
+        return foundationMatrixAbsoluteTree()
+    }
+    if code == 6 {
+        return foundationMatrixGridTree()
+    }
+    if code == 7 {
+        return foundationMatrixWrapTree()
+    }
+    if code == 8 {
+        return foundationMatrixOverlayTree(Alignment.TopLeading)
+    }
+    if code == 9 {
+        return foundationMatrixOverlayTree(Alignment.Center)
+    }
+    if code == 10 {
+        return foundationMatrixOverlayTree(Alignment.BottomTrailing)
+    }
+    return foundationMatrixFillTree()
+}
+
+function foundationMatrixCaseMatches(code: Int, large: borrow Size, small: borrow Size) -> Bool {
+    var relaid = foundationMatrixRun(foundationMatrixTreeByCode(code), large)
+    relaid = foundationMatrixRelayout(move relaid, small)
+    let scratchSmall = foundationMatrixRun(foundationMatrixTreeByCode(code), small)
+    if !foundationTreesGeometryEqual(relaid, scratchSmall) {
+        return false
+    }
+    relaid = foundationMatrixRelayout(move relaid, large)
+    let scratchLarge = foundationMatrixRun(foundationMatrixTreeByCode(code), large)
+    return foundationTreesGeometryEqual(relaid, scratchLarge)
+}
+
+function foundationMatrixStackTree(alignment: CrossAlignment) -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Fill,
+            height: SizeMode.Hug,
+            flex: 0,
+            arrange: ArrangeMode.Stack,
+            axis: Axis.Horizontal,
+            spacing: 6.0,
+            rowSpacing: 0.0,
+            alignment: move alignment,
+            overlayAlignment: Alignment.Center,
+            columns: 1,
+            padding: foundationMatrixInsets(4.0, 6.0, 5.0, 7.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 4
+        ),
+        foundationMatrixLeaf(SizeMode.Fixed(80.0), SizeMode.Fixed(28.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fixed(22.0), 2, foundationMatrixInsets(0.0, 3.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Fraction(0.25), SizeMode.Min(26.0), 0, foundationMatrixInsets(2.0, 1.0, 1.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Max(90.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(0.0, 2.0, 0.0, 2.0), 0.0, 0.0)
+    ])
+}
+
+function foundationMatrixAbsoluteTree() -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            flex: 0,
+            arrange: ArrangeMode.Absolute,
+            axis: Axis.Vertical,
+            spacing: 0.0,
+            rowSpacing: 0.0,
+            alignment: CrossAlignment.Start,
+            overlayAlignment: Alignment.Center,
+            columns: 1,
+            padding: foundationMatrixInsets(3.0, 4.0, 5.0, 6.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 2
+        ),
+        foundationMatrixLeaf(SizeMode.Fixed(44.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(1.0, 0.0, 0.0, 2.0), 10.0, 12.0),
+        foundationMatrixLeaf(SizeMode.Fixed(30.0), SizeMode.Fixed(26.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 0.0), 72.0, 24.0)
+    ])
+}
+
+function foundationMatrixGridTree() -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Fill,
+            height: SizeMode.Hug,
+            flex: 0,
+            arrange: ArrangeMode.Grid,
+            axis: Axis.Vertical,
+            spacing: 8.0,
+            rowSpacing: 5.0,
+            alignment: CrossAlignment.Stretch,
+            overlayAlignment: Alignment.Center,
+            columns: 2,
+            padding: foundationMatrixInsets(3.0, 4.0, 3.0, 4.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 3
+        ),
+        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 1.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Fixed(36.0), SizeMode.Max(34.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Fixed(28.0), SizeMode.Min(24.0), 0, foundationMatrixInsets(2.0, 0.0, 0.0, 3.0), 0.0, 0.0)
+    ])
+}
+
+function foundationMatrixWrapTree() -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Fill,
+            height: SizeMode.Hug,
+            flex: 0,
+            arrange: ArrangeMode.Wrap,
+            axis: Axis.Horizontal,
+            spacing: 5.0,
+            rowSpacing: 7.0,
+            alignment: CrossAlignment.End,
+            overlayAlignment: Alignment.Center,
+            columns: 1,
+            padding: foundationMatrixInsets(2.0, 3.0, 4.0, 5.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 4
+        ),
+        foundationMatrixLeaf(SizeMode.Fixed(48.0), SizeMode.Fixed(16.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Fraction(0.3), SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 0.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Min(34.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(0.0, 0.0, 1.0, 3.0), 0.0, 0.0),
+        foundationMatrixLeaf(SizeMode.Max(60.0), SizeMode.Fixed(22.0), 0, foundationMatrixInsets(2.0, 1.0, 0.0, 1.0), 0.0, 0.0)
+    ])
+}
+
+function foundationMatrixOverlayTree(alignment: Alignment) -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Fixed(180.0),
+            height: SizeMode.Fixed(110.0),
+            flex: 0,
+            arrange: ArrangeMode.Overlay,
+            axis: Axis.Vertical,
+            spacing: 0.0,
+            rowSpacing: 0.0,
+            alignment: CrossAlignment.Stretch,
+            overlayAlignment: move alignment,
+            columns: 1,
+            padding: foundationMatrixInsets(6.0, 7.0, 8.0, 9.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 1
+        ),
+        foundationMatrixLeaf(SizeMode.Fixed(34.0), SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0)
+    ])
+}
+
+function foundationMatrixFillTree() -> LayoutTree {
+    return LayoutTree(nodes: [
+        foundationMatrixContainer(
+            width: SizeMode.Fraction(0.75),
+            height: SizeMode.Min(80.0),
+            flex: 0,
+            arrange: ArrangeMode.Fill,
+            axis: Axis.Vertical,
+            spacing: 0.0,
+            rowSpacing: 0.0,
+            alignment: CrossAlignment.Stretch,
+            overlayAlignment: Alignment.Center,
+            columns: 1,
+            padding: foundationMatrixInsets(5.0, 6.0, 7.0, 8.0),
+            margin: EdgeInsets {},
+            firstChild: 1,
+            childCount: 1
+        ),
+        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fill, 1, foundationMatrixInsets(2.0, 3.0, 4.0, 5.0), 0.0, 0.0)
+    ])
+}
+
+function FoundationFlattenVariantSmoke() -> Bool {
+    let large = Size { width: 640.0 height: 420.0 }
+    let small = Size { width: 360.0 height: 260.0 }
+    return foundationMatrixCaseMatches(1, large, small) &&
+        foundationMatrixCaseMatches(2, large, small) &&
+        foundationMatrixCaseMatches(3, large, small) &&
+        foundationMatrixCaseMatches(4, large, small) &&
+        foundationMatrixCaseMatches(5, large, small) &&
+        foundationMatrixCaseMatches(6, large, small) &&
+        foundationMatrixCaseMatches(7, large, small) &&
+        foundationMatrixCaseMatches(8, large, small) &&
+        foundationMatrixCaseMatches(9, large, small) &&
+        foundationMatrixCaseMatches(10, large, small) &&
+        foundationMatrixCaseMatches(11, large, small)
+}

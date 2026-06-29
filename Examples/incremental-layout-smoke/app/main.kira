@@ -1,7 +1,23 @@
 import KiraUIFoundation
 
+function smokeSuitePartA() -> Int {
+    return FoundationIncrementalLayoutSmoke()
+}
+
+function smokeSuitePartB() -> Int {
+    return FoundationIncrementalDeepSmoke()
+}
+
+function smokeSuitePartC() -> Int {
+    return FoundationResizeLayoutSmoke()
+}
+
+function smokeSuiteTotal() -> Int {
+    return smokeSuitePartA() + smokeSuitePartB() + smokeSuitePartC()
+}
+
 @Main
 function main() {
-    print(FoundationIncrementalLayoutSmoke() + FoundationIncrementalDeepSmoke() + FoundationResizeLayoutSmoke())
+    print(smokeSuiteTotal())
     return
 }
