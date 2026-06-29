@@ -97,7 +97,7 @@ class KiraGraphicsFoundationBackend {
             a: 0.0
         }
         if self.metalActive {
-            uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height))
+            uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
             uiBatchPushRect(self.uiBatchPtr, 0.0, 0.0, intAsFloat(value: width), intAsFloat(value: height), bg, transparent, 0.0, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }

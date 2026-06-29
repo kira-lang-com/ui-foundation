@@ -67,6 +67,10 @@ struct UiBatchState {
     var quadCount: Int = 0
     var viewportW: Float = 1.0
     var viewportH: Float = 1.0
+    // Retina backing scale (physical pixels per point). Glyphs are rasterized at
+    // point-size x scale and positioned in points, so text is crisp at native
+    // resolution; surfaces are SDF-shaded per physical pixel and need no extra scale.
+    var scale: Float = 1.0
 }
 
 // The single shader (MSL) the compositor pipeline runs: an SDF rounded-rect/border
@@ -226,7 +230,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
 
 // Start a frame: clear the CPU vertex stream and record the viewport (pixel) size.
 @Native
-function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float) {
+function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float, scale: Float) {
     var state = nativeRecover<UiBatchState>(batchPtr)
     state.quadCount = 0
     state.viewportW = viewportW
@@ -237,7 +241,17 @@ function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float) {
     if viewportH <= 0.0 {
         state.viewportH = 1.0
     }
+    state.scale = scale
+    if scale <= 0.0 {
+        state.scale = 1.0
+    }
     return
+}
+
+@Native
+function uiBatchScale(batchPtr: RawPtr) -> Float {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.scale
 }
 
 // Append one quad (4 vertices) to the stream. (px0,py0)-(px1,py1) is the pixel-space
@@ -555,12 +569,19 @@ function uiBatchPushText(
     color: borrow Color, sizePx: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
 ) {
-    let sizeKey = uiBatchSizeKey(sizePx)
+    // Rasterize glyphs at physical pixels (point size x backing scale) for crisp text
+    // on Retina, but lay them out in points: every glyph pixel metric is divided by
+    // `scale` back into point space.
+    var scale = uiBatchScale(batchPtr)
+    if scale <= 0.0 {
+        scale = 1.0
+    }
+    let sizeKey = uiBatchSizeKey(sizePx * scale)
     if !uiBatchSetSize(batchPtr, sizeKey) {
         return
     }
-    let ascender = uiBatchAscender(batchPtr)
-    let descender = uiBatchDescender(batchPtr)
+    let ascender = uiBatchAscender(batchPtr) / scale
+    let descender = uiBatchDescender(batchPtr) / scale
     let baseline = y + (h - (ascender + descender)) / 2.0 + ascender
     var penX = x
 
@@ -583,10 +604,12 @@ function uiBatchPushText(
                 if slotIdx >= 0 {
                     let slot = uiBatchGlyphSlot(batchPtr, slotIdx)
                     if slot.valid && slot.w > 0 && slot.h > 0 {
-                        let gx = penX + Float(slot.bearingX)
-                        let gy = baseline - Float(slot.bearingY)
-                        let gw = Float(slot.w)
-                        let gh = Float(slot.h)
+                        // Pixel metrics -> points (divide by scale); atlas uv stays in
+                        // physical-pixel atlas space.
+                        let gx = penX + Float(slot.bearingX) / scale
+                        let gy = baseline - Float(slot.bearingY) / scale
+                        let gw = Float(slot.w) / scale
+                        let gh = Float(slot.h) / scale
                         let atlasW = Float(uiBatchAtlasSize())
                         let u0 = Float(slot.atlasX) / atlasW
                         let v0 = Float(slot.atlasY) / atlasW
@@ -602,7 +625,7 @@ function uiBatchPushText(
                             clipMinX, clipMinY, clipMaxX, clipMaxY
                         )
                     }
-                    penX = penX + slot.advance
+                    penX = penX + slot.advance / scale
                 }
             }
         }
