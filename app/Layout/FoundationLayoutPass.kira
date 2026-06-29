@@ -135,6 +135,13 @@ class FoundationLayoutPass {
     function collect(root: borrow FoundationView) -> [LayoutNode] {
         var nodes: [LayoutNode] = []
         foundationLayoutAppendRoot(root, nodes)
+        // Mark offer-independent (Fixed x Fixed) nodes once, so a later retained
+        // re-layout (resize) can skip re-measuring them — their size is invariant.
+        var index = 0
+        while index < nodes.count {
+            nodes[index].offerIndependent = layoutDescriptorOfferIndependent(nodes[index].descriptor)
+            index = index + 1
+        }
         return nodes
     }
 
