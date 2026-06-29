@@ -68,6 +68,12 @@ struct FoundationAppState {
     // collecting a fresh node list. The FPS badge is laid out and drawn as a separate
     // overlay, so `root` is never recomposed or cloned — it is rendered by borrow.
     var hasAppLayout: Bool = false
+    // Cached FPS-overlay layout. The badge is bottom-leading aligned, so its
+    // geometry depends only on the displayed FPS (its text width) and the viewport
+    // HEIGHT, never the width — a horizontal resize reuses it every frame.
+    var overlayLayout: LayoutTree = LayoutTree { nodes: [] }
+    var overlayFps: Int = -1
+    var overlayVpH: Int = -1
 }
 
 // Decide whether the current frame can re-present the retained UiBatch instead of
@@ -546,8 +552,15 @@ function RunFoundationApp(root: FoundationView) {
         // FPS badge: a tiny standalone overlay laid out and drawn on top of the app
         // each rebuilt frame, so the badge value updates without recomposing the tree.
         let overlay = foundationFpsOverlay(state.displayedFps)
-        let overlayLayout = FoundationLayoutPass().run(root: overlay, available: viewport)
-        let renderCount = appRendered + foundationRender(overlay, overlayLayout, backend)
+        // Re-lay-out the overlay only when its text (FPS) or the viewport height
+        // changed; a horizontal resize reuses the cached geometry. The view is
+        // rebuilt cheaply each frame (3 nodes, no closures) so it stays in sync.
+        if state.displayedFps != state.overlayFps || vpH != state.overlayVpH {
+            state.overlayLayout = FoundationLayoutPass().run(root: overlay, available: viewport)
+            state.overlayFps = state.displayedFps
+            state.overlayVpH = vpH
+        }
+        let renderCount = appRendered + foundationRender(overlay, state.overlayLayout, backend)
         state.hitRegions = backend.hitRegions
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
