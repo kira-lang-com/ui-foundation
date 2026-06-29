@@ -57,6 +57,29 @@ function foundationFrameUsesMetal(frame: borrow GraphicsFrame) -> Bool {
     return !uiBatchPtrIsNull(frame.metalContext)
 }
 
+// Per-frame duration (seconds) for the live FPS readout. On Metal the run loop samples
+// CACurrentMediaTime onto the context; on Sokol the duration comes from sapp.
+@Native
+function foundationFrameDuration(frame: borrow GraphicsFrame, metalActive: Bool) -> Float {
+    if metalActive {
+        return metalContextFrameDuration(frame.metalContext)
+    }
+    return rootFrameDuration()
+}
+
+// Live viewport (points) on the Metal path: the run loop keeps the context's
+// width/height tracking the host view's bounds, so reading them here reflows the UI
+// to the current window size during an interactive resize.
+@Native
+function foundationMetalViewportWidth(frame: borrow GraphicsFrame) -> Int {
+    return metalContextWidth(frame.metalContext)
+}
+
+@Native
+function foundationMetalViewportHeight(frame: borrow GraphicsFrame) -> Int {
+    return metalContextHeight(frame.metalContext)
+}
+
 
 struct FoundationSurfaceTextAppState {
     var frameCount: Int = 0
@@ -168,9 +191,17 @@ function RunFoundationInteractiveApp(
         state.ui.frameCount = state.frameCount
         let metalActive = foundationFrameUsesMetal(frame)
         if metalActive {
+            var mvW = foundationMetalViewportWidth(frame)
+            var mvH = foundationMetalViewportHeight(frame)
+            if mvW <= 0 {
+                mvW = width
+            }
+            if mvH <= 0 {
+                mvH = height
+            }
             state.ui.viewport = Size {
-                width: intAsFloat(value: width)
-                height: intAsFloat(value: height)
+                width: intAsFloat(value: mvW)
+                height: intAsFloat(value: mvH)
             }
         }
         if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
@@ -188,7 +219,7 @@ function RunFoundationInteractiveApp(
         // the retained tree, layout, and render all operate on; only the FPS
         // badge changes each frame, so the incremental layout keeps the
         // application's own subtree cached.
-        let root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(rootFrameDuration()))
+        let root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(foundationFrameDuration(frame, metalActive)))
 
         let graphics = foundationFrameGraphics(frame)
         var batchPtr = uiBatchNullPtr()
@@ -288,9 +319,18 @@ function RunFoundationApp(root: FoundationView) {
         let metalActive = foundationFrameUsesMetal(frame)
         var vpW = 1280
         var vpH = 720
-        if !metalActive {
+        if metalActive {
+            vpW = foundationMetalViewportWidth(frame)
+            vpH = foundationMetalViewportHeight(frame)
+        } else {
             vpW = rootViewportWidth()
             vpH = rootViewportHeight()
+        }
+        if vpW <= 0 {
+            vpW = 1280
+        }
+        if vpH <= 0 {
+            vpH = 720
         }
         state.ui.viewport = Size {
             width: intAsFloat(value: vpW)
@@ -326,7 +366,7 @@ function RunFoundationApp(root: FoundationView) {
         }
 
         // Overlay a live FPS indicator bottom-right on top of the app view.
-        let composed = foundationComposeWithFps(state.root, foundationFpsFromDuration(rootFrameDuration()))
+        let composed = foundationComposeWithFps(state.root, foundationFpsFromDuration(foundationFrameDuration(frame, metalActive)))
         let laidOut = FoundationLayoutPass().run(root: composed, available: viewport)
         if foundationLayoutHasNonEmptyFrame(laidOut) && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()

@@ -40,6 +40,11 @@ function uiMemWriteU32(ptr: RawPtr, offset: U64, value: U32) {
     return
 }
 @Native
+function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
+    metalMemWriteF32(ptr, offset, value)
+    return
+}
+@Native
 function uiMemReadU32(ptr: RawPtr, offset: U64) -> U32 {
     return metalMemReadU32(ptr, offset)
 }

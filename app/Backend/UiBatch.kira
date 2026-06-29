@@ -59,7 +59,11 @@ struct UiBatchState {
     var ascender: Float = 0.0
     var descender: Float = 0.0
 
-    var verts: [Float] = []
+    // Vertices are written straight into the dynamic vertex buffer's shared contents
+    // (GPU-visible memory) as they are emitted — no per-frame Kira array. Keeping a
+    // 27k-float array in this nativeState struct made every emitQuad recover O(n) and
+    // the frame O(n^2); writing through this raw pointer keeps the hot path O(1).
+    var contentsPtr: RawPtr
     var quadCount: Int = 0
     var viewportW: Float = 1.0
     var viewportH: Float = 1.0
@@ -131,6 +135,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     var state = UiBatchState {
         engine: uiNullPtr()
         face: uiNullPtr()
+        contentsPtr: uiNullPtr()
     }
 
     let shader = graphics.createShader(ShaderDescriptor {
@@ -175,6 +180,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     let floatCapacity = uiBatchCapacityQuads() * uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
     let vbuf = graphics.createDynamicBuffer(floatCapacity)
     state.vertexBufferId = vbuf.id
+    state.contentsPtr = graphics.dynamicBufferContents(vbuf)
 
     let ibuf = graphics.createIndexBuffer(IndexBufferDescriptor {
         label: "kira-ui-batch-indices"
@@ -222,7 +228,6 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
 @Native
 function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float) {
     var state = nativeRecover<UiBatchState>(batchPtr)
-    state.verts = []
     state.quadCount = 0
     state.viewportW = viewportW
     if viewportW <= 0.0 {
@@ -252,39 +257,47 @@ function uiBatchEmitQuad(
     if state.quadCount >= uiBatchCapacityQuads() {
         return
     }
+    let contents = state.contentsPtr
+    if uiPtrIsNull(contents) {
+        return
+    }
     let vw = state.viewportW
     let vh = state.viewportH
     let pxs = [px0, px1, px1, px0]
     let pys = [py0, py0, py1, py1]
     let lxs = [lx0, lx1, lx1, lx0]
     let lys = [ly0, ly0, ly1, ly1]
+    // Base float index of this quad's first vertex in the shared buffer.
+    var base = state.quadCount * uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
     var c = 0
     while c < 4 {
         let px = pxs[c]
         let py = pys[c]
-        state.verts.append(px / vw * 2.0 - 1.0)
-        state.verts.append(1.0 - py / vh * 2.0)
-        state.verts.append(px)
-        state.verts.append(py)
-        state.verts.append(lxs[c])
-        state.verts.append(lys[c])
-        state.verts.append(halfW)
-        state.verts.append(halfH)
-        state.verts.append(radius)
-        state.verts.append(borderWidth)
-        state.verts.append(mode)
-        state.verts.append(fr)
-        state.verts.append(fg)
-        state.verts.append(fb)
-        state.verts.append(fa)
-        state.verts.append(br)
-        state.verts.append(bg)
-        state.verts.append(bb)
-        state.verts.append(ba)
-        state.verts.append(clipMinX)
-        state.verts.append(clipMinY)
-        state.verts.append(clipMaxX)
-        state.verts.append(clipMaxY)
+        let o = base * 4
+        uiMemWriteF32(contents, o, px / vw * 2.0 - 1.0)
+        uiMemWriteF32(contents, o + 4, 1.0 - py / vh * 2.0)
+        uiMemWriteF32(contents, o + 8, px)
+        uiMemWriteF32(contents, o + 12, py)
+        uiMemWriteF32(contents, o + 16, lxs[c])
+        uiMemWriteF32(contents, o + 20, lys[c])
+        uiMemWriteF32(contents, o + 24, halfW)
+        uiMemWriteF32(contents, o + 28, halfH)
+        uiMemWriteF32(contents, o + 32, radius)
+        uiMemWriteF32(contents, o + 36, borderWidth)
+        uiMemWriteF32(contents, o + 40, mode)
+        uiMemWriteF32(contents, o + 44, fr)
+        uiMemWriteF32(contents, o + 48, fg)
+        uiMemWriteF32(contents, o + 52, fb)
+        uiMemWriteF32(contents, o + 56, fa)
+        uiMemWriteF32(contents, o + 60, br)
+        uiMemWriteF32(contents, o + 64, bg)
+        uiMemWriteF32(contents, o + 68, bb)
+        uiMemWriteF32(contents, o + 72, ba)
+        uiMemWriteF32(contents, o + 76, clipMinX)
+        uiMemWriteF32(contents, o + 80, clipMinY)
+        uiMemWriteF32(contents, o + 84, clipMaxX)
+        uiMemWriteF32(contents, o + 88, clipMaxY)
+        base = base + uiBatchFloatsPerVertex()
         c = c + 1
     }
     state.quadCount = state.quadCount + 1
@@ -608,13 +621,14 @@ function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borr
     if state.quadCount <= 0 {
         return
     }
+    // Vertices were written straight into the buffer's shared contents during emit, so
+    // there is nothing to upload here — just bind and issue the single indexed draw.
     let vbuf = GraphicsBuffer {
         handle: BackendBufferHandle {
             id: state.vertexBufferId
         }
         id: state.vertexBufferId
     }
-    graphics.updateDynamicBuffer(vbuf, state.verts)
 
     let pipeline = RenderPipeline {
         handle: BackendPipelineHandle {
