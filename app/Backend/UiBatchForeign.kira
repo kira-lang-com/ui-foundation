@@ -44,6 +44,22 @@ function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
     metalMemWriteF32(ptr, offset, value)
     return
 }
+// Write a whole quad (4 vertices x 23 floats) in one native call instead of 92
+// per-float FFI writes — see kira_ui_write_quad.
+@Native
+function uiWriteQuad(
+    ptr: RawPtr, baseFloats: U64,
+    px0: Float, py0: Float, px1: Float, py1: Float,
+    lx0: Float, ly0: Float, lx1: Float, ly1: Float,
+    vw: Float, vh: Float,
+    halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+    fr: Float, fg: Float, fb: Float, fa: Float,
+    br: Float, bg: Float, bb: Float, ba: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    metalUiWriteQuad(ptr, baseFloats, px0, py0, px1, py1, lx0, ly0, lx1, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    return
+}
 @Native
 function uiMemReadU32(ptr: RawPtr, offset: U64) -> U32 {
     return metalMemReadU32(ptr, offset)
