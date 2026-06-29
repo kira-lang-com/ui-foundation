@@ -42,6 +42,24 @@ function foundationIntToString(value: Int) -> String {
     return text
 }
 
+// Pick the FPS value the badge shows on a rebuild frame. On a viewport change (an
+// interactive resize) the re-present fast path never runs, so `displayedFps` — which
+// is refreshed only by vsync-paced re-present frames — would freeze and the badge
+// would show a stale number for the whole drag. In that case take this frame's freshly
+// measured rate so the badge tracks the real resize cadence live. Otherwise keep the
+// decoupled `displayedFps`, preserving static-frame stability (a steady dashboard keeps
+// re-presenting and a genuine rate change costs a single rebuild to refresh the number).
+// A non-positive measured rate (first frame, before any duration) is ignored so the
+// badge never flashes "0 FPS". This is cost-free during resize: the frame is already
+// rebuilding because the viewport moved, and the badge overlay is laid out and drawn
+// regardless — only the integer it carries changes.
+function foundationBadgeFps(displayedFps: Int, rawFps: Int, viewportChanged: Bool) -> Int {
+    if viewportChanged && rawFps > 0 {
+        return rawFps
+    }
+    return displayedFps
+}
+
 function foundationFpsBadgeFill() -> Color {
     return Color {
         r: 0.0
@@ -157,6 +175,30 @@ function FoundationFpsOverlaySmoke() -> Int {
         approxEqual(badge.x, 12.0) &&
         approxEqual(badge.y + badge.height, 720.0 - 12.0)
     )
+
+    return passed
+}
+
+// Guards `foundationBadgeFps`: the badge must keep updating during a resize (when the
+// re-present path that normally refreshes the FPS number never runs) while staying
+// stable on static frames and never flashing 0.
+function FoundationBadgeResizeSmoke() -> Int {
+    var passed = 0
+
+    // Resize frame (viewport changed): take the live measured rate, not the frozen
+    // displayed value. This is the bug fix — the badge updates during a drag.
+    passed = passed + smokePass(foundationBadgeFps(60, 24, true) == 24)
+
+    // Static frame (viewport unchanged): keep the decoupled displayed value so a steady
+    // dashboard stays stable instead of feeding rebuild durations back into the badge.
+    passed = passed + smokePass(foundationBadgeFps(60, 24, false) == 60)
+
+    // First frame / no measured duration yet: ignore the non-positive rate so the badge
+    // never flashes "0 FPS", even though the viewport "changed" from its unset state.
+    passed = passed + smokePass(foundationBadgeFps(60, 0, true) == 60)
+
+    // A genuine slow resize cadence is reported honestly (not clamped to the old value).
+    passed = passed + smokePass(foundationBadgeFps(60, 15, true) == 15)
 
     return passed
 }

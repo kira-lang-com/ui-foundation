@@ -530,6 +530,19 @@ function RunFoundationApp(root: FoundationView) {
 
         backend.beginFrame(vpW, vpH)
         let appRendered = foundationRender(state.root, state.cachedLayoutTree, backend)
+        // During an interactive resize the viewport changes every frame, so the
+        // re-present fast path (the only place `displayedFps` is refreshed) never runs
+        // and the badge would freeze on a stale number for the whole drag. A resize
+        // already forces a full rebuild each frame, so refreshing the badge from this
+        // frame's real duration is free — the overlay below is laid out and drawn
+        // regardless — and cannot create the static-frame rebuild feedback loop the
+        // re-present decoupling guards against (that loop only exists when a badge
+        // change would force an otherwise-skippable frame to rebuild; here the frame is
+        // already rebuilding because the viewport moved). `foundationBadgeFps` gates on
+        // the viewport change so a steady-state badge refresh still costs a single
+        // rebuild, not a loop. (Guarded by FoundationBadgeResizeSmoke.)
+        let viewportChanged = !state.hasPresentedFrame || vpW != state.lastPresentedViewportW || vpH != state.lastPresentedViewportH
+        state.displayedFps = foundationBadgeFps(state.displayedFps, rawFps, viewportChanged)
         // FPS badge: a tiny standalone overlay laid out and drawn on top of the app
         // each rebuilt frame, so the badge value updates without recomposing the tree.
         let overlay = foundationFpsOverlay(state.displayedFps)
