@@ -9,8 +9,6 @@ function foundationMatrixInsets(top: Float, trailing: Float, bottom: Float, lead
 
 function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, margin: EdgeInsets, x: Float, y: Float) -> LayoutNode {
     return layoutNodeFlattenDescriptor(LayoutNode(
-        measuredSize: Size {},
-        placedOrigin: Point {},
         firstChild: 0,
         childCount: 0
     ), LayoutDescriptor {
@@ -45,8 +43,6 @@ function foundationMatrixContainer(
     childCount: Int,
 ) -> LayoutNode {
     return layoutNodeFlattenDescriptor(LayoutNode(
-        measuredSize: Size {},
-        placedOrigin: Point {},
         firstChild: firstChild,
         childCount: childCount
     ), LayoutDescriptor {

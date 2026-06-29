@@ -7,8 +7,6 @@ function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], descriptors:
     var outNodes = nodes
     var outDescs = descriptors
     let node = layoutNodeFlattenDescriptor(LayoutNode {
-        measuredSize: Size {}
-        placedOrigin: Point {}
         firstChild: firstChild
         childCount: childCount
     }, desc)
