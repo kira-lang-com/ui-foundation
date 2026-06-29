@@ -93,6 +93,24 @@ Renderer (graphics commands)
 Backend (KiraGraphics)
 ```
 
+### Rendering backend
+
+On the Metal backend the render backend draws **entirely through the KiraGraphics
+public abstraction** — no immediate-mode helpers, no host shim. Every surface and glyph
+for a frame is accumulated into a single vertex stream by the batched compositor
+(`app/Backend/UiBatch.kira`) and submitted as one indexed draw:
+
+- **Surfaces** (rounded rectangles, squircles, borders) are rasterized in a
+  signed-distance-field fragment shader; **text** is rasterized by the real font engine
+  into a KiraGraphics atlas texture and drawn as textured quads. Premultiplied alpha,
+  rectangular clipping, one dynamic vertex buffer written straight into GPU-visible
+  memory.
+- Because it only uses the abstraction (buffers / pipeline / texture / draw), the same
+  renderer runs on any backend that implements it. The on-screen window provides a live
+  FPS readout and reflows the layout during an interactive resize.
+
+The Sokol backend keeps its existing immediate-mode path.
+
 ## Available Components
 
 | Component | Description |
