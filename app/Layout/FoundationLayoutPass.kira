@@ -91,6 +91,10 @@ class FoundationLayoutPass {
         tree = layoutResetCounters(move tree)
         engine.measure(tree: tree, index: 0, available: available)
         engine.place(tree: tree, index: 0, origin: Point {})
+        // The cached measure/place state is now valid for every node, so a later
+        // retained re-layout (relayout) can reuse the geometry of any subtree whose
+        // offer and origin are unchanged instead of recomputing the whole tree.
+        tree = layoutMarkAllClean(move tree)
         return tree
     }
 
