@@ -61,6 +61,11 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll, view.interaction)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
+        TextureView -> {
+            let frame = layoutFrame(tree, nodeIndex)
+            current.drawTextureFields(frame, view.texture, view.textureOpacity)
+            return 1
+        }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current);
         Column -> return foundationRenderChildren(view, tree, nodeIndex, current);
         Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current);

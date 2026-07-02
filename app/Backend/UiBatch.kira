@@ -55,6 +55,13 @@ struct UiBatchState {
     var atlasTextureId: U32 = 0
     var samplerId: U32 = 0
     var bindGroupId: U32 = 0
+    // External-texture slot (TextureView, mode 2). The fallback group binds the atlas at
+    // slot 1 so the shader's texture(1)/sampler(1) arguments are always satisfied; a real
+    // external texture replaces it via uiBatchSetExternalTexture (bind group cached per id).
+    var fallbackExternalBindGroupId: U32 = 0
+    var externalTextureId: U32 = 0
+    var externalBindGroupId: U32 = 0
+    var externalBindReady: Bool = false
 
     var atlasW: Int = 0
     var atlasH: Int = 0
@@ -89,10 +96,13 @@ struct UiBatchState {
 }
 
 // The single shader (MSL) the compositor pipeline runs: an SDF rounded-rect/border
-// pass plus an atlas-glyph sampling pass, selected per vertex by `mode`. Outputs
-// premultiplied alpha (the pipeline blends One, OneMinusSourceAlpha).
+// pass, an atlas-glyph sampling pass, and an EXTERNAL-texture pass (a TextureView
+// showing a texture rendered elsewhere — e.g. an engine viewport render target —
+// bound at texture/sampler slot 1, `local` carrying its uv), selected per vertex by
+// `mode` (0 / 1 / 2). Outputs premultiplied alpha (the pipeline blends One,
+// OneMinusSourceAlpha).
 function uiBatchMslSource() -> String {
-    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
+    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]], texture2d<float> external [[texture(1)]], sampler externalSmp [[sampler(1)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 1.5) { float4 c = external.sample(externalSmp, in.local); float a = c.a * in.fill.a; return float4(c.rgb * in.fill.a, a); } if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
 }
 
 function uiBatchQuadIndices(quadCount: Int) -> [Int] {
@@ -237,6 +247,12 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     let bindGroup = graphics.createTextureSamplerBindGroup("kira-ui-batch-bind", 0, atlas, 0, sampler)
     state.bindGroupId = bindGroup.id
 
+    // Slot-1 fallback: the shader always declares texture(1)/sampler(1); until a real
+    // external texture is registered, the atlas satisfies the binding (mode-2 quads are
+    // only emitted once a TextureView registered its texture).
+    let fallbackExternal = graphics.createTextureSamplerBindGroup("kira-ui-batch-external-fallback", 1, atlas, 1, sampler)
+    state.fallbackExternalBindGroupId = fallbackExternal.id
+
     state.glyphHashKeys = uiBatchIntZeros(uiBatchGlyphHashCap())
     state.glyphHashVals = uiBatchIntZeros(uiBatchGlyphHashCap())
 
@@ -369,6 +385,56 @@ function uiBatchPushRect(
         halfW, halfH, clampedRadius, borderWidth, 0.0,
         fill.r, fill.g, fill.b, fill.a,
         border.r, border.g, border.b, border.a,
+        clipMinX, clipMinY, clipMaxX, clipMaxY
+    )
+    return
+}
+
+// Register the external texture TextureViews sample this frame (one per frame — the
+// editor viewport). The slot-1 bind group is cached per texture id, so a stable
+// render-target id costs one creation total.
+@Native
+function uiBatchSetExternalTexture(batchPtr: RawPtr, graphics: borrow Graphics, textureId: U32) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if state.externalBindReady && state.externalTextureId == textureId {
+        return
+    }
+    let texture = GraphicsTexture {
+        handle: BackendTextureHandle {
+            id: textureId
+        }
+        id: textureId
+    }
+    let sampler = GraphicsSampler {
+        handle: BackendSamplerHandle {
+            id: state.samplerId
+        }
+        id: state.samplerId
+    }
+    let bindGroup = graphics.createTextureSamplerBindGroup("kira-ui-batch-external", 1, texture, 1, sampler)
+    state.externalTextureId = textureId
+    state.externalBindGroupId = bindGroup.id
+    state.externalBindReady = true
+    return
+}
+
+// Emit an external-texture quad (mode 2): `local` spans uv 0..1 across the rect.
+function uiBatchPushExternalRect(
+    batchPtr: RawPtr,
+    x: Float, y: Float, w: Float, h: Float,
+    alpha: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return
+    }
+    uiBatchEmitQuad(
+        batchPtr,
+        x, y, x + w, y + h,
+        0.0, 0.0, 1.0, 1.0,
+        w / 2.0, h / 2.0, 0.0, 0.0, 2.0,
+        1.0, 1.0, 1.0, alpha,
+        0.0, 0.0, 0.0, 0.0,
         clipMinX, clipMinY, clipMaxX, clipMaxY
     )
     return
@@ -811,10 +877,23 @@ function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borr
         }
         id: state.bindGroupId
     }
+    // Slot 1 carries the frame's external texture (TextureView) when registered, else the
+    // atlas fallback that keeps the shader's texture(1)/sampler(1) arguments satisfied.
+    var externalGroupId = state.fallbackExternalBindGroupId
+    if state.externalBindReady {
+        externalGroupId = state.externalBindGroupId
+    }
+    let externalGroup = BindGroup {
+        handle: BackendBindGroupHandle {
+            id: externalGroupId
+        }
+        id: externalGroupId
+    }
     encoder.setPipeline(pipeline)
     encoder.setVertexBuffer(vbuf)
     encoder.setIndexBuffer(ibuf, indexFormatUint32())
     encoder.setBindGroup(0, bindGroup)
+    encoder.setBindGroup(1, externalGroup)
     encoder.drawIndexed(state.quadCount * 6)
     return
 }

@@ -8,6 +8,9 @@ enum FoundationViewKind {
     Text
     HitArea
     LayoutPriority
+    // A leaf showing an EXTERNAL KiraGraphics texture (e.g. an engine viewport render
+    // target) inside the UI layout — drawn by the batched compositor as a mode-2 quad.
+    TextureView
 }
 
 function foundationNoopPress() {
@@ -92,6 +95,10 @@ struct FoundationView {
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
     let minLength: Float = 0.0
     let interaction: FoundationInteraction = FoundationInteraction {}
+    // TextureView: the external KiraGraphics texture id to show (0 = none), and its
+    // opacity. Kept as Int at the view layer; the backend converts to the U32 handle.
+    let texture: Int = 0
+    let textureOpacity: Float = 1.0
 }
 
 
@@ -219,6 +226,21 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             return LayoutDescriptor {
                 width: SizeMode.Hug
                 height: SizeMode.Hug
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        TextureView -> {
+            // A sized leaf: the texture stretches to whatever box the layout gives it
+            // (Fixed / Fill via the width/height modes, flex-participating like Surface).
+            return LayoutDescriptor {
+                width: view.width
+                height: view.height
+                flex: view.flex
                 arrange: ArrangeMode.Fill
                 axis: Axis.Vertical
                 alignment: CrossAlignment.Stretch
