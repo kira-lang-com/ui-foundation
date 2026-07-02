@@ -61,6 +61,7 @@ function foundationViewKindCode(kind: FoundationViewKind) -> Int {
         Text -> return 7;
         HitArea -> return 8;
         LayoutPriority -> return 9;
+        TextureView -> return 10;
     }
 }
 
@@ -100,7 +101,8 @@ function foundationRenderSignature(view: borrow FoundationView) -> Int {
         foundationShapeCode(view.shape) * 23 +
         view.effects.count * 19 +
         foundationBoolCode(view.disabled) * 11 +
-        foundationBoolCode(view.clipContent) * 7
+        foundationBoolCode(view.clipContent) * 7 +
+        view.texture * 41
 }
 
 function foundationAppendPath(path: borrow [Int], childOrdinal: Int) -> [Int] {

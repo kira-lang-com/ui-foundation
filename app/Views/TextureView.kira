@@ -1,0 +1,22 @@
+// A leaf view showing an EXTERNAL KiraGraphics texture inside the UI layout — the editor
+// viewport primitive: the engine renders its scene into an offscreen render-target texture
+// and the UI composites that texture like any other view (layout-sized, clipped, batched).
+//
+// One external texture is supported per frame (the batch's slot-1 binding); registering a
+// second id in the same frame rebinds to the LAST one registered.
+function TextureView(
+    texture: Int,
+    width: SizeMode,
+    height: SizeMode,
+    flex: Int,
+    opacity: Float,
+) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.TextureView
+        width: width
+        height: height
+        flex: flex
+        texture: texture
+        textureOpacity: opacity
+    }
+}

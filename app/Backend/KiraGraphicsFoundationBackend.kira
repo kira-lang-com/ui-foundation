@@ -196,6 +196,35 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
+    // TextureView: register the external texture with the batch (slot-1 bind group,
+    // cached per id) and emit its mode-2 quad. Metal path only; the legacy Sokol path
+    // draws a placeholder fill so layout issues stay visible there.
+    function drawTextureFields(bounds: borrow Rect, texture: Int, opacity: Float) {
+        self.drewVisibleUi = true
+        if texture <= 0 {
+            return
+        }
+        if self.metalActive {
+            uiBatchSetExternalTexture(self.uiBatchPtr, self.graphics, U32(texture))
+            uiBatchPushExternalRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, opacity, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
+        }
+        let placeholderFill = Color {
+            r: 0.15
+            g: 0.15
+            b: 0.18
+            a: 1.0
+        }
+        let placeholderBorder = Color {
+            r: 0.5
+            g: 0.5
+            b: 0.55
+            a: 1.0
+        }
+        self.encoder.drawSurface(graphicsRect(bounds), placeholderFill, placeholderBorder, 1.0, 0.0)
+        return
+    }
+
     function drawSquircleSurface(bounds: borrow Rect, paint: borrow FoundationSurfacePaint) {
         drawSquircleSurfaceFields(bounds, paint.fill, paint.border, paint.borderWidth, paint.radius)
         return

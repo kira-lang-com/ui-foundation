@@ -188,6 +188,7 @@ function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
     match view.kind {
         Surface -> total = total + 1;
         Text -> total = total + 1;
+        TextureView -> total = total + 1;
         Row -> {}
         Column -> {}
         Expanded -> {}
