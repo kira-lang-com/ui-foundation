@@ -223,11 +223,21 @@ function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
 }
 
 
+// No-op default for `engineFrame` below.
+function foundationNoopEngineFrame(frame: borrow GraphicsFrame) {
+    let ignored = frame.backend
+    return
+}
+
 function RunFoundationInteractiveApp(
     title: String,
     width: Int,
     height: Int,
     rootBuilder: (borrow FoundationUiContext) -> FoundationView,
+    // Host hook: runs FIRST every frame, BEFORE the UI render pass begins — the place a
+    // hosting engine ticks its simulation and runs its own (offscreen) render passes, e.g.
+    // drawing the scene into the render-target texture a TextureView shows this same frame.
+    engineFrame: (borrow GraphicsFrame) -> Void = foundationNoopEngineFrame,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
@@ -249,6 +259,10 @@ function RunFoundationInteractiveApp(
     }
 
     app.onFrame { frame in
+        // Engine-first: host simulation + offscreen passes complete before any UI work, so a
+        // TextureView composites THIS frame's engine output, never last frame's.
+        let hostFrame = engineFrame
+        hostFrame(frame)
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
         let metalActive = foundationFrameUsesMetal(frame)
