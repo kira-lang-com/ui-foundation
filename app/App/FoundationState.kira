@@ -1,0 +1,53 @@
+// Ambient state slots backing the Kira UI `@State` property wrapper.
+//
+// A wrapped property's backing struct is allocated once with `nativeState`, anchored under a
+// stable string key ("Owner.property") in the native slot store, and recovered by reference on
+// every later access — so state survives the per-frame widget rebuilds of the interactive app
+// loop. Kira has no mutable globals by design; the native store is the single process-global
+// anchor, and it treats values as opaque Kira-runtime pointers.
+//
+// Single-threaded by contract (the UI frame loop).
+
+@FFI.Extern { library: kirastatestore; symbol: kira_state_slot_has; abi: c; }
+function uiStateSlotHasRaw(key: CString): I32;
+@FFI.Extern { library: kirastatestore; symbol: kira_state_slot_get; abi: c; }
+function uiStateSlotGetRaw(key: CString): RawPtr;
+@FFI.Extern { library: kirastatestore; symbol: kira_state_slot_put; abi: c; }
+function uiStateSlotPutRaw(key: CString, value: RawPtr): Void;
+@FFI.Extern { library: kirastatestore; symbol: kira_state_slot_reset; abi: c; }
+function uiStateSlotResetRaw(): Void;
+@FFI.Extern { library: kirastatestore; symbol: kira_state_slot_count; abi: c; }
+function uiStateSlotCountRaw(): I32;
+
+// True when a value was stored under `key`.
+@Native
+function uiStateSlotHas(key: String) -> Bool {
+    return uiStateSlotHasRaw(key) != 0
+}
+
+// The pointer stored under `key` (null when absent — check with uiStateSlotHas first).
+@Native
+function uiStateSlotGet(key: String) -> RawPtr {
+    return uiStateSlotGetRaw(key)
+}
+
+// Store `value` under `key`, replacing any existing entry.
+@Native
+function uiStateSlotPut(key: String, value: RawPtr) {
+    uiStateSlotPutRaw(key, value)
+    return
+}
+
+// Drop every slot (test isolation / editor session reset). The Kira-side values are not freed.
+@Native
+function uiStateSlotReset() {
+    uiStateSlotResetRaw()
+    return
+}
+
+// Number of live slots.
+@Native
+function uiStateSlotCount() -> Int {
+    let raw = uiStateSlotCountRaw()
+    return Int(raw)
+}
