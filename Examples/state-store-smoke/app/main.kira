@@ -1,0 +1,25 @@
+import KiraUIFoundation
+
+struct TextBox {
+    var label: String = ""
+}
+
+function readLabel() -> String {
+    if KiraUIFoundation.uiStateSlotHas("smoke.text") == false {
+        KiraUIFoundation.uiStateSlotPut("smoke.text", nativeUserData(nativeState(TextBox { label: "persist" })))
+    }
+    let box = nativeRecover<TextBox>(KiraUIFoundation.uiStateSlotGet("smoke.text"))
+    return box.label
+}
+
+@Main
+function main() {
+    let first = readLabel()
+    let second = readLabel()
+    if first == "persist" {
+        print("first-read-ok")
+    }
+    if second == "persist" {
+        print("second-read-ok")
+    }
+}
