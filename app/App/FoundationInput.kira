@@ -84,6 +84,11 @@ function foundationUpdatePointer(ui: borrow mut FoundationUiContext, regions: bo
                 regions[newIndex].interaction.onHoverEnter()
             }
         }
+        // Hover moved to a different region: force a rebuild so widgets can
+        // restyle for hover (buttons highlight by default; see foundationHovered).
+        // A plain move WITHIN one region still skips the rebuild (retained fast
+        // path), so only boundary crossings pay the cost.
+        ui.eventCount = ui.eventCount + 1
     }
     ui.hoveredKey = newKey
     return index
@@ -105,12 +110,24 @@ function foundationClearHover(ui: borrow mut FoundationUiContext, regions: borro
     return
 }
 
-function foundationBeginPress(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], index: Int) {
+function foundationBeginPress(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], index: Int, allowFocus: Bool) {
     ui.pressedKey = ui.hoveredKey
     ui.pressX = ui.pointerX
     ui.pressY = ui.pointerY
     ui.dragging = false
     ui.dragKey = ui.hoveredKey
+    // Publish the pressed region's bounds immediately (not just on the release
+    // in foundationEndPress): ambient gesture code that runs on the press edge —
+    // e.g. the editor viewport mapping a click to a world ray — needs the exact
+    // hit-area rectangle right now, before any release.
+    if index >= 0 {
+        foundationWritePressBounds(ui, regions[index].bounds)
+    }
+    if allowFocus == false {
+        // Right/middle presses drive gestures (camera drags) only — they never
+        // move focus or the keyboard.
+        return
+    }
     if index >= 0 {
         let region = regions[index]
         if region.focusable {
@@ -159,13 +176,18 @@ function foundationEndPress(ui: borrow mut FoundationUiContext, regions: borrow 
         }
     } else {
         let releasedKey = ui.hoveredKey
-        if releasedKey != 0 && releasedKey == ui.pressedKey && index >= 0 {
+        // Only LEFT presses count as widget clicks; right/middle are gesture-only.
+        if releasedKey != 0 && releasedKey == ui.pressedKey && index >= 0 && ui.pressButton == 1 {
             let region = regions[index]
+            // Publish the button's bounds before firing, so an onPress that opens
+            // a menu can anchor it to this button (foundationPressBounds*).
+            foundationWritePressBounds(ui, region.bounds)
             region.onPress()
             ui.clickedKey = region.key
         }
     }
     ui.pressedKey = 0
+    ui.pressButton = 0
     ui.dragging = false
     ui.dragKey = 0
     return
@@ -242,6 +264,37 @@ function foundationHandleTextInputEvent(ui: borrow mut FoundationUiContext, regi
     return
 }
 
+// Reconcile keyboard focus against the freshly-built hit regions, once per full
+// frame. Two rules, in order:
+//   1. If the focused region no longer exists (its widget was removed — e.g. an
+//      inline edit field was dismissed), drop focus so a later autofocus field
+//      can claim it.
+//   2. If nothing holds focus and some region requests autofocus, adopt the
+//      first such region and raise the keyboard. Gated on focusedKey == 0 so it
+//      never steals focus from the user mid-edit, and never ping-pongs between
+//      two autofocus regions.
+function foundationReconcileFocus(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord]) {
+    if ui.focusedKey != 0 {
+        if foundationRegionIndexByKey(regions, ui.focusedKey) < 0 {
+            ui.focusedKey = 0
+            graphicsShowKeyboard(false)
+        }
+    }
+    if ui.focusedKey == 0 {
+        var i = 0
+        while i < regions.count {
+            if regions[i].autofocus {
+                ui.focusedKey = regions[i].key
+                ui.ime = imeReset()
+                graphicsShowKeyboard(true)
+                return
+            }
+            i = i + 1
+        }
+    }
+    return
+}
+
 function foundationHandleKeyEvent(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], keyCode: Int) {
     ui.lastKeyCode = keyCode
     if ui.focusedKey == 0 {
@@ -274,13 +327,37 @@ function foundationHandleKeyEvent(ui: borrow mut FoundationUiContext, regions: b
         }
         return
     }
+    // Everything else (arrows, home/end, forward-delete, …) goes to the field's
+    // navigation handler, which moves/edits at the caret.
+    region.onKey(keyCode)
     return
 }
 
 // Single entry point used by the interactive app's `onEvent` hook. Owns the
 // recovered `var` so it can hand mutable borrows of its fields to the handlers.
+function foundationPointerButtonInt(button: GraphicsPointerButton) -> Int {
+    match button {
+        Left -> return 1;
+        Right -> return 2;
+        Middle -> return 3;
+        None -> return 0;
+        Other -> return 0;
+    }
+}
+
 function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) {
     var state = nativeRecover<FoundationAppState>(userData)
+    // eventCount gates the interactive runner's re-present fast path: bumping it
+    // forces a full widget rebuild. Pointer MOVES never bump it: hover and drag
+    // deliver through their callbacks right here (camera gestures need no
+    // rebuild), UI-visible state changes only on press/release/scroll/keys —
+    // and every rebuild leaks native memory today (the leak the old live-resize
+    // path exposed), so mouse motion must keep hitting the retained fast path.
+    if event.kind != GraphicsEventKind.PointerMoved {
+        state.ui.eventCount = state.ui.eventCount + 1
+    }
+    state.ui.modShift = event.modifiers.shift
+    state.ui.modAlt = event.modifiers.alt
     if event.windowWidth > 0 && event.windowHeight > 0 {
         state.ui.viewport = Size {
             width: intAsFloat(value: event.windowWidth)
@@ -289,8 +366,28 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
     }
     let kind = event.kind
     if kind == GraphicsEventKind.PointerDown || kind == GraphicsEventKind.TouchesBegan {
+        var button = foundationPointerButtonInt(event.pointerButton)
+        if button == 0 {
+            // Synthetic/touch downs carry no button — treat as left.
+            button = 1
+        }
+        state.ui.pressButton = button
+        // Update the pointer/hover BEFORE snapshotting so ambient readers see the
+        // region this press actually landed on (right-click routing needs it).
         let index = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
-        foundationBeginPress(state.ui, state.hitRegions, index)
+        foundationWriteInputSnapshot(state.ui)
+        foundationBeginPress(state.ui, state.hitRegions, index, button == 1)
+        return
+    }
+    if kind == GraphicsEventKind.KeyUp {
+        let bit = foundationKeyBit(event.keyCode)
+        if bit > 0 {
+            let held = (state.ui.keysMask / bit) - ((state.ui.keysMask / bit) / 2) * 2 == 1
+            if held {
+                state.ui.keysMask = state.ui.keysMask - bit
+            }
+        }
+        foundationWriteInputSnapshot(state.ui)
         return
     }
     if kind == GraphicsEventKind.PointerMoved || kind == GraphicsEventKind.TouchesMoved || kind == GraphicsEventKind.PointerEntered {
@@ -301,6 +398,7 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
     if kind == GraphicsEventKind.PointerUp || kind == GraphicsEventKind.TouchesEnded {
         let index = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
         foundationEndPress(state.ui, state.hitRegions, index)
+        foundationWriteInputSnapshot(state.ui)
         return
     }
     if kind == GraphicsEventKind.PointerExited || kind == GraphicsEventKind.TouchesCancelled {
@@ -317,8 +415,233 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
         return
     }
     if kind == GraphicsEventKind.KeyDown {
+        let bit = foundationKeyBit(event.keyCode)
+        if bit > 0 {
+            let held = (state.ui.keysMask / bit) - ((state.ui.keysMask / bit) / 2) * 2 == 1
+            if held == false {
+                state.ui.keysMask = state.ui.keysMask + bit
+            }
+        }
+        foundationWriteInputSnapshot(state.ui)
         foundationHandleKeyEvent(state.ui, state.hitRegions, event.keyCode)
         return
     }
     return
+}
+
+// --- Ambient input snapshot: camera/tool code (any package) reads the held
+// pointer button, fly-key mask and modifiers through the ambient slot store,
+// without a path to the app state. ---
+
+struct FoundationInputSnapshot {
+    var button: Int = 0
+    var keysMask: Int = 0
+    var shift: Bool = false
+    var alt: Bool = false
+    // Live logical viewport size (written once per frame by the interactive
+    // runner) — layout-aware code (viewport camera aspect) reads it ambiently.
+    var viewW: Float = 0.0
+    var viewH: Float = 0.0
+    // Pointer position and the region key under it AT THE LAST press/release/key
+    // event (pointer MOVES don't rewrite the snapshot, so these stay latched to
+    // the last button/key event — exactly the "where did this press land" signal
+    // ambient gesture code needs, e.g. routing a right-click to the region it hit).
+    var pointerX: Float = 0.0
+    var pointerY: Float = 0.0
+    var hoveredKey: Int = 0
+    // Screen bounds of the region a click fired on (written by foundationEndPress
+    // just before onPress). A dropdown button reads these to anchor its popup to
+    // itself (bottom-left by default) instead of the cursor.
+    var pressBoundsX: Float = 0.0
+    var pressBoundsY: Float = 0.0
+    var pressBoundsW: Float = 0.0
+    var pressBoundsH: Float = 0.0
+}
+
+function foundationInputSlotKey() -> String {
+    return "foundation.input"
+}
+
+function foundationWriteInputSnapshot(ui: borrow FoundationUiContext) {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    }
+    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    snapshot.button = ui.pressButton
+    snapshot.keysMask = ui.keysMask
+    snapshot.shift = ui.modShift
+    snapshot.alt = ui.modAlt
+    snapshot.pointerX = ui.pointerX
+    snapshot.pointerY = ui.pointerY
+    snapshot.hoveredKey = ui.hoveredKey
+    return
+}
+
+// Held pointer button: 0 none, 1 left, 2 right, 3 middle.
+function foundationInputButton() -> Int {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.button
+}
+
+// True while the given fly key is held (bit from foundationKeyBit).
+function foundationInputKeyHeld(bit: Int) -> Bool {
+    if bit <= 0 {
+        return false
+    }
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return false
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let mask = snapshot.keysMask
+    return (mask / bit) - ((mask / bit) / 2) * 2 == 1
+}
+
+function foundationInputShift() -> Bool {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return false
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.shift
+}
+
+// Record the bounds of the region a click just fired on (see foundationEndPress).
+function foundationWritePressBounds(ui: borrow FoundationUiContext, bounds: borrow Rect) {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    }
+    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    snapshot.pressBoundsX = bounds.x
+    snapshot.pressBoundsY = bounds.y
+    snapshot.pressBoundsW = bounds.width
+    snapshot.pressBoundsH = bounds.height
+    return
+}
+
+// Bounds of the button the last left-click fired on (for anchoring popups).
+function foundationPressBoundsX() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pressBoundsX
+}
+
+function foundationPressBoundsY() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pressBoundsY
+}
+
+function foundationPressBoundsW() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pressBoundsW
+}
+
+function foundationPressBoundsH() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pressBoundsH
+}
+
+// True when `key` is the region currently under the pointer — the primitive the
+// widget layer uses to give every button a default hover state.
+function foundationHovered(key: Int) -> Bool {
+    if key == 0 {
+        return false
+    }
+    return foundationHoveredKey() == key
+}
+
+// --- Menu placement setting ---
+// How dropdown popups anchor to their button. A simple app-wide KiraUI setting
+// so an app flips it once instead of threading it through every dropdown.
+//   0 = below, left-aligned (default)   1 = below, right-aligned
+//   2 = above, left-aligned             3 = above, right-aligned
+struct FoundationMenuSettings {
+    var placement: Int = 0
+}
+
+function foundationMenuSettingsSlotKey() -> String {
+    return "foundation.menu.settings"
+}
+
+function foundationSetMenuPlacement(placement: Int) {
+    if uiStateSlotHas(foundationMenuSettingsSlotKey()) == false {
+        uiStateSlotPut(foundationMenuSettingsSlotKey(), nativeUserData(nativeState(FoundationMenuSettings {})))
+    }
+    var settings = nativeRecover<FoundationMenuSettings>(uiStateSlotGet(foundationMenuSettingsSlotKey()))
+    settings.placement = placement
+    return
+}
+
+function foundationMenuPlacement() -> Int {
+    if uiStateSlotHas(foundationMenuSettingsSlotKey()) == false {
+        return 0
+    }
+    let settings = nativeRecover<FoundationMenuSettings>(uiStateSlotGet(foundationMenuSettingsSlotKey()))
+    return settings.placement
+}
+
+// Pointer position at the last press/release/key event (logical pixels).
+function foundationPointerX() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pointerX
+}
+
+function foundationPointerY() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.pointerY
+}
+
+// Region key under the pointer at the last press/release/key event (0 = none).
+// Latched across pointer moves, so it reads as "where did the current button
+// press land" for as long as that button is held.
+function foundationHoveredKey() -> Int {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.hoveredKey
+}
+
+function foundationWriteViewportSnapshot(width: Float, height: Float) {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    }
+    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    snapshot.viewW = width
+    snapshot.viewH = height
+    return
+}
+
+function foundationViewportWidth() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.viewW
+}
+
+function foundationViewportHeight() -> Float {
+    if uiStateSlotHas(foundationInputSlotKey()) == false {
+        return 0.0
+    }
+    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    return snapshot.viewH
 }
