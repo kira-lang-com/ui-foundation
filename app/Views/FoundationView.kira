@@ -11,6 +11,11 @@ enum FoundationViewKind {
     // A leaf showing an EXTERNAL KiraGraphics texture (e.g. an engine viewport render
     // target) inside the UI layout — drawn by the batched compositor as a mode-2 quad.
     TextureView
+    // A vector icon leaf: `content` holds SVG text (subset — see NativeLibs/Icon),
+    // rasterized once per (icon, physical size) into the glyph atlas and drawn as a
+    // color-tinted mode-1 quad, exactly like a text glyph. `size` is the logical
+    // pixel box (square); `color` is the tint.
+    Icon
 }
 
 function foundationNoopPress() {
@@ -72,6 +77,14 @@ struct FoundationView {
     }
     let borderWidth: Float = 0.0
     let radius: Float = 0.0
+    // Optional background painted behind a HitArea (transparent = none). Buttons
+    // use it for their default hover highlight without any layout wrapping.
+    let backgroundFill: Color = Color {
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+    }
     let shape: FoundationShape = FoundationShape.RegularRoundedRect
     let material: FoundationMaterial = FoundationMaterial.Flat
     let effects: [FoundationEffect] = []
@@ -87,11 +100,19 @@ struct FoundationView {
     let weight: Float = 400.0
     let disabled: Bool = false
     let focusable: Bool = false
+    // A focusable region that grabs the keyboard as soon as it appears while
+    // nothing else is focused (e.g. an inline rename field). The runner adopts it
+    // once, never stealing focus mid-edit — see foundationReconcileFocus.
+    let autofocus: Bool = false
     let onPress: () -> Void = foundationNoopPress
     let onTextInput: (String) -> Void = foundationNoopTextInput
     let onTextCodepoint: (Int) -> Void = foundationNoopTextCodepoint
     let onBackspace: () -> Void = foundationNoopPress
     let onSubmit: () -> Void = foundationNoopPress
+    // Navigation / editing keys for a focused field (arrows, home/end, forward
+    // delete) — receives the keyCode of every key press EXCEPT Enter/Backspace,
+    // which have their own callbacks. Lets a text field move its caret.
+    let onKey: (Int) -> Void = foundationNoopTextCodepoint
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
     let minLength: Float = 0.0
     let interaction: FoundationInteraction = FoundationInteraction {}
@@ -99,6 +120,10 @@ struct FoundationView {
     // opacity. Kept as Int at the view layer; the backend converts to the U32 handle.
     let texture: Int = 0
     let textureOpacity: Float = 1.0
+    // LiquidGlass blur dial (0..1): how much of the blurred backdrop pyramid the
+    // glass shows vs the sharp capture. 1 = the iOS search-pill look (fully
+    // frosted), ~0 = the macOS dock look (crisp content, refraction + rims only).
+    let blur: Float = 1.0
 }
 
 
@@ -223,9 +248,11 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         HitArea -> {
+            // Honors the view's size modes (default Hug/Hug) so hit wrappers can
+            // stretch with fill-width rows instead of collapsing around them.
             return LayoutDescriptor {
-                width: SizeMode.Hug
-                height: SizeMode.Hug
+                width: view.width
+                height: view.height
                 arrange: ArrangeMode.Fill
                 axis: Axis.Vertical
                 alignment: CrossAlignment.Stretch
@@ -241,6 +268,19 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 width: view.width
                 height: view.height
                 flex: view.flex
+                arrange: ArrangeMode.Fill
+                axis: Axis.Vertical
+                alignment: CrossAlignment.Stretch
+                overlayAlignment: Alignment.Center
+                padding: EdgeInsets {}
+                margin: EdgeInsets {}
+            }
+        }
+        Icon -> {
+            // A fixed square leaf sized by the icon's logical pixel size.
+            return LayoutDescriptor {
+                width: SizeMode.Fixed(view.size)
+                height: SizeMode.Fixed(view.size)
                 arrange: ArrangeMode.Fill
                 axis: Axis.Vertical
                 alignment: CrossAlignment.Stretch

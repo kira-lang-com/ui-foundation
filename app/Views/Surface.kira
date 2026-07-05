@@ -12,9 +12,11 @@ function Surface(
     effects: [FoundationEffect],
     padding: EdgeInsets,
     clipContent: Bool,
+    blur: Float = 1.0,
 ) -> FoundationView {
     return FoundationView {
         kind: FoundationViewKind.Surface
+        blur: blur
         children: move children
         width: width
         height: height

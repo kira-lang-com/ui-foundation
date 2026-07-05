@@ -96,6 +96,140 @@ function uiTextFaceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
 function uiTextFaceVMetrics(face: RawPtr, out: RawPtr): Void;
 @FFI.Extern { library: kiratext; symbol: kira_text_utf8_next; abi: c; }
 function uiTextUtf8Next(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32;
+@FFI.Extern { library: kiratext; symbol: kira_text_decode_codepoints; abi: c; }
+function uiTextDecodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
+
+// ---------------------------------------------------------------------------
+// Icon engine (SVG-subset rasterizer, NativeLibs/Icon): coverage bitmaps packed
+// into the same atlas as glyphs and drawn as tinted mode-1 quads.
+// ---------------------------------------------------------------------------
+
+@FFI.Extern { library: kiraicon; symbol: kira_icon_hash; abi: c; }
+function uiIconHash(svg: CString): I64;
+@FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize; abi: c; }
+function uiIconRasterize(svg: CString, px: I32, outBuffer: RawPtr): I32;
+
+// libc fread — the only raw-file symbol the linked program does not already bind
+// (fopen/fwrite/fclose live in the Metal backend's foreign surface and are reused
+// below through their Kira functions; a second @FFI.Extern binding of the same C
+// symbol would be dropped).
+@FFI.Extern { library: kiratext; symbol: fread; abi: c; }
+function uiFRead(ptr: RawPtr, size: U64, count: U64, stream: RawPtr): U64;
+
+// Copy a Kira string's UTF-8 bytes into a NUL-terminated C buffer (caller frees).
+// Needed because fopen's one program-wide binding takes a RawPtr path (the shape
+// the image-dump hook needed for getenv-returned paths).
+@Native
+function uiCPathAlloc(path: borrow String) -> RawPtr {
+    let buf = uiMemAlloc(U64(path.count * 4 + 1))
+    let indexSlot = uiMemAlloc(8)
+    let cpSlot = uiMemAlloc(8)
+    uiMemWriteU32(indexSlot, 0, 0)
+    uiMemWriteU32(cpSlot, 0, 0)
+    var at = 0
+    var more = true
+    var guard = 0
+    while more && guard < 4096 {
+        let produced = uiTextUtf8Next(path, 1000000, indexSlot, cpSlot)
+        if produced == 0 {
+            more = false
+        } else {
+            let codepoint = Int(uiMemReadU32(cpSlot, 0))
+            if codepoint == 0 || codepoint > 127 {
+                // ASCII paths only — enough for the demo assets this serves.
+                more = codepoint > 127
+                if codepoint > 127 {
+                    metalMemWriteU8(buf, at, 63)
+                    at = at + 1
+                }
+            } else {
+                metalMemWriteU8(buf, at, codepoint)
+                at = at + 1
+            }
+        }
+        guard = guard + 1
+    }
+    metalMemWriteU8(buf, at, 0)
+    uiMemFree(indexSlot)
+    uiMemFree(cpSlot)
+    return buf
+}
+
+// Load a raw RGBA8 pixel blob (width*height*4 bytes, row-major, no header) from
+// `path`, upload it into a new registered sampled texture, and return the texture
+// id (0 on any failure). Metal path only — id 0 elsewhere. Intended for
+// demo/example backdrops shown through a TextureView.
+@Native
+function uiLoadRgbaTextureFile(graphics: borrow Graphics, path: borrow String, width: Int, height: Int) -> Int {
+    let ctx = graphics.metalContext
+    if uiPtrIsNull(ctx) {
+        return 0
+    }
+    let cPath = uiCPathAlloc(path)
+    let stream = metalFOpen(cPath, "rb")
+    uiMemFree(cPath)
+    if uiPtrIsNull(stream) {
+        return 0
+    }
+    let total = width * height * 4
+    let buf = uiMemAlloc(U64(total))
+    let readCount = uiFRead(buf, 1, U64(total), stream)
+    metalFClose(stream)
+    if Int(readCount) != total {
+        uiMemFree(buf)
+        return 0
+    }
+    let textureId = metalCreateTexture(ctx, width, height)
+    let region = uiMemAlloc(48)
+    metalMemWriteU64(region, 0, 0)
+    metalMemWriteU64(region, 8, 0)
+    metalMemWriteU64(region, 16, 0)
+    metalMemWriteU64(region, 24, width)
+    metalMemWriteU64(region, 32, height)
+    metalMemWriteU64(region, 40, 1)
+    metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
+    uiMemFree(region)
+    uiMemFree(buf)
+    return textureId
+}
+
+// As above, but the path is the VALUE of environment variable `envName` (the
+// image-dump-style hookup for scripted runs).
+@Native
+function uiLoadRgbaTextureFromEnv(graphics: borrow Graphics, envName: borrow String, width: Int, height: Int) -> Int {
+    let ctx = graphics.metalContext
+    if uiPtrIsNull(ctx) {
+        return 0
+    }
+    let path = metalGetEnv(envName)
+    if uiPtrIsNull(path) {
+        return 0
+    }
+    let stream = metalFOpen(path, "rb")
+    if uiPtrIsNull(stream) {
+        return 0
+    }
+    let total = width * height * 4
+    let buf = uiMemAlloc(U64(total))
+    let readCount = uiFRead(buf, 1, U64(total), stream)
+    metalFClose(stream)
+    if Int(readCount) != total {
+        uiMemFree(buf)
+        return 0
+    }
+    let textureId = metalCreateTexture(ctx, width, height)
+    let region = uiMemAlloc(48)
+    metalMemWriteU64(region, 0, 0)
+    metalMemWriteU64(region, 8, 0)
+    metalMemWriteU64(region, 16, 0)
+    metalMemWriteU64(region, 24, width)
+    metalMemWriteU64(region, 32, height)
+    metalMemWriteU64(region, 40, 1)
+    metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
+    uiMemFree(region)
+    uiMemFree(buf)
+    return textureId
+}
 
 // @Native bridges so non-native code (app wiring, the render backend) can obtain a
 // null RawPtr and test pointers without using the FFI symbols directly.

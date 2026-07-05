@@ -93,6 +93,10 @@ int kira_text_face_render_glyph(kira_text_face* face,
  * input. Invalid bytes decode to U+FFFD and advance by one byte. */
 int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepoint);
 
+/* Decode a whole NUL-terminated UTF-8 string into up to `max` int32 codepoints
+ * (written to `out`); returns the number decoded. */
+int kira_text_decode_codepoints(const char* s, int32_t* out, int max);
+
 /* Diagnostic: run the full FreeType pipeline (face load -> sizing -> glyph index
  * -> rasterization -> measurement) against a real on-disk font and return a
  * human-readable one-line report of the actual measured values. `font_path` may

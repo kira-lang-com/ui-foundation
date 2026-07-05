@@ -87,6 +87,40 @@ struct UiBatchState {
     // the frame O(n^2); writing through this raw pointer keeps the hot path O(1).
     var contentsPtr: RawPtr
     var quadCount: Int = 0
+    // Liquid glass splits the frame into TWO quad streams: everything emitted
+    // BEFORE the first LiquidGlass surface (the backdrop that gets captured and
+    // blurred) and everything from that surface on (composited over the refracted
+    // backdrop in the final pass). `vertexBufferId/contentsPtr/quadCount` above
+    // always describe the ACTIVE stream so every emit path is stream-agnostic; the
+    // parked stream lives in these `side*` fields and the two are swapped at the
+    // split point (uiBatchBeginGlassCapture) and swapped back at uiBatchBegin.
+    var sideVertexBufferId: U32 = 0
+    var sideContentsPtr: RawPtr
+    var sideQuadCount: Int = 0
+    var glassSplit: Bool = false
+    // Offscreen liquid-glass resources, created lazily on the first glass frame and
+    // recreated grow-only on resize (the backdrop capture is sampled 1:1 through uv
+    // 0..1, so a target larger than the viewport still composites correctly).
+    var glassReady: Bool = false
+    var glassTexW: Int = 0
+    var glassTexH: Int = 0
+    var sceneTextureId: U32 = 0
+    var blurTextureAId: U32 = 0
+    var blurTextureBId: U32 = 0
+    var blurPipelineId: U32 = 0
+    var blurParamsHBufferId: U32 = 0
+    var blurParamsVBufferId: U32 = 0
+    // Bind groups: the captured scene at slot 1 (the fullscreen mode-2 quad that
+    // re-presents the backdrop in the final pass), the blurred backdrop at slot 2
+    // (sampled by mode-3 glass quads), the two blur-pass inputs at slot 0, and the
+    // slot-2 atlas fallback that keeps texture(2)/sampler(2) satisfied on frames
+    // with no glass.
+    var sceneBindGroupId: U32 = 0
+    var backdropBindGroupId: U32 = 0
+    var blurInputSceneGroupId: U32 = 0
+    var blurInputAGroupId: U32 = 0
+    var blurInputBGroupId: U32 = 0
+    var fallbackBackdropBindGroupId: U32 = 0
     var viewportW: Float = 1.0
     var viewportH: Float = 1.0
     // Retina backing scale (physical pixels per point). Glyphs are rasterized at
@@ -96,13 +130,56 @@ struct UiBatchState {
 }
 
 // The single shader (MSL) the compositor pipeline runs: an SDF rounded-rect/border
-// pass, an atlas-glyph sampling pass, and an EXTERNAL-texture pass (a TextureView
+// pass, an atlas-glyph sampling pass, an EXTERNAL-texture pass (a TextureView
 // showing a texture rendered elsewhere — e.g. an engine viewport render target —
-// bound at texture/sampler slot 1, `local` carrying its uv), selected per vertex by
-// `mode` (0 / 1 / 2). Outputs premultiplied alpha (the pipeline blends One,
-// OneMinusSourceAlpha).
+// bound at texture/sampler slot 1, `local` carrying its uv), and a LIQUID-GLASS
+// pass (mode 3) that refracts the blurred-backdrop texture bound at slot 2 through
+// the quad's rounded shape, selected per vertex by `mode` (0 / 1 / 2 / 3). Outputs
+// premultiplied alpha (the pipeline blends One, OneMinusSourceAlpha).
+//
+// Mode 3 field reuse (the 23-float vertex has no spare slots): `border` carries the
+// glass rect's uv transform — border.rg = the rect centre in backdrop-texture uv,
+// border.ba = the rect half-size in uv.
+//
+// The mode-3 body is the Kira Graphics liquid_glass example's LiquidGlassComposite
+// fragment shader with its exact constants — refractionCurve(v) = 1 -
+// 2.3*pow(5.2*e, -6.9*v - 0.7), samplePoint = glassPoint*pow(curve, 1), the magenta
+// out-of-range guard, glow = sin(atan2(-gp.y, gp.x) - 0.5) (y negated: the
+// example's uv space is GL y-up, the batch's local space y-down), and multiplier =
+// glow*0.25*smoothstep(0.5, -0.5, interior) + 1 — generalized on two axes so it
+// serves REAL surfaces, not just the example's fixed panel:
+//  - the rounded-box SDF runs in PIXEL space with the surface's own corner radius
+//    (in.radius), so a pill-shaped glass surface is pill-shaped glass (the example
+//    hardcoded 0.3 in its normalized panel space);
+//  - interiorDistance feeds the curve normalized by the shorter half-extent
+//    (-d / min(hsize)) — the same 0..~1 range the example's normalized SDF
+//    produced on its near-square panel;
+//  - the edge antialiases through SDF coverage instead of a hard discard.
+// On top of that core sits a platform-glass grade (the iOS 26 Liquid Glass look):
+//  - the lens displacement follows the SDF's outward normal (finite-difference
+//    gradient) at a FIXED pixel scale ((1-curve) * min(minHalf, 44px)), so a long
+//    pill bends a thin rim arc instead of dragging content by its half-width;
+//  - the refracted sample is desaturated (the white wash itself comes from the
+//    surface's fill, so a flat backdrop lands exactly at bg + fill wash);
+//  - a single crisp ~2px rim line around the perimeter, strongest on the
+//    vertically-lit rims (profiled from the platform reference: bright line to
+//    ~255 inside the edge, no wide sheen, no inner shade);
+//  - the quad's outside-the-shape region renders a crisp dark contact ring
+//    (~2.5px) plus a faint offset soft shadow -- both measured off the
+//    reference -- at no extra pass.
+// Inside samples the BLURRED backdrop at slot 2; outside is the sharp backdrop
+// quad drawn beneath.
 function uiBatchMslSource() -> String {
-    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]], texture2d<float> external [[texture(1)]], sampler externalSmp [[sampler(1)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 1.5) { float4 c = external.sample(externalSmp, in.local); float a = c.a * in.fill.a; return float4(c.rgb * in.fill.a, a); } if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
+    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nstatic inline float refractionCurve(float value) { float e = 2.718281828459045; return 1.0 - 2.3 * pow(5.2 * e, -6.9 * value - 0.7); }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]], texture2d<float> external [[texture(1)]], sampler externalSmp [[sampler(1)]], texture2d<float> backdrop [[texture(2)]], sampler backdropSmp [[sampler(2)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 2.5) { float distancePx = sdRound(in.local, in.hsize, in.radius); if (distancePx > 0.5) { float rxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float rxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float ryp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float rym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 rn = normalize(float2(rxp - rxm, ryp - rym) + float2(0.0001, 0.0)); float ringW = 1.2 + 1.2 * (1.0 - abs(rn.y)); float ring = (1.0 - smoothstep(0.0, ringW, distancePx)) * (0.12 + 0.30 * (1.0 - abs(rn.y))); float ds = sdRound(in.local - float2(0.0, 2.0), in.hsize, in.radius); float soft = (1.0 - smoothstep(-2.0, 20.0, ds)) * 0.05 * clamp(rn.y, 0.0, 1.0); float shadow = min(ring + soft, 0.14); if (shadow <= 0.004) { discard_fragment(); } return float4(0.0, 0.0, 0.0, shadow); } float cov = clamp(0.5 - distancePx, 0.0, 1.0); float minH = max(min(in.hsize.x, in.hsize.y), 1.0); float t = max(0.0 - distancePx, 0.0) / 180.0; float ref = refractionCurve(t); float gxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float gxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float gyp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float gym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 n = normalize(float2(gxp - gxm, gyp - gym) + float2(0.0001, 0.0)); float bend = (1.0 - ref) * min(minH, 72.0); float2 gp = in.local / in.hsize; float2 uvFrag = float2(in.border.r + gp.x * in.border.b, in.border.g + gp.y * in.border.a); float2 uvScale = float2(in.border.b / in.hsize.x, in.border.a / in.hsize.y); float2 coord = uvFrag - n * bend * uvScale; float3 sharpTap = external.sample(externalSmp, coord).rgb; float3 softTap = backdrop.sample(backdropSmp, coord).rgb; float3 rgb = mix(sharpTap, softTap, clamp(in.fill.a, 0.0, 1.0) * smoothstep(2.0, 22.0, max(0.0 - distancePx, 0.0))); float luma = dot(rgb, float3(0.299, 0.587, 0.114)); float washA = clamp(in.borderWidth * (1.6 - 1.3 * luma), 0.0, 0.85); rgb = mix(rgb, in.fill.rgb, washA); float inside = max(0.0 - distancePx, 0.0); float spec = pow(abs(n.y), 1.5); float hairline = 1.0 - smoothstep(0.3, 1.5, inside); float innerBloom = 1.0 - smoothstep(0.8, 9.0, inside); rgb = rgb + float3(1.0, 1.0, 1.0) * (spec * (hairline * 0.22 + innerBloom * 0.07)); return float4(clamp(rgb, 0.0, 1.0) * cov, cov); } if (in.mode > 1.5) { float4 c = external.sample(externalSmp, in.local); float a = c.a * in.fill.a; return float4(c.rgb * in.fill.a, a); } if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
+}
+
+// Separable gaussian blur (the liquid-glass backdrop passes). One shader serves both
+// directions: buffer(0) holds 4 floats — texel resolution (w, h) and direction
+// (x, y) — written CPU-side per pass, so no per-size shader rebuilds. The fullscreen
+// triangle is derived from vertex_id (no vertex layout). Weights/offsets match the
+// Kira Graphics liquid_glass example's 3-tap kernel.
+function uiBlurMslSource() -> String {
+    return "#include <metal_stdlib>\nusing namespace metal;\nstruct VOut { float4 pos [[position]]; float2 uv; float2 texel; float2 dir; };\nvertex VOut v_main(uint vid [[vertex_id]], constant float* params [[buffer(0)]]) { float2 ndc = float2(vid == 1 ? 3.0 : -1.0, vid == 2 ? 3.0 : -1.0); VOut o; o.pos = float4(ndc, 0.0, 1.0); o.uv = float2((ndc.x + 1.0) * 0.5, (1.0 - ndc.y) * 0.5); o.texel = float2(1.0 / max(params[0], 1.0), 1.0 / max(params[1], 1.0)); o.dir = float2(params[2], params[3]); return o; }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler smp [[sampler(0)]]) { float2 off1 = 1.411764705882353 * in.dir * in.texel; float2 off2 = 3.2941176470588234 * in.dir * in.texel; float2 off3 = 5.176470588235294 * in.dir * in.texel; float4 c = src.sample(smp, in.uv) * 0.1964825501511404; c += src.sample(smp, in.uv + off1) * 0.2969069646728344; c += src.sample(smp, in.uv - off1) * 0.2969069646728344; c += src.sample(smp, in.uv + off2) * 0.09447039785044732; c += src.sample(smp, in.uv - off2) * 0.09447039785044732; c += src.sample(smp, in.uv + off3) * 0.010381362401148057; c += src.sample(smp, in.uv - off3) * 0.010381362401148057; return c; }\n"
 }
 
 function uiBatchQuadIndices(quadCount: Int) -> [Int] {
@@ -165,6 +242,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         engine: uiNullPtr()
         face: uiNullPtr()
         contentsPtr: uiNullPtr()
+        sideContentsPtr: uiNullPtr()
     }
 
     let shader = graphics.createShader(ShaderDescriptor {
@@ -211,6 +289,12 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     state.vertexBufferId = vbuf.id
     state.contentsPtr = graphics.dynamicBufferContents(vbuf)
 
+    // Second stream for the liquid-glass split (see UiBatchState). Allocated up
+    // front so switching streams mid-frame never allocates.
+    let vbuf2 = graphics.createDynamicBuffer(floatCapacity)
+    state.sideVertexBufferId = vbuf2.id
+    state.sideContentsPtr = graphics.dynamicBufferContents(vbuf2)
+
     let ibuf = graphics.createIndexBuffer(IndexBufferDescriptor {
         label: "kira-ui-batch-indices"
         usage: bufferUsageIndex()
@@ -253,6 +337,11 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     let fallbackExternal = graphics.createTextureSamplerBindGroup("kira-ui-batch-external-fallback", 1, atlas, 1, sampler)
     state.fallbackExternalBindGroupId = fallbackExternal.id
 
+    // Slot-2 fallback: same discipline for the liquid-glass backdrop binding —
+    // frames with no glass keep texture(2)/sampler(2) satisfied by the atlas.
+    let fallbackBackdrop = graphics.createTextureSamplerBindGroup("kira-ui-batch-backdrop-fallback", 2, atlas, 2, sampler)
+    state.fallbackBackdropBindGroupId = fallbackBackdrop.id
+
     state.glyphHashKeys = uiBatchIntZeros(uiBatchGlyphHashCap())
     state.glyphHashVals = uiBatchIntZeros(uiBatchGlyphHashCap())
 
@@ -266,6 +355,19 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
 @Native
 function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float, scale: Float) {
     var state = nativeRecover<UiBatchState>(batchPtr)
+    // If the previous frame split for liquid glass, the ACTIVE stream is the
+    // above-glass one; swap the backdrop stream back to active so the frame
+    // starts emitting into stream A again.
+    if state.glassSplit {
+        let activeBuffer = state.vertexBufferId
+        let activeContents = state.contentsPtr
+        state.vertexBufferId = state.sideVertexBufferId
+        state.contentsPtr = state.sideContentsPtr
+        state.sideVertexBufferId = activeBuffer
+        state.sideContentsPtr = activeContents
+        state.glassSplit = false
+    }
+    state.sideQuadCount = 0
     state.quadCount = 0
     state.viewportW = viewportW
     if viewportW <= 0.0 {
@@ -435,6 +537,308 @@ function uiBatchPushExternalRect(
         w / 2.0, h / 2.0, 0.0, 0.0, 2.0,
         1.0, 1.0, 1.0, alpha,
         0.0, 0.0, 0.0, 0.0,
+        clipMinX, clipMinY, clipMaxX, clipMaxY
+    )
+    return
+}
+
+// ---------------------------------------------------------------------------
+// Liquid glass (mode 3): capture-the-backdrop → separable blur → refracted
+// composite, the batched-compositor port of the Kira Graphics liquid_glass
+// example. See UiBatchState's stream fields for the split mechanics.
+// ---------------------------------------------------------------------------
+
+// A render pass targeting one of the glass offscreen textures.
+function uiGlassTexturePass(label: String, textureId: U32, r: Float, g: Float, b: Float, a: Float) -> RenderPassDescriptor {
+    let target = RenderTarget {
+        kind: renderTargetKindTexture()
+        texture: GraphicsTexture {
+            handle: BackendTextureHandle {
+                id: textureId
+            }
+            id: textureId
+        }
+        mipLevel: 0
+        arrayLayer: 0
+    }
+    let attachment = ColorAttachment {
+        target: target
+        loadAction: loadActionClear()
+        storeAction: storeActionStore()
+        clearColor: Color {
+            r: r
+            g: g
+            b: b
+            a: a
+        }
+        resolveTarget: emptyRenderTarget()
+        hasResolveTarget: false
+    }
+    return RenderPassDescriptor {
+        label: label
+        colorAttachments: [attachment]
+        primaryColorAttachment: attachment
+        hasPrimaryColorAttachment: true
+        depthAttachment: emptyDepthAttachment()
+        hasDepthAttachment: false
+        stencilAttachment: emptyStencilAttachment()
+        hasStencilAttachment: false
+    }
+}
+
+// Ensure the glass pipelines/param buffers exist (once) and the offscreen targets
+// cover the current physical viewport (grow-only: the capture is sampled through
+// uv 0..1, so a larger-than-viewport target still composites 1:1, and shrinking
+// never reallocates — Metal texture destruction is not exposed, so grow-only also
+// bounds the resource churn of an interactive resize).
+@Native
+function uiBatchEnsureGlassResources(batchPtr: RawPtr, graphics: borrow Graphics) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if state.blurPipelineId == 0 {
+        let blurShader = graphics.createShader(ShaderDescriptor {
+            label: "kira-ui-glass-blur"
+            vertexSource: uiBlurMslSource()
+            fragmentSource: ""
+            vertexPath: ""
+            fragmentPath: ""
+        })
+        let blurPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+            label: "kira-ui-glass-blur-pipeline"
+            shader: blurShader
+            vertexLayout: VertexLayout {
+                stride: 0
+                attributes: []
+            }
+            colorTargets: [
+                ColorTargetDescriptor {
+                    format: textureFormatRgba8Unorm()
+                    blend: BlendState {
+                        enabled: false
+                        preset: blendPresetReplace()
+                    }
+                }
+            ]
+            depthStencil: DepthStencilDescriptor {
+                depthEnabled: false
+                depthWriteEnabled: false
+                depthCompare: compareFunctionAlways()
+                format: textureFormatDepth24Stencil8()
+            }
+            rasterization: RasterizationDescriptor {
+                cullMode: cullModeNone()
+                frontFace: frontFaceCounterClockwise()
+            }
+            primitive: PrimitiveDescriptor {
+                topology: primitiveTopologyTriangleList()
+            }
+        })
+        state.blurPipelineId = blurPipeline.id
+        let paramsH = graphics.createDynamicBuffer(4)
+        state.blurParamsHBufferId = paramsH.id
+        let paramsV = graphics.createDynamicBuffer(4)
+        state.blurParamsVBufferId = paramsV.id
+    }
+
+    // Targets sized in LOGICAL points, exactly like the Kira Graphics example
+    // (its scene target is the 1600x900 window size regardless of backing scale,
+    // its blur chain half that). On Retina the capture is therefore half the
+    // drawable and the blurred backdrop a quarter — that resolution pyramid,
+    // upscaled at composite, is most of the example's visible blur, so matching
+    // it point-for-point matches the look.
+    let wantW = Int(state.viewportW)
+    let wantH = Int(state.viewportH)
+    if wantW <= state.glassTexW && wantH <= state.glassTexH {
+        return
+    }
+    // Allocate with generous headroom so an interactive window resize does not
+    // recreate the targets (plus bind groups) on every drag step — the capture
+    // fills the whole target via NDC regardless of its size, so oversizing only
+    // costs memory. Grow in 1.5x steps beyond the initial floor.
+    var texW = (wantW * 3) / 2
+    if texW < 2048 {
+        texW = 2048
+    }
+    var texH = (wantH * 3) / 2
+    if texH < 1280 {
+        texH = 1280
+    }
+    if state.glassTexW > texW {
+        texW = state.glassTexW
+    }
+    if state.glassTexH > texH {
+        texH = state.glassTexH
+    }
+    let scene = graphics.createTexture(TextureDescriptor {
+        label: "kira-ui-glass-scene"
+        width: texW
+        height: texH
+        format: textureFormatRgba8Unorm()
+        usage: textureUsageRenderTargetSampled()
+        sampleCount: 1
+        storageMode: 0
+    })
+    var blurW = texW / 2
+    if blurW < 1 {
+        blurW = 1
+    }
+    var blurH = texH / 2
+    if blurH < 1 {
+        blurH = 1
+    }
+    let blurA = graphics.createTexture(TextureDescriptor {
+        label: "kira-ui-glass-blur-a"
+        width: blurW
+        height: blurH
+        format: textureFormatRgba8Unorm()
+        usage: textureUsageRenderTargetSampled()
+        sampleCount: 1
+        storageMode: 0
+    })
+    let blurB = graphics.createTexture(TextureDescriptor {
+        label: "kira-ui-glass-blur-b"
+        width: blurW
+        height: blurH
+        format: textureFormatRgba8Unorm()
+        usage: textureUsageRenderTargetSampled()
+        sampleCount: 1
+        storageMode: 0
+    })
+    state.sceneTextureId = scene.id
+    state.blurTextureAId = blurA.id
+    state.blurTextureBId = blurB.id
+    state.glassTexW = texW
+    state.glassTexH = texH
+
+    let sampler = GraphicsSampler {
+        handle: BackendSamplerHandle {
+            id: state.samplerId
+        }
+        id: state.samplerId
+    }
+    let sceneGroup = graphics.createTextureSamplerBindGroup("kira-ui-glass-scene-bind", 1, scene, 1, sampler)
+    state.sceneBindGroupId = sceneGroup.id
+    let backdropGroup = graphics.createTextureSamplerBindGroup("kira-ui-glass-backdrop-bind", 2, blurB, 2, sampler)
+    state.backdropBindGroupId = backdropGroup.id
+    let blurInScene = graphics.createTextureSamplerBindGroup("kira-ui-glass-blur-in-scene", 0, scene, 0, sampler)
+    state.blurInputSceneGroupId = blurInScene.id
+    let blurInA = graphics.createTextureSamplerBindGroup("kira-ui-glass-blur-in-a", 0, blurA, 0, sampler)
+    state.blurInputAGroupId = blurInA.id
+    let blurInB = graphics.createTextureSamplerBindGroup("kira-ui-glass-blur-in-b", 0, blurB, 0, sampler)
+    state.blurInputBGroupId = blurInB.id
+
+    // Blur params (texel resolution + direction). BOTH passes divide the tap
+    // offsets by the FULL scene resolution — exactly what the Kira Graphics
+    // liquid_glass example's blur shaders hardcode (1600x900 even though the blur
+    // targets are 800x450).
+    let paramsHBuf = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.blurParamsHBufferId
+        }
+        id: state.blurParamsHBufferId
+    }
+    let hContents = graphics.dynamicBufferContents(paramsHBuf)
+    uiMemWriteF32(hContents, 0, Float(texW))
+    uiMemWriteF32(hContents, 4, Float(texH))
+    uiMemWriteF32(hContents, 8, 2.0)
+    uiMemWriteF32(hContents, 12, 0.0)
+    let paramsVBuf = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.blurParamsVBufferId
+        }
+        id: state.blurParamsVBufferId
+    }
+    let vContents = graphics.dynamicBufferContents(paramsVBuf)
+    uiMemWriteF32(vContents, 0, Float(texW))
+    uiMemWriteF32(vContents, 4, Float(texH))
+    uiMemWriteF32(vContents, 8, 0.0)
+    uiMemWriteF32(vContents, 12, 2.0)
+    state.glassReady = true
+    return
+}
+
+// First LiquidGlass surface of the frame: park the backdrop stream and switch
+// emission to the above-glass stream. The backdrop stream is drawn TWICE — once
+// into the (points-sized) scene capture that feeds the blur chain, and again at
+// full resolution directly in the swapchain pass — so the visible backdrop stays
+// crisp on Retina while the glass refracts the example-matching blur pyramid.
+// Later glass surfaces in the same frame reuse the same split — they all refract
+// the content below the FIRST glass surface, mirroring how platform glass samples
+// the layer stack beneath the glass plane.
+@Native
+function uiBatchBeginGlassCapture(batchPtr: RawPtr, graphics: borrow Graphics) {
+    uiBatchEnsureGlassResources(batchPtr, graphics)
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if !state.glassReady {
+        return
+    }
+    if state.glassSplit {
+        return
+    }
+    let activeBuffer = state.vertexBufferId
+    let activeContents = state.contentsPtr
+    let activeCount = state.quadCount
+    state.vertexBufferId = state.sideVertexBufferId
+    state.contentsPtr = state.sideContentsPtr
+    state.sideVertexBufferId = activeBuffer
+    state.sideContentsPtr = activeContents
+    state.sideQuadCount = activeCount
+    state.quadCount = 0
+    state.glassSplit = true
+    return
+}
+
+@Native
+function uiBatchGlassSplitActive(batchPtr: RawPtr) -> Bool {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.glassSplit
+}
+
+// Emit one liquid-glass quad (mode 3): a rounded-rect region that refracts the
+// backdrop. Field packing: fill.rgb = the wash color, fill.a = the BLUR MIX
+// (0..1, sharp capture vs blurred pyramid), borderWidth = the wash BASE strength
+// (the surface fill's alpha) which the shader scales by backdrop luminance —
+// stronger over dark content, near invisible over light.
+@Native
+function uiBatchPushGlass(
+    batchPtr: RawPtr,
+    x: Float, y: Float, w: Float, h: Float,
+    radius: Float,
+    tint: borrow Color,
+    glowIntensity: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return
+    }
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if !state.glassSplit {
+        return
+    }
+    let vw = state.viewportW
+    let vh = state.viewportH
+    // Padded well past the shape: the same quad renders the soft drop shadow in
+    // its outside-the-SDF region (offset +7px, ~22px falloff in the shader).
+    let pad = 30.0
+    let halfW = w / 2.0
+    let halfH = h / 2.0
+    let cx = x + halfW
+    let cy = y + halfH
+    let lhx = halfW + pad
+    let lhy = halfH + pad
+    var clampedRadius = radius
+    if clampedRadius > halfW {
+        clampedRadius = halfW
+    }
+    if clampedRadius > halfH {
+        clampedRadius = halfH
+    }
+    uiBatchEmitQuad(
+        batchPtr,
+        cx - lhx, cy - lhy, cx + lhx, cy + lhy,
+        0.0 - lhx, 0.0 - lhy, lhx, lhy,
+        halfW, halfH, clampedRadius, tint.a, 3.0,
+        tint.r, tint.g, tint.b, glowIntensity,
+        cx / vw, cy / vh, halfW / vw, halfH / vh,
         clipMinX, clipMinY, clipMaxX, clipMaxY
     )
     return
@@ -642,6 +1046,150 @@ function uiBatchGlyphSlot(batchPtr: RawPtr, index: Int) -> UiGlyphSlot {
     return state.glyphs[index]
 }
 
+// Append a vector icon: rasterize the SVG once per (icon, physical size) into
+// the glyph atlas (coverage-only) and emit one tinted mode-1 quad. Cache keys
+// live in the glyph hash under a NEGATIVE namespace (glyph keys are always
+// positive), so icons and glyphs share the atlas and the lookup table.
+@Native
+function uiBatchPushIcon(
+    batchPtr: RawPtr,
+    graphics: borrow Graphics,
+    svg: borrow String,
+    x: Float, y: Float, w: Float, h: Float,
+    color: borrow Color,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    var scale = state.scale
+    if scale <= 0.0 {
+        scale = 1.0
+    }
+    let sizePts = w < h ? w : h
+    let px = Int(sizePts * scale + 0.5)
+    if px <= 0 || px > 512 {
+        return
+    }
+    let hash64 = uiIconHash(svg)
+    let iconHash = Int(hash64)
+    let key = 0 - ((iconHash % 4294967291) * 1024 + px)
+    let cap = state.glyphHashKeys.count
+    var slotIdx = -1
+    var homeSlot = -1
+    var probing = cap > 0
+    var hh = 0
+    if cap > 0 {
+        hh = (key % cap + cap) % cap
+    }
+    var probes = 0
+    while probing && probes < cap {
+        let slotKey = state.glyphHashKeys[hh]
+        if slotKey == key {
+            slotIdx = state.glyphHashVals[hh]
+            probing = false
+        } else {
+            if slotKey == 0 {
+                homeSlot = hh
+                probing = false
+            } else {
+                hh = (hh + 1) % cap
+                probes = probes + 1
+            }
+        }
+    }
+    if slotIdx < 0 {
+        let bufBytes = px * px
+        let buf = uiMemAlloc(U64(bufBytes))
+        let rendered = uiIconRasterize(svg, px, buf)
+        var newSlot = UiGlyphSlot {
+            key: key
+            advance: 0.0
+            bearingX: 0
+            bearingY: 0
+            w: px
+            h: px
+            valid: true
+        }
+        if rendered != 0 {
+            if state.cursorX + px + 1 > state.atlasW {
+                state.cursorX = 1
+                state.cursorY = state.cursorY + state.rowHeight + 1
+                state.rowHeight = 0
+            }
+            if state.cursorY + px + 1 <= state.atlasH {
+                newSlot.atlasX = state.cursorX
+                newSlot.atlasY = state.cursorY
+                var pixels: [Int] = []
+                var row = 0
+                while row < px {
+                    var col = 0
+                    while col < px {
+                        let cov = uiMemReadByte(buf, row * px + col)
+                        pixels.append(cov)
+                        pixels.append(cov)
+                        pixels.append(cov)
+                        pixels.append(cov)
+                        col = col + 1
+                    }
+                    row = row + 1
+                }
+                graphics.updateTextureRegion(GraphicsTexture {
+                    handle: BackendTextureHandle {
+                        id: state.atlasTextureId
+                    }
+                    id: state.atlasTextureId
+                }, newSlot.atlasX, newSlot.atlasY, px, px, pixels)
+                state.cursorX = state.cursorX + px + 1
+                if px > state.rowHeight {
+                    state.rowHeight = px
+                }
+            } else {
+                newSlot.valid = false
+            }
+        } else {
+            newSlot.valid = false
+        }
+        uiMemFree(buf)
+        state.glyphs.append(move newSlot)
+        slotIdx = state.glyphs.count - 1
+        if homeSlot >= 0 {
+            state.glyphHashKeys[homeSlot] = key
+            state.glyphHashVals[homeSlot] = slotIdx
+        }
+    }
+    if slotIdx >= 0 {
+        if state.glyphs[slotIdx].valid {
+            let atlasX = state.glyphs[slotIdx].atlasX
+            let atlasY = state.glyphs[slotIdx].atlasY
+            let wpx = state.glyphs[slotIdx].w
+            let hpx = state.glyphs[slotIdx].h
+            let atlasW = Float(uiBatchAtlasSize())
+            let u0 = Float(atlasX) / atlasW
+            let v0 = Float(atlasY) / atlasW
+            let u1 = Float(atlasX + wpx) / atlasW
+            let v1 = Float(atlasY + hpx) / atlasW
+            // centre the square icon box inside the given bounds
+            let gx = x + (w - sizePts) / 2.0
+            let gy = y + (h - sizePts) / 2.0
+            let stride = uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
+            if state.quadCount < uiBatchCapacityQuads() && !uiPtrIsNull(state.contentsPtr) {
+                let base = state.quadCount * stride
+                uiWriteQuad(
+                    state.contentsPtr, base,
+                    gx, gy, gx + sizePts, gy + sizePts,
+                    u0, v0, u1, v1,
+                    state.viewportW, state.viewportH,
+                    0.0, 0.0, 0.0, 0.0, 1.0,
+                    color.r, color.g, color.b, color.a,
+                    0.0, 0.0, 0.0, 0.0,
+                    clipMinX, clipMinY, clipMaxX, clipMaxY
+                )
+                state.quadCount = state.quadCount + 1
+            }
+        }
+    }
+    return
+}
+
 // Lay out and append a UTF-8 string left-to-right, vertically centred in the
 // (x,y,w,h) box. Each glyph is a textured quad sampling its atlas coverage.
 @Native
@@ -842,23 +1390,26 @@ function uiBatchPushText(
     return
 }
 
-// Upload the frame's vertex stream and submit the whole UI as one indexed draw on the
-// active render-pass encoder.
+// Bind the batch pipeline + a vertex stream + the three texture slots and issue one
+// indexed draw. Slot assignments:
+//  - slot 0: always the glyph/icon atlas.
+//  - slot 1: the frame's external texture (TextureView) or the atlas fallback.
+//  - slot 2: the blurred backdrop when drawing glass quads (withBackdrop), else the
+//    atlas fallback.
 @Native
-function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
+function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, bufferId: U32, quadCount: Int, withBackdrop: Bool) {
     var state = nativeRecover<UiBatchState>(batchPtr)
-    if state.quadCount <= 0 {
+    if quadCount <= 0 {
         return
     }
     // Vertices were written straight into the buffer's shared contents during emit, so
     // there is nothing to upload here — just bind and issue the single indexed draw.
     let vbuf = GraphicsBuffer {
         handle: BackendBufferHandle {
-            id: state.vertexBufferId
+            id: bufferId
         }
-        id: state.vertexBufferId
+        id: bufferId
     }
-
     let pipeline = RenderPipeline {
         handle: BackendPipelineHandle {
             id: state.pipelineId
@@ -877,23 +1428,151 @@ function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borr
         }
         id: state.bindGroupId
     }
-    // Slot 1 carries the frame's external texture (TextureView) when registered, else the
-    // atlas fallback that keeps the shader's texture(1)/sampler(1) arguments satisfied.
-    var externalGroupId = state.fallbackExternalBindGroupId
+    var slot1GroupId = state.fallbackExternalBindGroupId
     if state.externalBindReady {
-        externalGroupId = state.externalBindGroupId
+        slot1GroupId = state.externalBindGroupId
     }
-    let externalGroup = BindGroup {
+    var slot2GroupId = state.fallbackBackdropBindGroupId
+    if withBackdrop {
+        slot2GroupId = state.backdropBindGroupId
+        // The sharp capture rides at slot 1 for the glass blur dial (mode-3 mixes
+        // sharp vs blurred by fill.a). Caveat: a TextureView ABOVE the glass plane
+        // would sample the capture instead of its own texture; below-glass
+        // TextureViews (the common case) draw in the backdrop stream and are fine.
+        slot1GroupId = state.sceneBindGroupId
+    }
+    let slot1Group = BindGroup {
         handle: BackendBindGroupHandle {
-            id: externalGroupId
+            id: slot1GroupId
         }
-        id: externalGroupId
+        id: slot1GroupId
+    }
+    let slot2Group = BindGroup {
+        handle: BackendBindGroupHandle {
+            id: slot2GroupId
+        }
+        id: slot2GroupId
     }
     encoder.setPipeline(pipeline)
     encoder.setVertexBuffer(vbuf)
     encoder.setIndexBuffer(ibuf, indexFormatUint32())
     encoder.setBindGroup(0, bindGroup)
-    encoder.setBindGroup(1, externalGroup)
-    encoder.drawIndexed(state.quadCount * 6)
+    encoder.setBindGroup(1, slot1Group)
+    encoder.setBindGroup(2, slot2Group)
+    encoder.drawIndexed(quadCount * 6)
+    return
+}
+
+// Upload the frame's vertex stream and submit the whole UI as one indexed draw on the
+// active render-pass encoder. On a liquid-glass split frame this draws the ABOVE-GLASS
+// stream (glass quads + everything over them); the backdrop stream and the
+// capture/blur passes are orchestrated by uiBatchPresent.
+@Native
+function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    let bufferId = state.vertexBufferId
+    let quadCount = state.quadCount
+    let split = state.glassSplit
+    var target = encoder
+    uiBatchDrawStream(batchPtr, target, bufferId, quadCount, split)
+    return
+}
+
+// One fullscreen blur tap: bind the blur pipeline, the direction/resolution params
+// (vertex buffer 0) and the input texture (slot 0), and draw the vertex_id triangle.
+@Native
+function uiBlurPassDraw(encoder: borrow mut RenderEncoder, pipelineId: U32, paramsBufferId: U32, inputGroupId: U32) {
+    let pipeline = RenderPipeline {
+        handle: BackendPipelineHandle {
+            id: pipelineId
+        }
+        id: pipelineId
+    }
+    let params = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: paramsBufferId
+        }
+        id: paramsBufferId
+    }
+    let inputGroup = BindGroup {
+        handle: BackendBindGroupHandle {
+            id: inputGroupId
+        }
+        id: inputGroupId
+    }
+    encoder.setPipeline(pipeline)
+    encoder.setVertexBuffer(params)
+    encoder.setBindGroup(0, inputGroup)
+    encoder.draw(3)
+    return
+}
+
+// Present the frame. Without a glass split this is the classic single swapchain
+// pass; with one it runs the liquid-glass chain — backdrop stream into the scene
+// capture (points-sized, feeding the blur pyramid), separable half-res blur, then
+// the swapchain pass drawing the backdrop stream again at FULL resolution followed
+// by the above-glass stream (glass quads refracting the blur + everything above).
+@Native
+function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graphics: borrow Graphics, bgR: Float, bgG: Float, bgB: Float, bgA: Float) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    let split = state.glassSplit && state.glassReady
+    let bg = Color {
+        r: bgR
+        g: bgG
+        b: bgB
+        a: bgA
+    }
+    if !split {
+        var encoder = frame.beginPass(bg)
+        uiBatchFlush(batchPtr, graphics, encoder)
+        frame.endPass()
+        return
+    }
+
+    let sideBuffer = state.sideVertexBufferId
+    let sideCount = state.sideQuadCount
+    let sceneTextureId = state.sceneTextureId
+    let blurAId = state.blurTextureAId
+    let blurBId = state.blurTextureBId
+    let blurPipelineId = state.blurPipelineId
+    let paramsH = state.blurParamsHBufferId
+    let paramsV = state.blurParamsVBufferId
+    let blurInScene = state.blurInputSceneGroupId
+    let blurInA = state.blurInputAGroupId
+
+    // Pass 1: the backdrop stream into the scene capture.
+    var backdropEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-scene-pass", sceneTextureId, bgR, bgG, bgB, bgA))
+    uiBatchDrawStream(batchPtr, backdropEncoder, sideBuffer, sideCount, false)
+    frame.endPass()
+
+    // Blur: separable gaussian at half resolution with DENSE taps (dir 2.0) run
+    // EIGHT (H,V) iterations (scene -> A -> B, then (B -> A -> B) x7). Iterating a
+    // dense small kernel widens the gaussian without the comb/banding artifacts a
+    // sparse widened-tap kernel produces (visible as 'lines of blur'), and lands on
+    // the reference's ghost softness (gradient energy ~0.69 vs target 0.65).
+    let blurInB = state.blurInputBGroupId
+    var blurHEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-h-pass", blurAId, 0.0, 0.0, 0.0, 1.0))
+    uiBlurPassDraw(blurHEncoder, blurPipelineId, paramsH, blurInScene)
+    frame.endPass()
+    var blurVEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-v-pass", blurBId, 0.0, 0.0, 0.0, 1.0))
+    uiBlurPassDraw(blurVEncoder, blurPipelineId, paramsV, blurInA)
+    frame.endPass()
+    var blurIteration = 1
+    while blurIteration < 8 {
+        var blurHNEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-hn-pass", blurAId, 0.0, 0.0, 0.0, 1.0))
+        uiBlurPassDraw(blurHNEncoder, blurPipelineId, paramsH, blurInB)
+        frame.endPass()
+        var blurVNEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-vn-pass", blurBId, 0.0, 0.0, 0.0, 1.0))
+        uiBlurPassDraw(blurVNEncoder, blurPipelineId, paramsV, blurInA)
+        frame.endPass()
+        blurIteration = blurIteration + 1
+    }
+
+    // Final pass: the swapchain composite — the backdrop stream at full resolution,
+    // then the above-glass stream whose glass quads refract the blurred capture.
+    var mainEncoder = frame.beginPass(bg)
+    uiBatchDrawStream(batchPtr, mainEncoder, sideBuffer, sideCount, false)
+    uiBatchFlush(batchPtr, graphics, mainEncoder)
+    frame.endPass()
     return
 }

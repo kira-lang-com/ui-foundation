@@ -27,7 +27,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         Surface -> {
             let frame = layoutFrame(tree, nodeIndex)
             if view.material != FoundationMaterial.Flat || view.effects.count > 0 {
-                current.beginBackdrop(frame, view.material)
+                current.beginBackdrop(frame, view.material, view.radius, view.blur, view.fill)
                 var effectIndex = 0
                 while effectIndex < view.effects.count {
                     current.applyBackdropEffect(frame, view.effects[effectIndex])
@@ -58,12 +58,22 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         HitArea -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onScroll, view.interaction)
+            // Paint the optional background (default transparent) behind the
+            // children — the default-hover highlight rides on this.
+            if view.backgroundFill.a > 0.0 {
+                current.drawSurfaceFields(frame, view.backgroundFill, view.border, view.borderWidth, view.radius)
+            }
+            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.autofocus, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onKey, view.onScroll, view.interaction)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
         TextureView -> {
             let frame = layoutFrame(tree, nodeIndex)
             current.drawTextureFields(frame, view.texture, view.textureOpacity)
+            return 1
+        }
+        Icon -> {
+            let frame = layoutFrame(tree, nodeIndex)
+            current.drawIconFields(frame, view.content, view.color)
             return 1
         }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current);

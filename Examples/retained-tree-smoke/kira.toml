@@ -4,7 +4,7 @@ version = "0.1.0"
 kind = "app"
 
 [defaults]
-execution_mode = "vm"
+execution_mode = "hybrid"
 build_target = "host"
 kira = "0.1.0"
 

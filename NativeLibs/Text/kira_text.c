@@ -702,3 +702,25 @@ int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepo
     *codepoint = cp;
     return 1;
 }
+
+/* Decode a whole NUL-terminated UTF-8 string into codepoints in one call, so the
+ * Kira side gets an editable buffer from an opaque String without per-codepoint
+ * FFI round-trips. Writes up to `max` int32 codepoints into `out`, returns the
+ * count. */
+int kira_text_decode_codepoints(const char* s, int32_t* out, int max) {
+    if (s == NULL || out == NULL || max <= 0) {
+        return 0;
+    }
+    int len = (int)strlen(s);
+    int32_t index = 0;
+    int n = 0;
+    uint32_t cp;
+    while (n < max) {
+        if (!kira_text_utf8_next(s, len, &index, &cp)) {
+            break;
+        }
+        out[n] = (int32_t)cp;
+        n += 1;
+    }
+    return n;
+}

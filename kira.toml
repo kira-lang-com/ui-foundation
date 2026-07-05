@@ -4,10 +4,10 @@ version = "0.1.0"
 kind = "library"
 kira = "0.1.0"
 module_root = "KiraUIFoundation"
-native_libraries = ["NativeLibs/Text.toml", "NativeLibs/StateStore.toml"]
+native_libraries = ["NativeLibs/Text.toml", "NativeLibs/StateStore.toml", "NativeLibs/Icon.toml"]
 
 [defaults]
-execution_mode = "vm"
+execution_mode = "llvm"
 build_target = "host"
 
 [dependencies]
