@@ -11,6 +11,11 @@ struct FoundationUiContext {
     var scrollY: Float = 0.0
     var lastTextCodepoint: Int = 0
     var lastKeyCode: Int = 0
+    // Total events dispatched since app start. The interactive runner's
+    // re-present fast path compares this against the last presented frame's
+    // count: no new events + same viewport → the rebuilt tree could not differ,
+    // so the retained batch is re-flushed instead of rebuilding.
+    var eventCount: Int = 0
     // Drag tracking: the press origin, whether a drag is in progress, and which
     // region owns it (so move/end keep targeting the press region even if the
     // pointer leaves it).
@@ -21,6 +26,27 @@ struct FoundationUiContext {
     // Active input-method composition (pinyin buffer + Hanzi candidates). Read by
     // the view builder to render the preedit/candidate bar; mutated by dispatch.
     var ime: ImeComposition = ImeComposition {}
+    // Live input snapshot for camera/tool code: which pointer button is held
+    // (0 none, 1 left, 2 right, 3 middle), a held-key bitmask (see
+    // foundationKeyBit), and modifier keys. Only left presses drive widget
+    // onPress; right/middle still deliver drags to gesture regions.
+    var pressButton: Int = 0
+    var keysMask: Int = 0
+    var modShift: Bool = false
+    var modAlt: Bool = false
+}
+
+// Bit for a held key in keysMask — macOS virtual keycodes for the fly keys:
+// A=0, S=1, D=2, F=3, W=13, Q=12, E=14. Zero for keys we do not track.
+function foundationKeyBit(keyCode: Int) -> Int {
+    if keyCode == 13 { return 1 }   // W
+    if keyCode == 0 { return 2 }    // A
+    if keyCode == 1 { return 4 }    // S
+    if keyCode == 2 { return 8 }    // D
+    if keyCode == 12 { return 16 }  // Q
+    if keyCode == 14 { return 32 }  // E
+    if keyCode == 3 { return 64 }   // F
+    return 0
 }
 
 struct FoundationAppState {
@@ -52,6 +78,17 @@ struct FoundationAppState {
     var lastPresentedViewportW: Int = -1
     var lastPresentedViewportH: Int = -1
     var hasPresentedFrame: Bool = false
+    // Interactive re-present gate: the event count at the last full rebuild.
+    // With no new events and an unchanged viewport, the interactive runner
+    // re-flushes the retained batch instead of rebuilding the widget tree.
+    var lastPresentedEventCount: Int = -1
+    // Cached composed root for resize-only frames (rebuildOnResize = false
+    // hosts): the widget build and retained reconcile are skipped and the
+    // cached tree is re-laid-out for the new viewport.
+    var cachedRoot: FoundationView = FoundationView {
+        kind: FoundationViewKind.Spacer
+    }
+    var hasCachedRoot: Bool = false
     // Displayed FPS, derived ONLY from re-presented (skipped) frames. A re-present
     // is GPU/vsync-paced, so its frame duration reflects the true steady cadence; a
     // rebuild frame is much slower (it does the full tree/layout/render work) and its
@@ -189,6 +226,7 @@ function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
         Surface -> total = total + 1;
         Text -> total = total + 1;
         TextureView -> total = total + 1;
+        Icon -> total = total + 1;
         Row -> {}
         Column -> {}
         Expanded -> {}
@@ -224,7 +262,7 @@ function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
 
 
 // No-op default for `engineFrame` below.
-function foundationNoopEngineFrame(frame: borrow GraphicsFrame) {
+function foundationNoopEngineFrame(frame: borrow mut GraphicsFrame) {
     let ignored = frame.backend
     return
 }
@@ -237,7 +275,15 @@ function RunFoundationInteractiveApp(
     // Host hook: runs FIRST every frame, BEFORE the UI render pass begins — the place a
     // hosting engine ticks its simulation and runs its own (offscreen) render passes, e.g.
     // drawing the scene into the render-target texture a TextureView shows this same frame.
-    engineFrame: (borrow GraphicsFrame) -> Void = foundationNoopEngineFrame,
+    engineFrame: (borrow mut GraphicsFrame) -> Void = foundationNoopEngineFrame,
+    // Live FPS badge overlay (bottom-left). Chrome-dense apps (editors) turn it off.
+    showFpsOverlay: Bool = true,
+    // When false, a resize-only frame (viewport changed, no new input events)
+    // reuses the cached widget tree — skipping the builder and the retained
+    // reconcile — and only re-lays-out and re-renders. Correct whenever the
+    // builder's OUTPUT STRUCTURE does not depend on the viewport size (fixed
+    // chrome); hosts whose widget tree adapts to the viewport keep the default.
+    rebuildOnResize: Bool = true,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
@@ -289,14 +335,7 @@ function RunFoundationInteractiveApp(
                 height: 720.0
             }
         }
-        let build = rootBuilder
-        let appRoot = build(state.ui)
-        // Overlay a live FPS indicator bottom-right. The composed tree is what
-        // the retained tree, layout, and render all operate on; only the FPS
-        // badge changes each frame, so the incremental layout keeps the
-        // application's own subtree cached.
-        let root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(foundationFrameDuration(frame, metalActive)))
-
+        foundationWriteViewportSnapshot(state.ui.viewport.width, state.ui.viewport.height)
         let graphics = foundationFrameGraphics(frame)
         var batchPtr = uiBatchNullPtr()
         if metalActive {
@@ -306,12 +345,80 @@ function RunFoundationInteractiveApp(
             }
             batchPtr = state.uiBatchPtr
         }
-        let encoder = frame.beginPass(Color {
-            r: 0.96
-            g: 0.95
-            b: 0.93
-            a: 1.0
-        })
+
+        // Re-present fast path: no events arrived since the last full rebuild and
+        // the viewport is unchanged, so the rebuilt tree could not differ. The
+        // retained batch's vertex/index buffers already describe this frame's
+        // pixels — re-flush them and skip the widget build, retained reconcile,
+        // layout, and render entirely. Hit regions persist in state, so input
+        // keeps working; the engine hook already ran, and a TextureView samples
+        // its texture's CURRENT contents on flush, so an engine-rendered viewport
+        // stays live even on skipped frames.
+        let vpWNow = Int(state.ui.viewport.width)
+        let vpHNow = Int(state.ui.viewport.height)
+        if state.hasPresentedFrame &&
+            !showFpsOverlay &&
+            metalActive &&
+            state.uiBatchReady &&
+            state.ui.eventCount == state.lastPresentedEventCount &&
+            vpWNow == state.lastPresentedViewportW &&
+            vpHNow == state.lastPresentedViewportH {
+            // Re-runs the retained streams — including the liquid-glass
+            // capture/blur passes on a split frame, so glass stays live over an
+            // engine viewport that re-renders beneath it.
+            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            state.frameCount = state.frameCount + 1
+            state.ui.clickedKey = 0
+            state.ui.scrollX = 0.0
+            state.ui.scrollY = 0.0
+            state.ui.lastTextCodepoint = 0
+            state.ui.lastKeyCode = 0
+            return
+        }
+
+        // Resize-only frame for a fixed-structure host: reuse the cached tree.
+        // (Reaching here means the re-present gate above did not hit, so either
+        // the viewport moved or events arrived; the event check isolates resize.)
+        let resizeOnly = !rebuildOnResize &&
+            state.hasCachedRoot &&
+            state.ui.eventCount == state.lastPresentedEventCount
+
+        var root = FoundationView {
+            kind: FoundationViewKind.Spacer
+        }
+        if resizeOnly {
+            root = state.cachedRoot
+        } else {
+            let build = rootBuilder
+            let appRoot = build(state.ui)
+            // Overlay a live FPS indicator bottom-right (opt-out via
+            // showFpsOverlay). The composed tree is what the retained tree,
+            // layout, and render all operate on; only the FPS badge changes each
+            // frame, so the incremental layout keeps the application's own
+            // subtree cached.
+            if showFpsOverlay {
+                root = foundationComposeWithFps(move appRoot, foundationFpsFromDuration(foundationFrameDuration(frame, metalActive)))
+            } else {
+                root = move appRoot
+            }
+        }
+
+        // On the batched Metal path the walk only ACCUMULATES quads (the encoder is
+        // untouched until present), so the swapchain pass must not begin yet — a
+        // liquid-glass frame runs its capture/blur passes first. The legacy Sokol
+        // path draws immediately during the walk and keeps its pass open here.
+        var encoder = makeRenderEncoder()
+        if !metalActive {
+            // The standalone placeholder is replaced immediately on this path;
+            // release it before the pass encoder overwrites it.
+            nativeStateFree(encoder.storage)
+            encoder = frame.beginPass(Color {
+                r: 0.96
+                g: 0.95
+                b: 0.93
+                a: 1.0
+            })
+        }
         var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
             graphics: graphics
@@ -319,10 +426,14 @@ function RunFoundationInteractiveApp(
             metalActive: metalActive
         }
         let viewport = state.ui.viewport
+        // A resize-only frame reuses the cached tree, so the retained structure
+        // cannot have changed — skip the reconcile as well.
         if state.frameCount == 0 {
             state.retainedTree = foundationRetainedMount(root)
         } else {
-            state.retainedTree = foundationRetainedUpdate(state.retainedTree, root)
+            if !resizeOnly {
+                state.retainedTree = foundationRetainedUpdate(state.retainedTree, root)
+            }
         }
         if !state.announcedTree && foundationRenderableViewCount(root) > 0 {
             kiraGraphicsLiveUiFoundationTreeBuilt()
@@ -341,7 +452,29 @@ function RunFoundationInteractiveApp(
         // reused the entire cached tree or rebuilt it from scratch and could go
         // stale when a layout-affecting field changed without moving the lossy
         // invalidation signature.
-        let laidOut = FoundationLayoutPass().runIncremental(root: root, available: viewport, cached: state.cachedLayoutTree)
+        //
+        // EXCEPT when the viewport changed OR input events drove this rebuild:
+        // the incremental engine's offer-based skip leaves flexed subtrees with
+        // stale geometry when content changes size (observed as panels laid out
+        // half at the old size, half at the new after a resize, and as sibling
+        // flex panels stealing height after a click moved a row highlight).
+        // Resize and event frames pay for one full layout; the incremental path
+        // remains for event-free per-frame rebuilds (the FPS-overlay hosts,
+        // where only the badge subtree changes each frame).
+        var laidOut = LayoutTree {
+            nodes: []
+        }
+        var viewportChanged = true
+        if state.cachedLayoutTree.nodes.count > 0 {
+            let cachedRootFrame = foundationRootFrame(state.cachedLayoutTree)
+            viewportChanged = Int(cachedRootFrame.width) != Int(viewport.width) || Int(cachedRootFrame.height) != Int(viewport.height)
+        }
+        let eventsArrived = state.ui.eventCount != state.lastPresentedEventCount
+        if viewportChanged || eventsArrived {
+            laidOut = FoundationLayoutPass().run(root: root, available: viewport)
+        } else {
+            laidOut = FoundationLayoutPass().runIncremental(root: root, available: viewport, cached: state.cachedLayoutTree)
+        }
         state.cachedLayoutTree = laidOut
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
@@ -352,6 +485,7 @@ function RunFoundationInteractiveApp(
         backend.beginFrame(Int(viewport.width), Int(viewport.height))
         let renderCount = foundationRender(root, laidOut, backend)
         state.hitRegions = backend.hitRegions
+        foundationReconcileFocus(state.ui, state.hitRegions)
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
             state.announcedRenderCommands = true
@@ -359,8 +493,27 @@ function RunFoundationInteractiveApp(
 
         state.frameCount = state.frameCount + 1
         backend.endFrame()
-        frame.endPass()
+        if metalActive {
+            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            // The metal path never handed the placeholder to a pass; release it
+            // now that the batch has presented. (On the Sokol path the pass
+            // encoder is released by frame.endPass.)
+            nativeStateFree(encoder.storage)
+        } else {
+            frame.endPass()
+        }
         backend.submit()
+        // Record what this full frame presented; the re-present gate above
+        // compares against these next frame.
+        state.hasPresentedFrame = true
+        state.lastPresentedViewportW = Int(viewport.width)
+        state.lastPresentedViewportH = Int(viewport.height)
+        state.lastPresentedEventCount = state.ui.eventCount
+        // Cache the composed root for resize-only reuse (fixed-structure hosts).
+        if !rebuildOnResize {
+            state.cachedRoot = move root
+            state.hasCachedRoot = true
+        }
         state.ui.clickedKey = 0
         state.ui.scrollX = 0.0
         state.ui.scrollY = 0.0
@@ -488,14 +641,9 @@ function RunFoundationApp(root: FoundationView) {
             vpH,
             state.lastPresentedViewportH,
         ) {
-            var skipEncoder = frame.beginPass(Color {
-                r: 0.96
-                g: 0.95
-                b: 0.93
-                a: 1.0
-            })
-            uiBatchFlush(state.uiBatchPtr, graphics, skipEncoder)
-            frame.endPass()
+            // Re-runs the retained streams — including the liquid-glass
+            // capture/blur passes on a split frame.
+            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
             // This frame was GPU/vsync-paced, so its duration reflects the true
             // cadence: refresh the desired FPS from it. `lastPresentedFps` (the value
             // currently drawn) is left untouched, so if the cadence genuinely shifted
@@ -511,12 +659,21 @@ function RunFoundationApp(root: FoundationView) {
             return
         }
 
-        let encoder = frame.beginPass(Color {
-            r: 0.96
-            g: 0.95
-            b: 0.93
-            a: 1.0
-        })
+        // Batched Metal path: the walk only accumulates quads; the pass structure
+        // (including liquid-glass capture/blur passes) is owned by uiBatchPresent
+        // after the walk. Sokol draws immediately and keeps its pass open here.
+        var encoder = makeRenderEncoder()
+        if !metalActive {
+            // The standalone placeholder is replaced immediately on this path;
+            // release it before the pass encoder overwrites it.
+            nativeStateFree(encoder.storage)
+            encoder = frame.beginPass(Color {
+                r: 0.96
+                g: 0.95
+                b: 0.93
+                a: 1.0
+            })
+        }
         var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
             graphics: graphics
@@ -577,6 +734,7 @@ function RunFoundationApp(root: FoundationView) {
         }
         let renderCount = appRendered + foundationRender(overlay, state.overlayLayout, backend)
         state.hitRegions = backend.hitRegions
+        foundationReconcileFocus(state.ui, state.hitRegions)
         if renderCount > 0 && !state.announcedRenderCommands {
             kiraGraphicsLiveUiFoundationRenderCommandsGenerated()
             state.announcedRenderCommands = true
@@ -584,7 +742,15 @@ function RunFoundationApp(root: FoundationView) {
 
         state.frameCount = state.frameCount + 1
         backend.endFrame()
-        frame.endPass()
+        if metalActive {
+            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            // The metal path never handed the placeholder to a pass; release it
+            // now that the batch has presented. (On the Sokol path the pass
+            // encoder is released by frame.endPass.)
+            nativeStateFree(encoder.storage)
+        } else {
+            frame.endPass()
+        }
         backend.submit()
         if metalActive {
             state.lastPresentedFps = state.displayedFps

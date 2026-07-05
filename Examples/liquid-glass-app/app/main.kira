@@ -1,0 +1,221 @@
+import KiraUIFoundation
+
+// Liquid glass — a REAL app composition. A photo backdrop (fullscreen
+// TextureView) with app chrome floating over it, every piece of chrome a
+// FoundationMaterial.LiquidGlass surface in its own shape:
+//   - a large glass info card in the middle (rounded rect),
+//   - a glass search pill and a round glass button docked at the bottom.
+// Each glass surface captures the content rendered beneath it, blurs it through
+// the Kira Graphics liquid_glass example's half-res pyramid, and refracts it with
+// that example's composite shader — generalized to the surface's own corner
+// radius, so the pill is pill-shaped glass and the button is a glass circle.
+//
+// The photo arrives as a raw RGBA blob (1600x900x4, cover-cropped offline from
+// examples/liquid_glass/assets/background-cubes.jpg); it is loaded from the
+// example's assets directory (or the KIRA_GLASS_BG environment variable).
+
+struct GlassDemoState {
+    var textureId: Int = 0
+    var attempted: Bool = false
+}
+
+function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Float, fillAlpha: Float, blur: Float) -> FoundationView {
+    return Surface(
+        children: move children,
+        width: SizeMode.Fixed(w),
+        height: SizeMode.Fixed(h),
+        flex: 0,
+        fill: Color { r: 1.0 g: 0.99215686 b: 0.9764706 a: fillAlpha },
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 1.0,
+        radius: radius,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.LiquidGlass,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true,
+        blur: blur
+    )
+}
+
+function centered(child: FoundationView) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Center,
+        padding: EdgeInsets {}
+    )
+}
+
+// Big glass info card, centre screen.
+function glassCard() -> FoundationView {
+    return glassSurface(
+        children: [
+            centered(VStack(
+                children: [
+                    Text("Welcome to Kira", Color { r: 1.0 g: 1.0 b: 1.0 a: 0.96 }, 30.0, 700.0),
+                    Text("Everything behind this card is real content,", Color { r: 1.0 g: 1.0 b: 1.0 a: 0.80 }, 15.0, 500.0),
+                    Text("captured, blurred and refracted live.", Color { r: 1.0 g: 1.0 b: 1.0 a: 0.80 }, 15.0, 500.0)
+                ],
+                spacing: 10.0,
+                padding: EdgeInsets {}
+            ))
+        ],
+        w: 480.0, h: 300.0, radius: 44.0, fillAlpha: 0.14, blur: 0.6
+    )
+}
+
+// Bottom dock: a round glass button and a glass search pill, side by side.
+function glassDock() -> FoundationView {
+    let button = glassSurface(
+        children: [centered(Text("≡", Color { r: 0.15 g: 0.15 b: 0.18 a: 0.9 }, 26.0, 600.0))],
+        w: 68.0, h: 68.0, radius: 34.0, fillAlpha: 0.28, blur: 0.55
+    )
+    let pill = glassSurface(
+        children: [
+            Frame(
+                child: Text("Search", Color { r: 0.15 g: 0.15 b: 0.18 a: 0.75 }, 19.0, 500.0),
+                width: SizeMode.Fill,
+                height: SizeMode.Fill,
+                flex: 0,
+                alignment: Alignment.Leading,
+                padding: EdgeInsets {
+                    top: 0.0
+                    trailing: 0.0
+                    bottom: 0.0
+                    leading: 30.0
+                }
+            )
+        ],
+        w: 520.0, h: 68.0, radius: 34.0, fillAlpha: 0.28, blur: 0.55
+    )
+    return HStack(
+        children: [move button, move pill],
+        spacing: 14.0,
+        padding: EdgeInsets {}
+    )
+}
+
+function headline() -> FoundationView {
+    return VStack(
+        children: [
+            Text("Liquid Glass", Color { r: 1.0 g: 1.0 b: 1.0 a: 0.98 }, 42.0, 800.0),
+            Text("UI Foundation — real backdrop capture, blur and refraction", Color { r: 1.0 g: 1.0 b: 1.0 a: 0.85 }, 16.0, 500.0)
+        ],
+        spacing: 8.0,
+        padding: EdgeInsets {}
+    )
+}
+
+function rootView(textureId: Int) -> FoundationView {
+    var layers: [FoundationView] = []
+    if textureId > 0 {
+        layers.append(TextureView(
+            texture: textureId,
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            opacity: 1.0
+        ))
+    } else {
+        // Backdrop blob not found: say so instead of refracting a blank wall.
+        layers.append(Frame(
+            child: Text("assets/background-cubes.rgba not found — run from the example directory (or set KIRA_GLASS_BG)", Color { r: 0.35 g: 0.1 b: 0.1 a: 1.0 }, 16.0, 600.0),
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            alignment: Alignment.TopLeading,
+            padding: EdgeInsets {
+                top: 24.0
+                trailing: 24.0
+                bottom: 0.0
+                leading: 24.0
+            }
+        ))
+    }
+    layers.append(Frame(
+        child: headline(),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {
+            top: 44.0
+            trailing: 0.0
+            bottom: 0.0
+            leading: 52.0
+        }
+    ))
+    layers.append(centered(glassCard()))
+    layers.append(Frame(
+        child: glassDock(),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Bottom,
+        padding: EdgeInsets {
+            top: 0.0
+            trailing: 0.0
+            bottom: 44.0
+            leading: 0.0
+        }
+    ))
+    // A Fill-arranged Surface stacks its children over the same bounds: the photo
+    // backdrop, then the chrome layers above it.
+    return Surface(
+        children: move layers,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.78 g: 0.78 b: 0.80 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+@Main
+function main() {
+    let storage = nativeState(GlassDemoState {})
+    let demoUser = nativeUserData(storage)
+    RunFoundationInteractiveApp(
+        title: "Kira UI Foundation Liquid Glass",
+        width: 1600,
+        height: 900,
+        rootBuilder: { ui in
+            var demo = nativeRecover<GlassDemoState>(demoUser)
+            let ignored = ui.frameCount
+            return rootView(demo.textureId)
+        },
+        engineFrame: { frame in
+            var demo = nativeRecover<GlassDemoState>(demoUser)
+            if !demo.attempted {
+                demo.attempted = true
+                let graphics = foundationFrameGraphics(frame)
+                // Env override first (scripted runs), then the common launch
+                // directories: the example dir itself and the repo root.
+                var id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
+                if id == 0 {
+                    id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes.rgba", 1600, 900)
+                }
+                if id == 0 {
+                    id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes.rgba", 1600, 900)
+                }
+                if id == 0 {
+                    id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+                }
+                demo.textureId = id
+            }
+            return
+        },
+        showFpsOverlay: false
+    )
+    return
+}

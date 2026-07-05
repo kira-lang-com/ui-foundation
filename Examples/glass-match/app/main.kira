@@ -1,0 +1,119 @@
+import KiraUIFoundation
+
+// glass-match — the pixel-match rig. Renders THE SAME scene the numpy sim scores
+// against: a fullscreen flat-cream backdrop (rig-backdrop.rgba, 825x184, the raw
+// RGBA of pixelmatch/backdrop.png, which already contains Apple's baked drop
+// shadow) with the LiquidGlass filter button + search pill floating over it at the
+// exact geometry.json coordinates. NO text/icon children (scored region masks the
+// inner content), so only the outer glass shader is exercised.
+//
+// Window is target.png's size (825x184) at scale 1.0 offscreen, so layout points
+// map 1:1 to the target pixels. Backdrop path via KIRA_GLASS_BG env or the
+// absolute workspace fallback.
+
+struct RigState {
+    var textureId: Int = 0
+    var attempted: Bool = false
+}
+
+// One outer-glass surface, no children, warm-white wash (washColor [255,253,249],
+// washAlpha 0.43) exactly as the fit prescribes.
+function glassSurface(w: Float, h: Float, radius: Float) -> FoundationView {
+    return Surface(
+        children: [],
+        width: SizeMode.Fixed(w),
+        height: SizeMode.Fixed(h),
+        flex: 0,
+        fill: Color { r: 1.0 g: 0.99215686 b: 0.9764706 a: 0.28 },
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 1.0,
+        radius: radius,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.LiquidGlass,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true
+    )
+}
+
+// Place a fixed-size child at absolute (x, y) from the top-left of the window.
+function placed(child: FoundationView, x: Float, y: Float) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {
+            top: y
+            trailing: 0.0
+            bottom: 0.0
+            leading: x
+        }
+    )
+}
+
+function rootView(textureId: Int) -> FoundationView {
+    var layers: [FoundationView] = []
+    if textureId > 0 {
+        layers.append(TextureView(
+            texture: textureId,
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            opacity: 1.0
+        ))
+    }
+    // button: x=40.5 y=40.0 w=104 h=104 r=52 ; pill: x=169.0 y=40.0 w=615.7 h=104 r=52
+    layers.append(placed(glassSurface(104.0, 104.0, 52.0), 40.5, 40.0))
+    layers.append(placed(glassSurface(615.7, 104.0, 52.0), 169.0, 40.0))
+    return Surface(
+        children: move layers,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.91 g: 0.894 b: 0.874 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+@Main
+function main() {
+    let storage = nativeState(RigState {})
+    let rigUser = nativeUserData(storage)
+    RunFoundationInteractiveApp(
+        title: "Glass Match Rig",
+        width: 825,
+        height: 184,
+        rootBuilder: { ui in
+            var rig = nativeRecover<RigState>(rigUser)
+            let ignored = ui.frameCount
+            return rootView(rig.textureId)
+        },
+        engineFrame: { frame in
+            var rig = nativeRecover<RigState>(rigUser)
+            if !rig.attempted {
+                rig.attempted = true
+                let graphics = foundationFrameGraphics(frame)
+                var id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 825, 184)
+                if id == 0 {
+                    id = uiLoadRgbaTextureFile(graphics, "rig-backdrop.rgba", 825, 184)
+                }
+                if id == 0 {
+                    id = uiLoadRgbaTextureFile(graphics, "/Users/priamc/.claude/jobs/e33828a0/tmp/pixelmatch/rig-backdrop.rgba", 825, 184)
+                }
+                rig.textureId = id
+            }
+            return
+        },
+        showFpsOverlay: false
+    )
+    return
+}
