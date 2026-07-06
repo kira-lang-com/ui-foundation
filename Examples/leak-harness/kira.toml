@@ -1,6 +1,7 @@
 [package]
 name = "leak-harness"
 version = "0.1.0"
+kind = "app"
 kira = "0.1.0"
 
 [defaults]
