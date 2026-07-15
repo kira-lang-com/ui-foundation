@@ -1,3 +1,5 @@
+import KiraGraphics
+import Foundation
 struct Glow {
     let color: Color = Color {
         r: 0.0

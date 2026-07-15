@@ -1,3 +1,4 @@
+import Foundation
 import KiraUIFoundation
 // Host leak repro: loops the per-frame pipeline (foundationRetainedUpdate +
 // FoundationLayoutPass.run). Measure true leaks with:

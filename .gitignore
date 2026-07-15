@@ -4,3 +4,4 @@ generated/
 kira.lock
 exports/
 Bindings/
+**/app/bindings/
