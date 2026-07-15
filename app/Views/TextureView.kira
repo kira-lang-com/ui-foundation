@@ -1,3 +1,4 @@
+import KiraLayout
 // A leaf view showing an EXTERNAL KiraGraphics texture inside the UI layout — the editor
 // viewport primitive: the engine renders its scene into an offscreen render-target texture
 // and the UI composites that texture like any other view (layout-sized, clipped, batched).
@@ -10,6 +11,7 @@ function TextureView(
     height: SizeMode,
     flex: Int,
     opacity: Float,
+    radius: Float,
 ) -> FoundationView {
     return FoundationView {
         kind: FoundationViewKind.TextureView
@@ -18,5 +20,6 @@ function TextureView(
         flex: flex
         texture: texture
         textureOpacity: opacity
+        radius: radius
     }
 }

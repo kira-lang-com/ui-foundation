@@ -1,3 +1,6 @@
+import KiraLayout
+import KiraGraphics
+import Foundation
 struct FoundationHitRegionRecord {
     let key: Int = 0
     let bounds: Rect
@@ -29,6 +32,16 @@ function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
 @Native
 function foundationDrawText(content: borrow String, bounds: borrow Rect, color: borrow Color, size: Float) {
     kira_text_draw_run("", content, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a, size)
+    return
+}
+
+// Legacy immediate-mode icon blit (Sokol path only, incl. wasm32-emscripten):
+// the icon counterpart of foundationDrawText. The rasterized coverage is cached
+// per (icon, pixel size) inside kiraicon and blitted tinted through
+// kg_ui_blit_coverage, exactly like text glyph coverage.
+@Native
+function foundationDrawIcon(svg: borrow String, bounds: borrow Rect, color: borrow Color) {
+    uiIconDrawRun(svg, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a)
     return
 }
 
@@ -255,31 +268,24 @@ class KiraGraphicsFoundationBackend {
     }
 
     // TextureView: register the external texture with the batch (slot-1 bind group,
-    // cached per id) and emit its mode-2 quad. Metal path only; the legacy Sokol path
-    // draws a placeholder fill so layout issues stay visible there.
-    function drawTextureFields(bounds: borrow Rect, texture: Int, opacity: Float) {
+    // cached per id) and emit its mode-2 quad on the Metal path. The Sokol path
+    // composites through the immediate-2D textured pipeline (kg_ui_draw_texture),
+    // which samples the registered render-target texture directly.
+    function drawTextureFields(bounds: borrow Rect, texture: Int, opacity: Float, radius: Float) {
         self.drewVisibleUi = true
         if texture <= 0 {
             return
         }
         if self.metalActive {
+            // NOTE: the Metal UiBatch external-texture path (mode 2) does not yet
+            // apply a rounded-rect coverage mask, so `radius` is a no-op here; the
+            // viewport composites square-cornered on Metal. The Sokol path below
+            // rounds it. Rounding the Metal external quad is a separate task.
             uiBatchSetExternalTexture(self.uiBatchPtr, self.graphics, U32(texture))
             uiBatchPushExternalRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, opacity, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
-        let placeholderFill = Color {
-            r: 0.15
-            g: 0.15
-            b: 0.18
-            a: 1.0
-        }
-        let placeholderBorder = Color {
-            r: 0.5
-            g: 0.5
-            b: 0.55
-            a: 1.0
-        }
-        self.encoder.drawSurface(graphicsRect(bounds), placeholderFill, placeholderBorder, 1.0, 0.0)
+        self.encoder.drawTexture(graphicsRect(bounds), texture, opacity, radius)
         return
     }
 
@@ -317,7 +323,9 @@ class KiraGraphicsFoundationBackend {
         self.drewVisibleUi = true
         if self.metalActive {
             uiBatchPushIcon(self.uiBatchPtr, self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            return
         }
+        foundationDrawIcon(svg, bounds, color)
         return
     }
 
