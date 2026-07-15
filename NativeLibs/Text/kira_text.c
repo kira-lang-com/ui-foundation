@@ -59,6 +59,176 @@ static float kira_text_f26dot6(FT_Pos value) {
     return (float)value / 64.0f;
 }
 
+/* ------------------------------------------------------------------------
+ * Process-lifetime registries for engines and faces.
+ *
+ * The Kira side (app/Backend/UiBatch.kira: uiBatchStateLoadFont) stores the
+ * engine and face handles inside a UiBatchState that lives behind an opaque
+ * nativeState slot for the whole program and is never explicitly destroyed
+ * (state slots leak by design — kira_state_slot_reset). With no owner calling
+ * kira_text_{face,engine}_destroy, the FT_Library/FT_Face allocations become
+ * unreachable at process exit and `leaks --atExit` reports the entire FreeType
+ * tree loaded from the system font as leaked.
+ *
+ * Mirror the native runtime's approach (kira-zig
+ * packages/kira_native_bridge/src/runtime_helpers.c —
+ * kira_native_state_registry / kira_task_registry): record every engine and
+ * face at creation, unlink on explicit destroy, and free the survivors from a
+ * single atexit handler registered on the first create. The public ABI is
+ * unchanged, and this is double-destroy safe — an explicit destroy unlinks
+ * before disposing, so the atexit sweep never touches an already-freed handle.
+ *
+ * Ordering is load-bearing: a FreeType face belongs to its library
+ * (FT_Done_Face must precede FT_Done_FreeType), so the teardown disposes every
+ * face before any engine. Faces from distinct engines are independent, so a
+ * single faces-then-engines pass keeps every library alive while its faces are
+ * torn down. The draw-cache/embedded-face statics (g_draw_engine,
+ * g_embedded_engine, and their faces) route through these same create/destroy
+ * paths, so they are tracked and reclaimed too; mid-run cache eviction and
+ * embedded-face reload call kira_text_face_destroy, which unlinks first, so the
+ * atexit sweep never double-frees an evicted face.
+ */
+typedef struct KiraTextEngineNode {
+    kira_text_engine* engine;
+    struct KiraTextEngineNode* next;
+} KiraTextEngineNode;
+
+typedef struct KiraTextFaceNode {
+    kira_text_face* face;
+    struct KiraTextFaceNode* next;
+} KiraTextFaceNode;
+
+static KiraTextEngineNode* g_engine_registry = NULL;
+static KiraTextFaceNode*   g_face_registry   = NULL;
+
+#if defined(_WIN32)
+#include <windows.h>
+static SRWLOCK g_text_registry_lock = SRWLOCK_INIT;
+static void kira_text_registry_acquire(void) { AcquireSRWLockExclusive(&g_text_registry_lock); }
+static void kira_text_registry_release(void) { ReleaseSRWLockExclusive(&g_text_registry_lock); }
+#else
+#include <pthread.h>
+static pthread_mutex_t g_text_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+static void kira_text_registry_acquire(void) { pthread_mutex_lock(&g_text_registry_lock); }
+static void kira_text_registry_release(void) { pthread_mutex_unlock(&g_text_registry_lock); }
+#endif
+
+/* Raw teardown of a face's FreeType/HarfBuzz resources (no registry unlink).
+ * hb_font holds a reference on the FT_Face, so it must go first. */
+static void kira_text_face_dispose(kira_text_face* face) {
+    if (face == NULL) {
+        return;
+    }
+    if (face->hb_font != NULL) {
+        hb_font_destroy(face->hb_font);
+    }
+    if (face->face != NULL) {
+        FT_Done_Face(face->face);
+    }
+    free(face->owned_blob);
+    free(face);
+}
+
+/* Raw teardown of an engine's FreeType library (no registry unlink). All faces
+ * belonging to this library must already be disposed. */
+static void kira_text_engine_dispose(kira_text_engine* engine) {
+    if (engine == NULL) {
+        return;
+    }
+    if (engine->library != NULL) {
+        FT_Done_FreeType(engine->library);
+    }
+    free(engine);
+}
+
+static void kira_text_registry_teardown(void) {
+    kira_text_registry_acquire();
+    KiraTextFaceNode* face_node = g_face_registry;
+    g_face_registry = NULL;
+    KiraTextEngineNode* engine_node = g_engine_registry;
+    g_engine_registry = NULL;
+    kira_text_registry_release();
+
+    /* Faces first: FT_Done_Face needs its still-live FT_Library. */
+    while (face_node != NULL) {
+        KiraTextFaceNode* next = face_node->next;
+        kira_text_face_dispose(face_node->face);
+        free(face_node);
+        face_node = next;
+    }
+    while (engine_node != NULL) {
+        KiraTextEngineNode* next = engine_node->next;
+        kira_text_engine_dispose(engine_node->engine);
+        free(engine_node);
+        engine_node = next;
+    }
+}
+
+/* Register the atexit sweep exactly once. Caller must hold the registry lock. */
+static void kira_text_registry_register_atexit(void) {
+    static int registered = 0;
+    if (!registered) {
+        registered = 1;
+        atexit(kira_text_registry_teardown);
+    }
+}
+
+static void kira_text_engine_registry_add(kira_text_engine* engine) {
+    KiraTextEngineNode* node = (KiraTextEngineNode*)malloc(sizeof(*node));
+    if (node == NULL) {
+        return; /* untracked: survives to exit unreclaimed, never unsafe */
+    }
+    node->engine = engine;
+    kira_text_registry_acquire();
+    kira_text_registry_register_atexit();
+    node->next = g_engine_registry;
+    g_engine_registry = node;
+    kira_text_registry_release();
+}
+
+static void kira_text_engine_registry_remove(kira_text_engine* engine) {
+    kira_text_registry_acquire();
+    KiraTextEngineNode** link = &g_engine_registry;
+    while (*link != NULL) {
+        if ((*link)->engine == engine) {
+            KiraTextEngineNode* dead = *link;
+            *link = dead->next;
+            free(dead);
+            break;
+        }
+        link = &(*link)->next;
+    }
+    kira_text_registry_release();
+}
+
+static void kira_text_face_registry_add(kira_text_face* face) {
+    KiraTextFaceNode* node = (KiraTextFaceNode*)malloc(sizeof(*node));
+    if (node == NULL) {
+        return; /* untracked: survives to exit unreclaimed, never unsafe */
+    }
+    node->face = face;
+    kira_text_registry_acquire();
+    kira_text_registry_register_atexit();
+    node->next = g_face_registry;
+    g_face_registry = node;
+    kira_text_registry_release();
+}
+
+static void kira_text_face_registry_remove(kira_text_face* face) {
+    kira_text_registry_acquire();
+    KiraTextFaceNode** link = &g_face_registry;
+    while (*link != NULL) {
+        if ((*link)->face == face) {
+            KiraTextFaceNode* dead = *link;
+            *link = dead->next;
+            free(dead);
+            break;
+        }
+        link = &(*link)->next;
+    }
+    kira_text_registry_release();
+}
+
 kira_text_engine* kira_text_engine_create(void) {
     kira_text_engine* engine = (kira_text_engine*)calloc(1, sizeof(*engine));
     if (engine == NULL) {
@@ -69,6 +239,7 @@ kira_text_engine* kira_text_engine_create(void) {
         free(engine);
         return NULL;
     }
+    kira_text_engine_registry_add(engine);
     return engine;
 }
 
@@ -76,10 +247,9 @@ void kira_text_engine_destroy(kira_text_engine* engine) {
     if (engine == NULL) {
         return;
     }
-    if (engine->library != NULL) {
-        FT_Done_FreeType(engine->library);
-    }
-    free(engine);
+    /* Unlink before disposing so the atexit sweep never double-frees. */
+    kira_text_engine_registry_remove(engine);
+    kira_text_engine_dispose(engine);
 }
 
 const char* kira_text_backend_version(void) {
@@ -103,6 +273,7 @@ static kira_text_face* kira_text_face_wrap(FT_Face face, unsigned char* owned_bl
     wrapper->owned_blob = owned_blob;
     wrapper->pixel_size = 0.0f;
     wrapper->has_kerning = FT_HAS_KERNING(face) ? 1 : 0;
+    kira_text_face_registry_add(wrapper);
     return wrapper;
 }
 
@@ -147,14 +318,9 @@ void kira_text_face_destroy(kira_text_face* face) {
     if (face == NULL) {
         return;
     }
-    if (face->hb_font != NULL) {
-        hb_font_destroy(face->hb_font);
-    }
-    if (face->face != NULL) {
-        FT_Done_Face(face->face);
-    }
-    free(face->owned_blob);
-    free(face);
+    /* Unlink before disposing so the atexit sweep never double-frees. */
+    kira_text_face_registry_remove(face);
+    kira_text_face_dispose(face);
 }
 
 int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size) {
@@ -464,6 +630,51 @@ extern void kg_ui_blit_coverage(double x, double y, int width, int rows,
                                 int pitch, const unsigned char* coverage,
                                 double r, double g, double b, double a);
 
+/* Atlas-backed coverage draw: packs each glyph into the kira-graphics glyph
+ * atlas once (keyed by `key`) and thereafter draws a single textured quad
+ * instead of decomposing the coverage bitmap into per-pixel quads every frame.
+ * Drop-in for kg_ui_blit_coverage with a stable, non-zero key. Weakly linked so
+ * unit builds without the sokol backend fall back to per-pixel blitting. */
+extern void kg_ui_draw_glyph_coverage(int64_t key,
+                                       double x, double y, int width, int rows,
+                                       int pitch, const unsigned char* coverage,
+                                       double r, double g, double b, double a)
+    __attribute__((weak));
+
+/* Stable, non-zero atlas key for a rasterized glyph. Folds the resolved font
+ * PATH (not the cached face pointer — that pointer is unstable across the
+ * 16-slot face cache's LRU eviction and can be reused by malloc for a different
+ * font, which would collide keys and mis-render), the shaped glyph id, and the
+ * quantized physical pixel size — the exact triple that determines the coverage
+ * bitmap — into a 64-bit FNV-1a mix. */
+static int64_t kira_text_glyph_key(const char* font_path,
+                                    uint32_t glyph, double phys_size) {
+    int px_q = (int)(phys_size * 2.0 + 0.5); /* 0.5px buckets, matches face cache */
+    uint64_t k = 1469598103934665603ull; /* FNV offset basis */
+    for (const char* p = font_path; p != NULL && *p != '\0'; p += 1) {
+        k = (k ^ (uint64_t)(unsigned char)*p) * 1099511628211ull;
+    }
+    k = (k ^ (uint64_t)glyph) * 1099511628211ull;
+    k = (k ^ (uint64_t)(uint32_t)px_q) * 1099511628211ull;
+    return (int64_t)(k | 1ull); /* never 0 (the atlas empty-slot sentinel) */
+}
+
+/* Physical-pixels-per-point backing scale of the current UI pass (kira-graphics
+ * sokol backend). On a Retina/high_dpi framebuffer this is > 1.0; glyphs must be
+ * rasterized at pixel_size * scale to stay crisp. Weakly linked so unit builds
+ * without the sokol backend fall back to 1.0. */
+extern double kg_ui_dpi_scale(void) __attribute__((weak));
+
+static double kira_text_backing_scale(void) {
+    if (kg_ui_dpi_scale) {
+        double s = kg_ui_dpi_scale();
+        if (s >= 1.0) {
+            return s;
+        }
+    }
+    return 1.0;
+}
+
 /* Embedded Figtree font face — lazily loaded from the bundled byte array. */
 static kira_text_engine* g_embedded_engine = NULL;
 static kira_text_face*   g_embedded_face   = NULL;
@@ -569,15 +780,25 @@ void kira_text_draw_run(const char* font_path,
         return;
     }
 
-    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    /* All incoming geometry (x/y/w/h, pixel_size) is in logical POINTS. Rasterize
+     * glyphs at physical resolution (point-size * backing scale) so text is crisp
+     * on Retina/high_dpi, then divide FreeType/HarfBuzz metrics (which are now in
+     * physical pixels) back into point space for positioning. kg_ui_blit_coverage
+     * receives the glyph origin in points and maps the physical coverage bitmap
+     * back down internally. Off Retina scale == 1.0, so this is a no-op. */
+    const double scale = kira_text_backing_scale();
+    const double inv_scale = 1.0 / scale;
+    const double phys_size = pixel_size * scale;
+
+    kira_text_face* face = kira_text_cached_face(font_path, (float)phys_size);
     if (face == NULL) {
         return;
     }
 
     kira_text_vmetrics vmetrics;
     kira_text_face_vmetrics(face, &vmetrics);
-    double text_height = (double)vmetrics.ascender + (double)vmetrics.descender;
-    double baseline = y + (h - text_height) * 0.5 + (double)vmetrics.ascender;
+    double text_height = ((double)vmetrics.ascender + (double)vmetrics.descender) * inv_scale;
+    double baseline = y + (h - text_height) * 0.5 + (double)vmetrics.ascender * inv_scale;
 
     hb_font_t* hb = kira_text_hb_font(face);
     if (hb == NULL) {
@@ -597,19 +818,26 @@ void kira_text_draw_run(const char* font_path,
     double pen_x = x;
     for (unsigned int i = 0; i < count; i += 1) {
         uint32_t glyph = infos[i].codepoint; /* glyph id after shaping */
-        double x_offset = (double)positions[i].x_offset / 64.0;
-        double y_offset = (double)positions[i].y_offset / 64.0;
+        double x_offset = (double)positions[i].x_offset / 64.0 * inv_scale;
+        double y_offset = (double)positions[i].y_offset / 64.0 * inv_scale;
 
         kira_text_glyph_bitmap bitmap;
         if (kira_text_face_render_glyph(face, glyph, &bitmap)) {
             if (bitmap.width > 0 && bitmap.rows > 0) {
-                kg_ui_blit_coverage(pen_x + x_offset + (double)bitmap.bearing_x,
-                                    baseline - y_offset - (double)bitmap.bearing_y,
-                                    bitmap.width, bitmap.rows, bitmap.pitch,
-                                    bitmap.buffer, r, g, b, a);
+                double gx = pen_x + x_offset + (double)bitmap.bearing_x * inv_scale;
+                double gy = baseline - y_offset - (double)bitmap.bearing_y * inv_scale;
+                if (kg_ui_draw_glyph_coverage) {
+                    kg_ui_draw_glyph_coverage(
+                        kira_text_glyph_key(font_path, glyph, phys_size),
+                        gx, gy, bitmap.width, bitmap.rows, bitmap.pitch,
+                        bitmap.buffer, r, g, b, a);
+                } else {
+                    kg_ui_blit_coverage(gx, gy, bitmap.width, bitmap.rows, bitmap.pitch,
+                                        bitmap.buffer, r, g, b, a);
+                }
             }
         }
-        pen_x += (double)positions[i].x_advance / 64.0;
+        pen_x += (double)positions[i].x_advance / 64.0 * inv_scale;
     }
     hb_buffer_destroy(buffer);
 }
