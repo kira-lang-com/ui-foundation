@@ -1,3 +1,4 @@
+import KiraGraphics
 // Foreign surface for the batched UI compositor.
 //
 // The compositor renders the whole UI through the Kira Graphics public abstraction
@@ -108,6 +109,12 @@ function uiTextDecodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
 function uiIconHash(svg: CString): I64;
 @FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize; abi: c; }
 function uiIconRasterize(svg: CString, px: I32, outBuffer: RawPtr): I32;
+// Immediate-mode icon draw for the legacy (non-Metal-batch) path — the icon
+// counterpart of kira_text_draw_run: rasterizes (cached per icon+size) and
+// blits the tinted coverage through kg_ui_blit_coverage. This is what draws
+// icons on the Sokol path, including WebGPU on wasm32-emscripten.
+@FFI.Extern { library: kiraicon; symbol: kira_icon_draw_run; abi: c; }
+function uiIconDrawRun(svg: CString, x: F64, y: F64, w: F64, h: F64, r: F64, g: F64, b: F64, a: F64): Void;
 
 // libc fread — the only raw-file symbol the linked program does not already bind
 // (fopen/fwrite/fclose live in the Metal backend's foreign surface and are reused

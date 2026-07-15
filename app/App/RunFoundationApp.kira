@@ -1,3 +1,6 @@
+import KiraGraphics
+import KiraLayout
+import Foundation
 struct FoundationUiContext {
     var frameCount: Int = 0
     var viewport: Size = Size {}
@@ -205,19 +208,24 @@ function foundationEmptyRootView() -> FoundationView {
     )
 }
 
+// UI layout works in logical POINTS, not framebuffer pixels. On a Retina
+// framebuffer (high_dpi) sapp_width/height return pixel sizes; dividing by the
+// backing scale (sokolLogical*) keeps the interface at its intended physical
+// size while the framebuffer renders at native resolution for crisp output.
+// Off Retina the backing scale is 1.0, so these are identical to sapp_width/height.
 @Native
 function rootViewportSize() -> Size {
-    return Size(width: sapp_widthf(), height: sapp_heightf())
+    return Size(width: sokolLogicalWidthF(), height: sokolLogicalHeightF())
 }
 
 @Native
 function rootViewportWidth() -> Int {
-    return sapp_width()
+    return sokolLogicalWidth()
 }
 
 @Native
 function rootViewportHeight() -> Int {
-    return sapp_height()
+    return sokolLogicalHeight()
 }
 
 function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
@@ -271,11 +279,11 @@ function RunFoundationInteractiveApp(
     title: String,
     width: Int,
     height: Int,
-    rootBuilder: (borrow FoundationUiContext) -> FoundationView,
+    rootBuilder: borrow (borrow FoundationUiContext) -> FoundationView,
     // Host hook: runs FIRST every frame, BEFORE the UI render pass begins — the place a
     // hosting engine ticks its simulation and runs its own (offscreen) render passes, e.g.
     // drawing the scene into the render-target texture a TextureView shows this same frame.
-    engineFrame: (borrow mut GraphicsFrame) -> Void = foundationNoopEngineFrame,
+    engineFrame: borrow (borrow mut GraphicsFrame) -> Void = foundationNoopEngineFrame,
     // Live FPS badge overlay (bottom-left). Chrome-dense apps (editors) turn it off.
     showFpsOverlay: Bool = true,
     // When false, a resize-only frame (viewport changed, no new input events)
@@ -296,7 +304,11 @@ function RunFoundationInteractiveApp(
         width: width
         height: height
         sampleCount: 1
-        backend: GraphicsBackend.Metal
+        // Platform-aware default: Metal on Apple hosts, Sokol everywhere else
+        // (including Web/WASM, where the host-platform probe honestly reports
+        // Unknown and Sokol/WebGPU is the only backend). The per-frame path
+        // already branches dynamically via foundationFrameUsesMetal(frame).
+        backend: graphicsDefaultBackend()
     }
 
     app.onEvent { event in
@@ -307,7 +319,7 @@ function RunFoundationInteractiveApp(
     app.onFrame { frame in
         // Engine-first: host simulation + offscreen passes complete before any UI work, so a
         // TextureView composites THIS frame's engine output, never last frame's.
-        let hostFrame = engineFrame
+        let hostFrame: borrow (borrow mut GraphicsFrame) -> Void = engineFrame
         hostFrame(frame)
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
@@ -389,8 +401,8 @@ function RunFoundationInteractiveApp(
         if resizeOnly {
             root = state.cachedRoot
         } else {
-            let build = rootBuilder
-            let appRoot = build(state.ui)
+            let buildRoot: borrow (borrow FoundationUiContext) -> FoundationView = rootBuilder
+            let appRoot = buildRoot(state.ui)
             // Overlay a live FPS indicator bottom-right (opt-out via
             // showFpsOverlay). The composed tree is what the retained tree,
             // layout, and render all operate on; only the FPS badge changes each
@@ -585,7 +597,9 @@ function RunFoundationApp(root: FoundationView) {
         width: 1280
         height: 720
         sampleCount: 1
-        backend: GraphicsBackend.Metal
+        // Platform-aware default: Metal on Apple hosts, Sokol otherwise
+        // (incl. Web/WASM where the platform probe reports Unknown).
+        backend: graphicsDefaultBackend()
     }
 
     app.onFrame { frame in
