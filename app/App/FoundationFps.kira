@@ -1,3 +1,6 @@
+import Foundation
+import KiraLayout
+import KiraGraphics
 // Live FPS indicator for the interactive Foundation runner.
 //
 // The frame duration comes from sokol's filtered (rolling-average)

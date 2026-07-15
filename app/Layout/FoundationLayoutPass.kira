@@ -1,3 +1,5 @@
+import Foundation
+import KiraLayout
 // Append one flattened node plus its descriptor, keeping `nodes` and
 // `descriptors` index-aligned. The descriptor is flattened into the node's
 // inline scalars here (once) and then retained in the parallel `descriptors`

@@ -1,3 +1,6 @@
+import KiraGraphics
+import KiraLayout
+import Foundation
 function foundationTextIntrinsicWidth(size: Float, characterCount: Int) -> Float {
     let glyphWidth = size * 0.48
     let gap = size * 0.18

@@ -1,3 +1,6 @@
+import KiraLayout
+import KiraGraphics
+import Foundation
 // Centralised pointer / touch / keyboard event dispatch for the interactive
 // Foundation app loop. `foundationDispatchEvent` recovers the app state from the
 // native user-data pointer and fans out to the leaf handlers below, passing the
