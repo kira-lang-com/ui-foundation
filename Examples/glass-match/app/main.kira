@@ -1,3 +1,5 @@
+import Foundation
+import KiraLayout
 import KiraUIFoundation
 
 // glass-match — the pixel-match rig. Renders THE SAME scene the numpy sim scores
@@ -61,7 +63,8 @@ function rootView(textureId: Int) -> FoundationView {
             width: SizeMode.Fill,
             height: SizeMode.Fill,
             flex: 0,
-            opacity: 1.0
+            opacity: 1.0,
+            radius: 0.0
         ))
     }
     // button: x=40.5 y=40.0 w=104 h=104 r=52 ; pill: x=169.0 y=40.0 w=615.7 h=104 r=52
