@@ -842,7 +842,7 @@ function RunFoundationSurfaceTextApp(
             b: 0.07
             a: 1.0
         })
-        let backend = KiraGraphicsFoundationBackend {
+        var backend = KiraGraphicsFoundationBackend {
             encoder: encoder
             graphics: foundationFrameGraphics(frame)
             uiBatchPtr: uiBatchNullPtr()
