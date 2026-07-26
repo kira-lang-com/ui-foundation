@@ -58,7 +58,10 @@ struct FoundationAppState {
     var announcedRetainedTree: Bool = false
     var announcedLayout: Bool = false
     var announcedRenderCommands: Bool = false
-    var root: FoundationView = FoundationView {}
+    // A placeholder until the first build replaces it. `kind` carries no
+    // default, so the neutral one is named here: an empty Surface, the same
+    // shape `foundationEmptyRootView` returns.
+    var root: FoundationView = FoundationView { kind: FoundationViewKind.Surface }
     var retainedTree: FoundationRetainedTree = FoundationRetainedTree {}
     var cachedLayoutTree: LayoutTree = LayoutTree { nodes: [] }
     var hitRegions: [FoundationHitRegionRecord] = []
@@ -187,7 +190,8 @@ struct FoundationSurfaceTextAppState {
     var surfaceBounds: Rect = Rect {}
     var surfacePaint: FoundationSurfacePaint = FoundationSurfacePaint {}
     var textBounds: Rect = Rect {}
-    var textPaint: FoundationTextPaint = FoundationTextPaint {}
+    // `content` carries no default, so the empty string is named here.
+    var textPaint: FoundationTextPaint = FoundationTextPaint { content: "" }
 }
 
 function foundationEmptyRootView() -> FoundationView {
