@@ -420,7 +420,7 @@ int kira_text_face_render_glyph(kira_text_face* face,
     return 1;
 }
 
-static const char* kira_text_discover_font(void) {
+static const char* kira_text_probe_font(void) {
     /* Prefer the bundled Figtree font file shipped alongside the library. */
     static const char* const bundled_candidates[] = {
         "fonts/Figtree-VariableFont_wght.ttf",
@@ -472,11 +472,29 @@ static const char* kira_text_discover_font(void) {
     return "<builtin>";
 }
 
+/* The default face path, probed once.
+ *
+ * Which fonts are installed does not change while a process runs, but the probe
+ * that answers it opens files: up to thirteen of them, and the first hit is
+ * usually the last candidate on the list. Every measured run without an
+ * explicit font path asks this question, so a UI frame asked it hundreds of
+ * times and spent more of itself in open(2) than in anything else — the largest
+ * single cost in a Project Matter frame once the compiler stopped copying
+ * aggregates. Every result, including the "<builtin>" fallback, is a string
+ * literal, so caching the pointer keeps it valid for the life of the process. */
+static const char* kira_text_discover_font(void) {
+    static const char* cached = NULL;
+    if (cached == NULL) {
+        cached = kira_text_probe_font();
+    }
+    return cached;
+}
+
 /* Locate a CJK-capable system font. The bundled Figtree face (and Segoe/Arial)
  * have no CJK coverage, so committed Hanzi would render as .notdef tofu. These
  * fonts also carry Latin glyphs, so a mixed Latin+Hanzi run can be shaped
  * entirely with the CJK face. Returns NULL when none is installed. */
-static const char* kira_text_discover_cjk_font(void) {
+static const char* kira_text_probe_cjk_font(void) {
     static const char* const cjk_candidates[] = {
         "C:/Windows/Fonts/msyh.ttc",   /* Microsoft YaHei */
         "C:/Windows/Fonts/msyh.ttf",
@@ -496,6 +514,21 @@ static const char* kira_text_discover_cjk_font(void) {
         }
     }
     return NULL;
+}
+
+/* The CJK face path, probed once, on the same terms as the default face.
+ *
+ * A separate flag, because "no CJK font is installed" is a real answer and a
+ * null pointer would otherwise re-probe every run — the expensive case, since
+ * a miss opens every candidate. */
+static const char* kira_text_discover_cjk_font(void) {
+    static const char* cached = NULL;
+    static int probed = 0;
+    if (!probed) {
+        cached = kira_text_probe_cjk_font();
+        probed = 1;
+    }
+    return cached;
 }
 
 /* Decode UTF-8 and report whether any scalar lands in a CJK/Kana/Hangul block
