@@ -89,6 +89,12 @@ struct UiBatchState {
     // the frame O(n^2); writing through this raw pointer keeps the hot path O(1).
     var contentsPtr: RawPtr
     var quadCount: Int = 0
+    // The vertex buffer holds one slot per frame in flight, so `contentsPtr` is the
+    // base of the whole ring and this is the float index where THIS frame's slot
+    // starts (claimed once per frame in uiBatchBeginFrameSlots). Emitting without it
+    // would write the frame being built into the bytes the GPU is still drawing —
+    // part of the window from one frame and part from the next.
+    var frameBase: Int = 0
     // Liquid glass splits the frame into TWO quad streams: everything emitted
     // BEFORE the first LiquidGlass surface (the backdrop that gets captured and
     // blurred) and everything from that surface on (composited over the refracted
@@ -98,6 +104,7 @@ struct UiBatchState {
     // split point (uiBatchBeginGlassCapture) and swapped back at uiBatchBegin.
     var sideVertexBufferId: U32 = 0
     var sideContentsPtr: RawPtr
+    var sideFrameBase: Int = 0
     var sideQuadCount: Int = 0
     var glassSplit: Bool = false
     // Offscreen liquid-glass resources, created lazily on the first glass frame and
@@ -353,6 +360,33 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     return nativeUserData(storage)
 }
 
+// Claim both streams' slots for this frame. Runs right after uiBatchBegin, once the
+// streams are back in their unsplit order, so each stream's base belongs to the
+// stream it is stored beside. Both are claimed even when the frame never splits: an
+// unclaimed buffer would keep the slot the last frame that used it left behind, and
+// a later frame writing that slot would be writing what a running frame is drawing.
+@Native
+function uiBatchBeginFrameSlots(batchPtr: RawPtr, graphics: borrow Graphics) {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    let active = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.vertexBufferId
+        }
+        id: state.vertexBufferId
+    }
+    // Byte offset to float index: a slot stride is a multiple of the 256-byte binding
+    // alignment, so this division is exact.
+    state.frameBase = graphics.dynamicBufferFrameStart(active) / 4
+    let side = GraphicsBuffer {
+        handle: BackendBufferHandle {
+            id: state.sideVertexBufferId
+        }
+        id: state.sideVertexBufferId
+    }
+    state.sideFrameBase = graphics.dynamicBufferFrameStart(side) / 4
+    return
+}
+
 // Start a frame: clear the CPU vertex stream and record the viewport (pixel) size.
 @Native
 function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float, scale: Float) {
@@ -363,10 +397,13 @@ function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float, scal
     if state.glassSplit {
         let activeBuffer = state.vertexBufferId
         let activeContents = state.contentsPtr
+        let activeBase = state.frameBase
         state.vertexBufferId = state.sideVertexBufferId
         state.contentsPtr = state.sideContentsPtr
+        state.frameBase = state.sideFrameBase
         state.sideVertexBufferId = activeBuffer
         state.sideContentsPtr = activeContents
+        state.sideFrameBase = activeBase
         state.glassSplit = false
     }
     state.sideQuadCount = 0
@@ -419,8 +456,8 @@ function uiBatchEmitQuad(
     let pys = [py0, py0, py1, py1]
     let lxs = [lx0, lx1, lx1, lx0]
     let lys = [ly0, ly0, ly1, ly1]
-    // Base float index of this quad's first vertex in the shared buffer.
-    var base = state.quadCount * uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
+    // Base float index of this quad's first vertex, inside this frame's ring slot.
+    var base = state.frameBase + state.quadCount * uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
     var c = 0
     while c < 4 {
         let px = pxs[c]
@@ -738,22 +775,17 @@ function uiBatchEnsureGlassResources(batchPtr: RawPtr, graphics: borrow Graphics
         }
         id: state.blurParamsHBufferId
     }
-    let hContents = graphics.dynamicBufferContents(paramsHBuf)
-    uiMemWriteF32(hContents, 0, Float(texW))
-    uiMemWriteF32(hContents, 4, Float(texH))
-    uiMemWriteF32(hContents, 8, 2.0)
-    uiMemWriteF32(hContents, 12, 0.0)
+    // Written through updateDynamicBuffer rather than the contents pointer: a dynamic
+    // buffer carries a ring, and updateDynamicBuffer is what claims the slot this
+    // write belongs in. Four floats per glass rebuild is not a hot path.
+    graphics.updateDynamicBuffer(paramsHBuf, [Float(texW), Float(texH), 2.0, 0.0])
     let paramsVBuf = GraphicsBuffer {
         handle: BackendBufferHandle {
             id: state.blurParamsVBufferId
         }
         id: state.blurParamsVBufferId
     }
-    let vContents = graphics.dynamicBufferContents(paramsVBuf)
-    uiMemWriteF32(vContents, 0, Float(texW))
-    uiMemWriteF32(vContents, 4, Float(texH))
-    uiMemWriteF32(vContents, 8, 0.0)
-    uiMemWriteF32(vContents, 12, 2.0)
+    graphics.updateDynamicBuffer(paramsVBuf, [Float(texW), Float(texH), 0.0, 2.0])
     state.glassReady = true
     return
 }
@@ -778,11 +810,14 @@ function uiBatchBeginGlassCapture(batchPtr: RawPtr, graphics: borrow Graphics) {
     }
     let activeBuffer = state.vertexBufferId
     let activeContents = state.contentsPtr
+    let activeBase = state.frameBase
     let activeCount = state.quadCount
     state.vertexBufferId = state.sideVertexBufferId
     state.contentsPtr = state.sideContentsPtr
+    state.frameBase = state.sideFrameBase
     state.sideVertexBufferId = activeBuffer
     state.sideContentsPtr = activeContents
+    state.sideFrameBase = activeBase
     state.sideQuadCount = activeCount
     state.quadCount = 0
     state.glassSplit = true
@@ -1174,7 +1209,7 @@ function uiBatchPushIcon(
             let gy = y + (h - sizePts) / 2.0
             let stride = uiBatchVertsPerQuad() * uiBatchFloatsPerVertex()
             if state.quadCount < uiBatchCapacityQuads() && !uiPtrIsNull(state.contentsPtr) {
-                let base = state.quadCount * stride
+                let base = state.frameBase + state.quadCount * stride
                 uiWriteQuad(
                     state.contentsPtr, base,
                     gx, gy, gx + sizePts, gy + sizePts,
@@ -1367,7 +1402,7 @@ function uiBatchPushText(
                         let u1 = Float(atlasX + gwpx) / atlasW
                         let v1 = Float(atlasY + ghpx) / atlasW
                         if state.quadCount < uiBatchCapacityQuads() && !uiPtrIsNull(state.contentsPtr) {
-                            let base = state.quadCount * stride
+                            let base = state.frameBase + state.quadCount * stride
                             uiWriteQuad(
                                 state.contentsPtr, base,
                                 gx, gy, gx + gw, gy + gh,

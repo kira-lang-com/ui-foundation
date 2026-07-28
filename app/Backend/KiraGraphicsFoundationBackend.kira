@@ -134,6 +134,9 @@ class KiraGraphicsFoundationBackend {
         }
         if self.metalActive {
             uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
+            // Claim this frame's slot in each vertex stream before anything emits into
+            // one; the frames still on the GPU keep theirs.
+            uiBatchBeginFrameSlots(self.uiBatchPtr, self.graphics)
             uiBatchPushRect(self.uiBatchPtr, 0.0, 0.0, intAsFloat(value: width), intAsFloat(value: height), bg, transparent, 0.0, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
