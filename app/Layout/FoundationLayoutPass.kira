@@ -8,10 +8,11 @@ import KiraLayout
 function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], descriptors: borrow mut [LayoutDescriptor], desc: LayoutDescriptor, firstChild: Int, childCount: Int) {
     var outNodes = nodes
     var outDescs = descriptors
-    let node = layoutNodeFlattenDescriptor(LayoutNode {
+    var node = LayoutNode {
         firstChild: firstChild
         childCount: childCount
-    }, desc)
+    }
+    layoutNodeFlattenDescriptor(node, desc)
     outNodes.append(move node)
     outDescs.append(move desc)
     return
@@ -80,7 +81,7 @@ class FoundationLayoutPass {
         // The cached measure/place state is now valid for every node, so a later
         // retained re-layout (relayout) can reuse the geometry of any subtree whose
         // offer and origin are unchanged instead of recomputing the whole tree.
-        tree = layoutMarkAllClean(move tree)
+        layoutMarkAllClean(tree)
         return tree
     }
 
@@ -107,10 +108,10 @@ class FoundationLayoutPass {
             let same = layoutDescriptorEqual(result.descriptors[index], fresh.descriptors[index])
             changed.append(!same)
             result.descriptors[index] = fresh.descriptors[index]
-            result.nodes[index] = layoutNodeFlattenDescriptor(result.nodes[index], result.descriptors[index])
+            layoutNodeFlattenDescriptor(result.nodes[index], result.descriptors[index])
             index = index + 1
         }
-        result = layoutPropagateDirty(move result, changed)
+        layoutPropagateDirty(result, changed)
         result = layoutResetCounters(move result)
         engine.measure(tree: result, index: 0, available: available)
         engine.place(tree: result, index: 0, origin: Point {})

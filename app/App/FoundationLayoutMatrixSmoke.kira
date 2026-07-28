@@ -10,10 +10,11 @@ function foundationMatrixInsets(top: Float, trailing: Float, bottom: Float, lead
 }
 
 function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, margin: EdgeInsets, x: Float, y: Float) -> LayoutNode {
-    return layoutNodeFlattenDescriptor(LayoutNode(
+    var node = LayoutNode(
         firstChild: 0,
         childCount: 0
-    ), LayoutDescriptor {
+    )
+    layoutNodeFlattenDescriptor(node, LayoutDescriptor {
         width: width
         height: height
         flex: flex
@@ -26,6 +27,7 @@ function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, marg
         x: x
         y: y
     })
+    return node
 }
 
 function foundationMatrixContainer(
@@ -44,10 +46,11 @@ function foundationMatrixContainer(
     firstChild: Int,
     childCount: Int,
 ) -> LayoutNode {
-    return layoutNodeFlattenDescriptor(LayoutNode(
+    var node = LayoutNode(
         firstChild: firstChild,
         childCount: childCount
-    ), LayoutDescriptor {
+    )
+    layoutNodeFlattenDescriptor(node, LayoutDescriptor {
         width: width
         height: height
         flex: flex
@@ -61,6 +64,7 @@ function foundationMatrixContainer(
         padding: padding
         margin: margin
     })
+    return node
 }
 
 function foundationMatrixRun(tree: LayoutTree, available: borrow Size) -> LayoutTree {
@@ -68,7 +72,8 @@ function foundationMatrixRun(tree: LayoutTree, available: borrow Size) -> Layout
     let engine = LayoutEngine()
     engine.measure(tree: laidOut, index: 0, available: available)
     engine.place(tree: laidOut, index: 0, origin: Point {})
-    return layoutMarkAllClean(move laidOut)
+    layoutMarkAllClean(laidOut)
+    return laidOut
 }
 
 function foundationMatrixRelayout(tree: LayoutTree, available: borrow Size) -> LayoutTree {
