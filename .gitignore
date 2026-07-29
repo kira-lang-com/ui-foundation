@@ -1,4 +1,5 @@
 .kira-build/
+.codex/tmp/
 generated/
 .DS_Store
 kira.lock

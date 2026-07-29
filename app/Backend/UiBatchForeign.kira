@@ -45,7 +45,7 @@ function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
     metalMemWriteF32(ptr, offset, value)
     return
 }
-// Write one vertex of a quad: the 23 floats the MSL `UiVertex` struct reads, in
+// Write one vertex of a quad: the 24 floats the MSL `UiVertex` struct reads, in
 // its field order (see the layout comment in UiBatch.kira). `px`/`py` are pixel
 // coordinates, which the fragment stage clips against; `posX`/`posY` are the
 // same point in clip space, with the y flip a top-left-origin UI needs.
@@ -55,6 +55,7 @@ function uiWriteVertex(
     px: Float, py: Float, lx: Float, ly: Float,
     vw: Float, vh: Float,
     halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+    edgeRefraction: Float,
     fr: Float, fg: Float, fb: Float, fa: Float,
     br: Float, bg: Float, bb: Float, ba: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
@@ -71,18 +72,19 @@ function uiWriteVertex(
     uiMemWriteF32(ptr, bytes + U64(32), radius)
     uiMemWriteF32(ptr, bytes + U64(36), borderWidth)
     uiMemWriteF32(ptr, bytes + U64(40), mode)
-    uiMemWriteF32(ptr, bytes + U64(44), fr)
-    uiMemWriteF32(ptr, bytes + U64(48), fg)
-    uiMemWriteF32(ptr, bytes + U64(52), fb)
-    uiMemWriteF32(ptr, bytes + U64(56), fa)
-    uiMemWriteF32(ptr, bytes + U64(60), br)
-    uiMemWriteF32(ptr, bytes + U64(64), bg)
-    uiMemWriteF32(ptr, bytes + U64(68), bb)
-    uiMemWriteF32(ptr, bytes + U64(72), ba)
-    uiMemWriteF32(ptr, bytes + U64(76), clipMinX)
-    uiMemWriteF32(ptr, bytes + U64(80), clipMinY)
-    uiMemWriteF32(ptr, bytes + U64(84), clipMaxX)
-    uiMemWriteF32(ptr, bytes + U64(88), clipMaxY)
+    uiMemWriteF32(ptr, bytes + U64(44), edgeRefraction)
+    uiMemWriteF32(ptr, bytes + U64(48), fr)
+    uiMemWriteF32(ptr, bytes + U64(52), fg)
+    uiMemWriteF32(ptr, bytes + U64(56), fb)
+    uiMemWriteF32(ptr, bytes + U64(60), fa)
+    uiMemWriteF32(ptr, bytes + U64(64), br)
+    uiMemWriteF32(ptr, bytes + U64(68), bg)
+    uiMemWriteF32(ptr, bytes + U64(72), bb)
+    uiMemWriteF32(ptr, bytes + U64(76), ba)
+    uiMemWriteF32(ptr, bytes + U64(80), clipMinX)
+    uiMemWriteF32(ptr, bytes + U64(84), clipMinY)
+    uiMemWriteF32(ptr, bytes + U64(88), clipMaxX)
+    uiMemWriteF32(ptr, bytes + U64(92), clipMaxY)
     return
 }
 
@@ -102,15 +104,16 @@ function uiWriteQuad(
     lx0: Float, ly0: Float, lx1: Float, ly1: Float,
     vw: Float, vh: Float,
     halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+    edgeRefraction: Float,
     fr: Float, fg: Float, fb: Float, fa: Float,
     br: Float, bg: Float, bb: Float, ba: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
 ) {
-    let stride = U64(23)
-    uiWriteVertex(ptr, baseFloats, px0, py0, lx0, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride, px1, py0, lx1, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride * U64(2), px1, py1, lx1, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride * U64(3), px0, py1, lx0, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    let stride = U64(24)
+    uiWriteVertex(ptr, baseFloats, px0, py0, lx0, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    uiWriteVertex(ptr, baseFloats + stride, px1, py0, lx1, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    uiWriteVertex(ptr, baseFloats + stride * U64(2), px1, py1, lx1, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    uiWriteVertex(ptr, baseFloats + stride * U64(3), px0, py1, lx0, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
     return
 }
 @Native
