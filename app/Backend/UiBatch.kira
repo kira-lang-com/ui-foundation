@@ -17,12 +17,13 @@ import KiraGraphics
 // handle/recover discipline the Metal context uses, so it survives the begin/draw/end
 // seam identically on the native and hybrid backends.
 //
-// Vertex layout (23 f32, tightly packed; matches the MSL `UiVertex` struct):
+// Vertex layout (24 f32, tightly packed; matches the MSL `UiVertex` struct):
 //   posX posY  pxX pxY  localX localY  halfW halfH  radius borderWidth  mode
-//   fillR fillG fillB fillA  borderR borderG borderB borderA  clipMinX clipMinY clipMaxX clipMaxY
+//   edgeRefraction  fillR fillG fillB fillA  borderR borderG borderB borderA
+//   clipMinX clipMinY clipMaxX clipMaxY
 // `mode` 0 = SDF surface (local = pixel offset from centre), 1 = glyph (local = uv).
 
-function uiBatchFloatsPerVertex() -> Int { return 23 }
+function uiBatchFloatsPerVertex() -> Int { return 24 }
 function uiBatchVertsPerQuad() -> Int { return 4 }
 function uiBatchCapacityQuads() -> Int { return 16384 }
 function uiBatchAtlasSize() -> Int { return 1024 }
@@ -146,9 +147,10 @@ struct UiBatchState {
 // the quad's rounded shape, selected per vertex by `mode` (0 / 1 / 2 / 3). Outputs
 // premultiplied alpha (the pipeline blends One, OneMinusSourceAlpha).
 //
-// Mode 3 field reuse (the 23-float vertex has no spare slots): `border` carries the
+// Mode 3 field reuse: `border` carries the
 // glass rect's uv transform — border.rg = the rect centre in backdrop-texture uv,
-// border.ba = the rect half-size in uv.
+// border.ba = the rect half-size in uv. `edgeRefraction` independently scales the
+// white refracted hairline and inner bloom while leaving the lens itself intact.
 //
 // The mode-3 body is the Kira Graphics liquid_glass example's LiquidGlassComposite
 // fragment shader with its exact constants — refractionCurve(v) = 1 -
@@ -179,7 +181,7 @@ struct UiBatchState {
 // Inside samples the BLURRED backdrop at slot 2; outside is the sharp backdrop
 // quad drawn beneath.
 function uiBatchMslSource() -> String {
-    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nstatic inline float refractionCurve(float value) { float e = 2.718281828459045; return 1.0 - 2.3 * pow(5.2 * e, -6.9 * value - 0.7); }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]], texture2d<float> external [[texture(1)]], sampler externalSmp [[sampler(1)]], texture2d<float> backdrop [[texture(2)]], sampler backdropSmp [[sampler(2)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 2.5) { float distancePx = sdRound(in.local, in.hsize, in.radius); if (distancePx > 0.5) { float rxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float rxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float ryp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float rym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 rn = normalize(float2(rxp - rxm, ryp - rym) + float2(0.0001, 0.0)); float ringW = 1.2 + 1.2 * (1.0 - abs(rn.y)); float ring = (1.0 - smoothstep(0.0, ringW, distancePx)) * (0.12 + 0.30 * (1.0 - abs(rn.y))); float ds = sdRound(in.local - float2(0.0, 2.0), in.hsize, in.radius); float soft = (1.0 - smoothstep(-2.0, 20.0, ds)) * 0.05 * clamp(rn.y, 0.0, 1.0); float shadow = min(ring + soft, 0.14); if (shadow <= 0.004) { discard_fragment(); } return float4(0.0, 0.0, 0.0, shadow); } float cov = clamp(0.5 - distancePx, 0.0, 1.0); float minH = max(min(in.hsize.x, in.hsize.y), 1.0); float t = max(0.0 - distancePx, 0.0) / 180.0; float ref = refractionCurve(t); float gxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float gxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float gyp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float gym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 n = normalize(float2(gxp - gxm, gyp - gym) + float2(0.0001, 0.0)); float bend = (1.0 - ref) * min(minH, 72.0); float2 gp = in.local / in.hsize; float2 uvFrag = float2(in.border.r + gp.x * in.border.b, in.border.g + gp.y * in.border.a); float2 uvScale = float2(in.border.b / in.hsize.x, in.border.a / in.hsize.y); float2 coord = uvFrag - n * bend * uvScale; float3 sharpTap = external.sample(externalSmp, coord).rgb; float3 softTap = backdrop.sample(backdropSmp, coord).rgb; float3 rgb = mix(sharpTap, softTap, clamp(in.fill.a, 0.0, 1.0) * smoothstep(2.0, 22.0, max(0.0 - distancePx, 0.0))); float luma = dot(rgb, float3(0.299, 0.587, 0.114)); float washA = clamp(in.borderWidth * (1.6 - 1.3 * luma), 0.0, 0.85); rgb = mix(rgb, in.fill.rgb, washA); float inside = max(0.0 - distancePx, 0.0); float spec = pow(abs(n.y), 1.5); float hairline = 1.0 - smoothstep(0.3, 1.5, inside); float innerBloom = 1.0 - smoothstep(0.8, 9.0, inside); rgb = rgb + float3(1.0, 1.0, 1.0) * (spec * (hairline * 0.22 + innerBloom * 0.07)); return float4(clamp(rgb, 0.0, 1.0) * cov, cov); } if (in.mode > 1.5) { float4 c = external.sample(externalSmp, in.local); float a = c.a * in.fill.a; return float4(c.rgb * in.fill.a, a); } if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
+    return "#include <metal_stdlib>\nusing namespace metal;\nstruct UiVertex { float posX; float posY; float pxX; float pxY; float localX; float localY; float halfW; float halfH; float radius; float borderWidth; float mode; float edgeRefraction; float fillR; float fillG; float fillB; float fillA; float borderR; float borderG; float borderB; float borderA; float clipMinX; float clipMinY; float clipMaxX; float clipMaxY; };\nstruct VOut { float4 pos [[position]]; float2 local; float2 px; float2 hsize; float radius; float borderWidth; float mode; float edgeRefraction; float4 fill; float4 border; float4 clip; };\nvertex VOut v_main(uint vid [[vertex_id]], constant UiVertex* verts [[buffer(0)]]) { UiVertex v = verts[vid]; VOut o; o.pos = float4(v.posX, v.posY, 0.0, 1.0); o.local = float2(v.localX, v.localY); o.px = float2(v.pxX, v.pxY); o.hsize = float2(v.halfW, v.halfH); o.radius = v.radius; o.borderWidth = v.borderWidth; o.mode = v.mode; o.edgeRefraction = v.edgeRefraction; o.fill = float4(v.fillR, v.fillG, v.fillB, v.fillA); o.border = float4(v.borderR, v.borderG, v.borderB, v.borderA); o.clip = float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY); return o; }\nstatic inline float sdRound(float2 p, float2 b, float r) { float2 q = abs(p) - b + float2(r, r); return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r; }\nstatic inline float refractionCurve(float value) { float e = 2.718281828459045; return 1.0 - 2.3 * pow(5.2 * e, -6.9 * value - 0.7); }\nfragment float4 f_main(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler smp [[sampler(0)]], texture2d<float> external [[texture(1)]], sampler externalSmp [[sampler(1)]], texture2d<float> backdrop [[texture(2)]], sampler backdropSmp [[sampler(2)]]) { if (in.px.x < in.clip.x || in.px.y < in.clip.y || in.px.x > in.clip.z || in.px.y > in.clip.w) discard_fragment(); if (in.mode > 2.5) { float distancePx = sdRound(in.local, in.hsize, in.radius); if (distancePx > 0.5) { float rxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float rxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float ryp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float rym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 rn = normalize(float2(rxp - rxm, ryp - rym) + float2(0.0001, 0.0)); float ringW = 1.2 + 1.2 * (1.0 - abs(rn.y)); float ring = (1.0 - smoothstep(0.0, ringW, distancePx)) * (0.12 + 0.30 * (1.0 - abs(rn.y))); float ds = sdRound(in.local - float2(0.0, 2.0), in.hsize, in.radius); float soft = (1.0 - smoothstep(-2.0, 20.0, ds)) * 0.05 * clamp(rn.y, 0.0, 1.0); float shadow = min(ring + soft, 0.14); if (shadow <= 0.004) { discard_fragment(); } return float4(0.0, 0.0, 0.0, shadow); } float cov = clamp(0.5 - distancePx, 0.0, 1.0); float minH = max(min(in.hsize.x, in.hsize.y), 1.0); float t = max(0.0 - distancePx, 0.0) / 180.0; float ref = refractionCurve(t); float gxp = sdRound(in.local + float2(1.0, 0.0), in.hsize, in.radius); float gxm = sdRound(in.local - float2(1.0, 0.0), in.hsize, in.radius); float gyp = sdRound(in.local + float2(0.0, 1.0), in.hsize, in.radius); float gym = sdRound(in.local - float2(0.0, 1.0), in.hsize, in.radius); float2 n = normalize(float2(gxp - gxm, gyp - gym) + float2(0.0001, 0.0)); float bend = (1.0 - ref) * min(minH, 72.0); float2 gp = in.local / in.hsize; float2 uvFrag = float2(in.border.r + gp.x * in.border.b, in.border.g + gp.y * in.border.a); float2 uvScale = float2(in.border.b / in.hsize.x, in.border.a / in.hsize.y); float2 coord = uvFrag - n * bend * uvScale; float3 sharpTap = external.sample(externalSmp, coord).rgb; float3 softTap = backdrop.sample(backdropSmp, coord).rgb; float3 rgb = mix(sharpTap, softTap, clamp(in.fill.a, 0.0, 1.0) * smoothstep(2.0, 22.0, max(0.0 - distancePx, 0.0))); float luma = dot(rgb, float3(0.299, 0.587, 0.114)); float washA = clamp(in.borderWidth * (1.6 - 1.3 * luma), 0.0, 0.85); rgb = mix(rgb, in.fill.rgb, washA); float inside = max(0.0 - distancePx, 0.0); float spec = pow(abs(n.y), 1.5); float hairline = 1.0 - smoothstep(0.3, 1.5, inside); float innerBloom = 1.0 - smoothstep(0.8, 9.0, inside); rgb = rgb + float3(1.0, 1.0, 1.0) * (spec * (hairline * 0.22 + innerBloom * 0.07)) * clamp(in.edgeRefraction, 0.05, 2.0); return float4(clamp(rgb, 0.0, 1.0) * cov, cov); } if (in.mode > 1.5) { float4 c = external.sample(externalSmp, in.local); float a = c.a * in.fill.a; return float4(c.rgb * in.fill.a, a); } if (in.mode > 0.5) { float cov = atlas.sample(smp, in.local).r; float a = in.fill.a * cov; return float4(in.fill.rgb * a, a); } float d = sdRound(in.local, in.hsize, in.radius); float fillCov = clamp(0.5 - d, 0.0, 1.0); if (in.borderWidth > 0.0 && in.border.a > 0.0) { float di = sdRound(in.local, in.hsize - float2(in.borderWidth, in.borderWidth), max(in.radius - in.borderWidth, 0.0)); float innerCov = clamp(0.5 - di, 0.0, 1.0); float3 rgb = mix(in.border.rgb, in.fill.rgb, innerCov); float a = mix(in.border.a, in.fill.a, innerCov) * fillCov; return float4(rgb * a, a); } float a = in.fill.a * fillCov; return float4(in.fill.rgb * a, a); }\n"
 }
 
 // Separable gaussian blur (the liquid-glass backdrop passes). One shader serves both
@@ -438,6 +440,7 @@ function uiBatchEmitQuad(
     px0: Float, py0: Float, px1: Float, py1: Float,
     lx0: Float, ly0: Float, lx1: Float, ly1: Float,
     halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+    edgeRefraction: Float,
     fr: Float, fg: Float, fb: Float, fa: Float,
     br: Float, bg: Float, bb: Float, ba: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
@@ -474,18 +477,19 @@ function uiBatchEmitQuad(
         uiMemWriteF32(contents, o + 32, radius)
         uiMemWriteF32(contents, o + 36, borderWidth)
         uiMemWriteF32(contents, o + 40, mode)
-        uiMemWriteF32(contents, o + 44, fr)
-        uiMemWriteF32(contents, o + 48, fg)
-        uiMemWriteF32(contents, o + 52, fb)
-        uiMemWriteF32(contents, o + 56, fa)
-        uiMemWriteF32(contents, o + 60, br)
-        uiMemWriteF32(contents, o + 64, bg)
-        uiMemWriteF32(contents, o + 68, bb)
-        uiMemWriteF32(contents, o + 72, ba)
-        uiMemWriteF32(contents, o + 76, clipMinX)
-        uiMemWriteF32(contents, o + 80, clipMinY)
-        uiMemWriteF32(contents, o + 84, clipMaxX)
-        uiMemWriteF32(contents, o + 88, clipMaxY)
+        uiMemWriteF32(contents, o + 44, edgeRefraction)
+        uiMemWriteF32(contents, o + 48, fr)
+        uiMemWriteF32(contents, o + 52, fg)
+        uiMemWriteF32(contents, o + 56, fb)
+        uiMemWriteF32(contents, o + 60, fa)
+        uiMemWriteF32(contents, o + 64, br)
+        uiMemWriteF32(contents, o + 68, bg)
+        uiMemWriteF32(contents, o + 72, bb)
+        uiMemWriteF32(contents, o + 76, ba)
+        uiMemWriteF32(contents, o + 80, clipMinX)
+        uiMemWriteF32(contents, o + 84, clipMinY)
+        uiMemWriteF32(contents, o + 88, clipMaxX)
+        uiMemWriteF32(contents, o + 92, clipMaxY)
         base = base + uiBatchFloatsPerVertex()
         c = c + 1
     }
@@ -523,7 +527,7 @@ function uiBatchPushRect(
         batchPtr,
         cx - lhx, cy - lhy, cx + lhx, cy + lhy,
         0.0 - lhx, 0.0 - lhy, lhx, lhy,
-        halfW, halfH, clampedRadius, borderWidth, 0.0,
+        halfW, halfH, clampedRadius, borderWidth, 0.0, 0.0,
         fill.r, fill.g, fill.b, fill.a,
         border.r, border.g, border.b, border.a,
         clipMinX, clipMinY, clipMaxX, clipMaxY
@@ -573,7 +577,7 @@ function uiBatchPushExternalRect(
         batchPtr,
         x, y, x + w, y + h,
         0.0, 0.0, 1.0, 1.0,
-        w / 2.0, h / 2.0, 0.0, 0.0, 2.0,
+        w / 2.0, h / 2.0, 0.0, 0.0, 2.0, 0.0,
         1.0, 1.0, 1.0, alpha,
         0.0, 0.0, 0.0, 0.0,
         clipMinX, clipMinY, clipMaxX, clipMaxY
@@ -842,6 +846,7 @@ function uiBatchPushGlass(
     radius: Float,
     tint: borrow Color,
     glowIntensity: Float,
+    edgeRefraction: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
 ) {
     if w <= 0.0 || h <= 0.0 {
@@ -873,7 +878,7 @@ function uiBatchPushGlass(
         batchPtr,
         cx - lhx, cy - lhy, cx + lhx, cy + lhy,
         0.0 - lhx, 0.0 - lhy, lhx, lhy,
-        halfW, halfH, clampedRadius, tint.a, 3.0,
+        halfW, halfH, clampedRadius, tint.a, 3.0, edgeRefraction,
         tint.r, tint.g, tint.b, glowIntensity,
         cx / vw, cy / vh, halfW / vw, halfH / vh,
         clipMinX, clipMinY, clipMaxX, clipMaxY
@@ -1215,7 +1220,7 @@ function uiBatchPushIcon(
                     gx, gy, gx + sizePts, gy + sizePts,
                     u0, v0, u1, v1,
                     state.viewportW, state.viewportH,
-                    0.0, 0.0, 0.0, 0.0, 1.0,
+                    0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                     color.r, color.g, color.b, color.a,
                     0.0, 0.0, 0.0, 0.0,
                     clipMinX, clipMinY, clipMaxX, clipMaxY
@@ -1408,7 +1413,7 @@ function uiBatchPushText(
                                 gx, gy, gx + gw, gy + gh,
                                 u0, v0, u1, v1,
                                 state.viewportW, state.viewportH,
-                                0.0, 0.0, 0.0, 0.0, 1.0,
+                                0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                                 color.r, color.g, color.b, color.a,
                                 0.0, 0.0, 0.0, 0.0,
                                 clipMinX, clipMinY, clipMaxX, clipMaxY

@@ -332,7 +332,7 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, fill: borrow Color) {
+    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, edgeRefraction: Float, fill: borrow Color) {
         self.backdropDepth = self.backdropDepth + 1
         // REAL liquid glass on the batched Metal path: split the quad stream so
         // everything already emitted becomes the captured-and-blurred backdrop, and
@@ -344,7 +344,7 @@ class KiraGraphicsFoundationBackend {
             // The surface's fill IS the glass wash: the shader applies it
             // adaptively (stronger over dark backdrop, near invisible over light),
             // so the separate fill quad is suppressed for this surface.
-            uiBatchPushGlass(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            uiBatchPushGlass(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             self.suppressNextFill = true
             return
         }

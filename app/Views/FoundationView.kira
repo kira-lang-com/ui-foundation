@@ -127,6 +127,10 @@ struct FoundationView {
     // glass shows vs the sharp capture. 1 = the iOS search-pill look (fully
     // frosted), ~0 = the macOS dock look (crisp content, refraction + rims only).
     let blur: Float = 1.0
+    // LiquidGlass white edge-refraction strength. 1 preserves the platform
+    // default; lower values soften the hairline/bloom and higher values intensify
+    // it without changing the glass shape, blur, tint, or lens displacement.
+    let edgeRefraction: Float = 1.0
 }
 
 
