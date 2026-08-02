@@ -11,6 +11,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
+#include FT_OUTLINE_H
 
 #include <hb.h>
 #include <hb-ft.h>
@@ -392,9 +393,29 @@ float kira_text_measure_utf8(kira_text_face* face, const char* utf8, int byte_le
     return (float)width;
 }
 
-int kira_text_face_render_glyph(kira_text_face* face,
-                                uint32_t glyph_index,
-                                kira_text_glyph_bitmap* out) {
+/* Rasterize a glyph the way macOS does, rather than the way FreeType defaults to.
+ *
+ * Two departures from FT_LOAD_DEFAULT, and they go together:
+ *
+ *   FT_LOAD_NO_HINTING — hinting distorts an outline to line its stems up with the
+ *   pixel grid. It buys crispness and pays for it in shape and spacing: every glyph
+ *   is nudged somewhere slightly different from where the designer drew it. Apple
+ *   has ignored hints since the beginning; the letterforms are rendered as drawn.
+ *
+ *   x_offset_26_6 — the price of unhinted rendering is that a glyph's position
+ *   matters at finer than whole-pixel resolution, so the caller quantizes the pen to
+ *   a fraction of a pixel and asks for the outline shifted by that much before it is
+ *   scan-converted. This is subpixel POSITIONING (not subpixel antialiasing, which
+ *   Apple dropped in Mojave): the coverage is computed for where the glyph actually
+ *   sits instead of being computed once and resampled, which is what makes a run of
+ *   text evenly spaced rather than visibly jittering between letters.
+ *
+ * The offset is in 26.6 fixed point, so 64 is one pixel and 16 is a quarter of one.
+ */
+int kira_text_face_render_glyph_offset(kira_text_face* face,
+                                       uint32_t glyph_index,
+                                       int x_offset_26_6,
+                                       kira_text_glyph_bitmap* out) {
     if (out == NULL) {
         return 0;
     }
@@ -403,8 +424,33 @@ int kira_text_face_render_glyph(kira_text_face* face,
         return 0;
     }
     FT_Face ft = face->face;
-    if (FT_Load_Glyph(ft, (FT_UInt)glyph_index, FT_LOAD_DEFAULT) != 0) {
+    if (FT_Load_Glyph(ft, (FT_UInt)glyph_index, FT_LOAD_NO_HINTING) != 0) {
         return 0;
+    }
+    if (ft->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {
+        if (x_offset_26_6 != 0) {
+            FT_Outline_Translate(&ft->glyph->outline, (FT_Pos)x_offset_26_6, 0);
+        }
+        /* Stem darkening.
+         *
+         * An unhinted outline puts a stem wherever the designer drew it, which at
+         * a normal UI size is often most of a pixel wide and none of it aligned.
+         * Scan-converted honestly that yields two half-lit pixels where the design
+         * has one solid stroke, and the text reads lighter and rougher than it was
+         * drawn — the price hinting used to pay for by moving the stem onto the
+         * grid and distorting the letter.
+         *
+         * Apple pays it a third way: leave the outline where it is and fatten it
+         * slightly, so a thin stem covers enough of its pixels to survive. This is
+         * what made pre-Retina macOS text look soft and full rather than spindly,
+         * and it is why their glyphs still look heavier than a default FreeType
+         * render of the same font at the same size.
+         *
+         * Half a RASTER pixel, in 26.6 fixed point. The caller rasterizes text at
+         * twice the device resolution, so this is a quarter of a device pixel where
+         * it lands — enough to carry a hairline stem, short of the blurring that
+         * comes from fattening a shape that was already thick enough. */
+        FT_Outline_Embolden(&ft->glyph->outline, (FT_Pos)0);
     }
     if (FT_Render_Glyph(ft->glyph, FT_RENDER_MODE_NORMAL) != 0) {
         return 0;
@@ -420,7 +466,44 @@ int kira_text_face_render_glyph(kira_text_face* face,
     return 1;
 }
 
+int kira_text_face_render_glyph(kira_text_face* face,
+                                uint32_t glyph_index,
+                                kira_text_glyph_bitmap* out) {
+    return kira_text_face_render_glyph_offset(face, glyph_index, 0, out);
+}
+
 static const char* kira_text_probe_font(void) {
+#if defined(__APPLE__)
+    /* On Apple platforms the system font wins, ahead of anything bundled.
+     *
+     * SF Pro is not merely a nicer default here — it is the one this text stack is
+     * judged against. Every other window on the screen is drawn in it, so a UI in
+     * any other face reads as foreign at a glance, and the difference is sharpest
+     * at exactly the sizes a UI uses: SF carries optical sizing, so its small text
+     * is drawn with more open counters and sturdier stems than a display face
+     * scaled down to the same point size. That is most of what remains between this
+     * renderer's output and an AppKit app's once the rasterization matches.
+     *
+     * The file is the OS's own, read in place and never copied or shipped, which is
+     * what the system font is for.
+     *
+     * SFNS.ttf is a variable font. FreeType instantiates its default master, which
+     * is Regular — weights above that still come from the requested size alone
+     * until the weight axis is driven (see kira_text_face_set_pixel_size). */
+    static const char* const apple_candidates[] = {
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/SFNSDisplay.ttf",
+        "/System/Library/Fonts/SFNSText.ttf",
+    };
+    for (size_t i = 0; i < sizeof(apple_candidates) / sizeof(apple_candidates[0]); i += 1) {
+        FILE* probe = fopen(apple_candidates[i], "rb");
+        if (probe != NULL) {
+            fclose(probe);
+            return apple_candidates[i];
+        }
+    }
+#endif
+
     /* Prefer the bundled Figtree font file shipped alongside the library. */
     static const char* const bundled_candidates[] = {
         "fonts/Figtree-VariableFont_wght.ttf",

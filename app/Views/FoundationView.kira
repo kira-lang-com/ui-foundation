@@ -123,10 +123,22 @@ struct FoundationView {
     // opacity. Kept as Int at the view layer; the backend converts to the U32 handle.
     let texture: Int = 0
     let textureOpacity: Float = 1.0
+    // Optional second texture and GPU crossfade position. TextureView uses these
+    // for transitions where downstream effects (notably LiquidGlass capture) must
+    // see the already-blended image rather than two separately composited quads.
+    let secondaryTexture: Int = 0
+    let textureTransition: Float = 0.0
+    // Text: derive the ink from what the backdrop capture holds under the run
+    // instead of using `color`, so a label stays legible whatever it ends up over.
+    // Only meaningful above a glass layer, which is what produces a capture.
+    let adaptiveInk: Bool = false
     // LiquidGlass blur dial (0..1): how much of the blurred backdrop pyramid the
     // glass shows vs the sharp capture. 1 = the iOS search-pill look (fully
     // frosted), ~0 = the macOS dock look (crisp content, refraction + rims only).
     let blur: Float = 1.0
+    // LiquidGlass: what the surface shades itself with. Defaults to the values the
+    // material was tuned to, so a surface that names none looks unchanged.
+    let glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {}
     // LiquidGlass white edge-refraction strength. 1 preserves the platform
     // default; lower values soften the hairline/bloom and higher values intensify
     // it without changing the glass shape, blur, tint, or lens displacement.

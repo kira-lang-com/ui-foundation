@@ -15,37 +15,286 @@ import KiraUIFoundation
 // The photo arrives as a raw RGBA blob (1600x900x4, cover-cropped offline from
 // examples/liquid_glass/assets/background-cubes.jpg); it is loaded from the
 // example's assets directory (or the KIRA_GLASS_BG environment variable).
+//
+// Two of them ship. background-cubes-cool.rgba is the default: the same photograph
+// with its red and blue channels exchanged, which turns the food into glass and ice
+// and gives the material a cool palette to refract instead of a warm one. It exists
+// because a colour-channel bug in a screenshot converter produced it by accident and
+// it looked better than the thing it was a mistake about. The original is still
+// beside it and still loads if the cool one is missing.
 
 struct GlassDemoState {
     var textureId: Int = 0
+    var darkTextureId: Int = 0
     var attempted: Bool = false
+    // Which sidebar row is selected (the card follows it), what has been typed into
+    // the search pill, and whether the dock's + button has pinned the note — a glass
+    // island that lands ON the card, so the frame stacks glass over glass.
+    var selected: Int = 0
+    // Bottom material swatch selection. XHigh is the authored default; clicking a
+    // swatch changes the centre card to that exact FoundationFrost level.
+    var frostLevel: Int = 4
+    var query: String = ""
+    var notePinned: Bool = false
+    // KIRA_GLASS_BG set to an empty value: the run asked for NO photo, so the
+    // missing-asset notice stays away and the glass refracts the plain root fill.
+    var backdropOff: Bool = false
+    // Which of the platform's two material tables the app is heading for — the
+    // DESTINATION, set by the toggle.
+    var dark: Bool = false
+    // Where it actually is, 0 light and 1 dark. Everything that shades reads this
+    // rather than the boolean: a scheme change that every surface, label and fill
+    // can be partway through is what makes it a transition instead of a cut. This
+    // is the CURVED position — already eased, ready to shade with.
+    var schemeAt: Float = 0.0
+    // The move in progress: where it set off from, and how far along it is (0..1,
+    // linear in time). The easing is applied to THIS, not to the position — a curve
+    // evaluated on the position runs backwards when the move does, and Apple's
+    // curve reversed is a stall followed by a snap.
+    var schemeFrom: Float = 0.0
+    var schemeProgress: Float = 1.0
 }
 
-function glassForeground() -> Color {
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.88 }
+// The scheme a run is in. Every glass surface, every label and the root fill read
+// this — dark mode is not a tint applied over a light UI, it is the other table.
+function appScheme(dark: Bool) -> FoundationScheme {
+    if dark {
+        return FoundationScheme.Dark
+    }
+    return FoundationScheme.Light
 }
 
-function glassInputForeground() -> Color {
-    return Color { r: 0.68627451 g: 0.78823529 b: 0.82352941 a: 0.88 }
+// How long the crossfade takes, in SECONDS.
+//
+// It was a fraction per frame, which is a bug dressed as a constant: the move then
+// takes as long as the frames take, so a heavy frame does not drop one step of the
+// animation, it stretches the whole animation — slow AND lumpy, and different every
+// run. Time is the thing the eye is measuring, so time is what it has to be in.
+function schemeSeconds() -> Float {
+    return 0.35
 }
 
-function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Float, fillAlpha: Float, blur: Float, edgeRefraction: Float = 1.0) -> FoundationView {
-    return Surface(
+// How far to travel this frame. Clamped because a stalled frame (a window drag, a
+// first-frame texture upload) reports a huge duration, and honouring it would jump
+// the transition instead of animating it.
+function schemeStep(delta: Float) -> Float {
+    var dt = delta
+    if dt <= 0.0 {
+        dt = 1.0 / 60.0
+    }
+    if dt > 0.1 {
+        dt = 0.1
+    }
+    return dt / schemeSeconds()
+}
+
+// Apple's timing curve, evaluated properly rather than approximated.
+//
+// This is kCAMediaTimingFunctionDefault — the cubic Bezier (0.25, 0.1), (0.25, 1.0)
+// that Core Animation applies to anything that does not ask for something else, and
+// what an appearance change on the platform is timed with. It is NOT symmetric:
+// it leaves quickly, spends most of its length decelerating, and settles. A linear
+// ramp is the one curve that never occurs in the platform's motion, which is why it
+// reads as mechanical however smooth it is.
+function schemeCurveX1() -> Float { return 0.25 }
+function schemeCurveY1() -> Float { return 0.1 }
+function schemeCurveX2() -> Float { return 0.25 }
+function schemeCurveY2() -> Float { return 1.0 }
+
+// One axis of the curve at parameter u. The Bezier's first and last control points
+// are pinned at 0 and 1, so only the two middle ones appear.
+function bezierAxis(u: Float, p1: Float, p2: Float) -> Float {
+    let v = 1.0 - u
+    return 3.0 * v * v * u * p1 + 3.0 * v * u * u * p2 + u * u * u
+}
+
+function bezierAxisSlope(u: Float, p1: Float, p2: Float) -> Float {
+    let v = 1.0 - u
+    return 3.0 * v * v * p1 + 6.0 * v * u * (p2 - p1) + 3.0 * u * u * (1.0 - p2)
+}
+
+// The curve is parameterised by u, but the input is TIME (x), so u has to be solved
+// for first — Newton from a linear guess, which converges in a handful of steps for
+// a curve this well behaved. Without this step the animation would be following the
+// Bezier's parameter rather than its shape, which is a different curve entirely and
+// a common way to get this subtly wrong.
+function schemeEase(progress: Float) -> Float {
+    if progress <= 0.0 {
+        return 0.0
+    }
+    if progress >= 1.0 {
+        return 1.0
+    }
+    var u = progress
+    var i = 0
+    while i < 6 {
+        let x = bezierAxis(u, schemeCurveX1(), schemeCurveX2()) - progress
+        let slope = bezierAxisSlope(u, schemeCurveX1(), schemeCurveX2())
+        if slope > 0.00001 || slope < 0.0 - 0.00001 {
+            u = u - x / slope
+        }
+        if u < 0.0 {
+            u = 0.0
+        }
+        if u > 1.0 {
+            u = 1.0
+        }
+        i = i + 1
+    }
+    return bezierAxis(u, schemeCurveY1(), schemeCurveY2())
+}
+
+// Which side of the move the app is on. Half a step either way is "arrived" — the
+// position lands exactly on 0 or 1, so this is only deciding the midpoint.
+function schemeIsDark(at: Float) -> Bool {
+    return at >= 0.5
+}
+
+// How far the arriving scheme has come, 0 at the midpoint (clear glass, no ink of
+// either scheme) to 1 at either end. Both halves of the move are a journey OUT of
+// the middle, which is why this is symmetric.
+function schemeArrived(at: Float) -> Float {
+    if at >= 0.5 {
+        return (at - 0.5) * 2.0
+    }
+    return (0.5 - at) * 2.0
+}
+
+// One colour on the way to another.
+function mixColor(from: borrow Color, to: borrow Color, t: Float) -> Color {
+    return Color {
+        r: from.r + (to.r - from.r) * t
+        g: from.g + (to.g - from.g) * t
+        b: from.b + (to.b - from.b) * t
+        a: from.a + (to.a - from.a) * t
+    }
+}
+
+// A vibrancy step read at a position between the schemes rather than at one of
+// them. Ink has no blend mode to worry about, so unlike the materials it really can
+// travel the whole way as a colour.
+function schemeInk(level: Int, at: Float, alpha: Float) -> Color {
+    let light = foundationVibrantLabel(level, FoundationScheme.Light)
+    let dark = foundationVibrantLabel(level, FoundationScheme.Dark)
+    return withAlpha(mixColor(light, dark, at), alpha)
+}
+
+function withAlpha(color: borrow Color, alpha: Float) -> Color {
+    return Color {
+        r: color.r
+        g: color.g
+        b: color.b
+        a: alpha
+    }
+}
+
+// Hit-area keys. Interaction state (hover, press, focus) is read back off the
+// context by key, so every interactive region needs a stable one.
+function rowKey(index: Int) -> Int {
+    return 101 + index
+}
+
+function searchKey() -> Int {
+    return 201
+}
+
+function addKey() -> Int {
+    return 202
+}
+
+function frostKey(level: Int) -> Int {
+    return 301 + level
+}
+
+function frostForLevel(level: Int) -> FoundationFrost {
+    if level == 0 { return FoundationFrost.Translucent }
+    if level == 1 { return FoundationFrost.Light }
+    if level == 2 { return FoundationFrost.Medium }
+    if level == 3 { return FoundationFrost.High }
+    if level == 5 { return FoundationFrost.Max }
+    return FoundationFrost.XHigh
+}
+
+function ignoreAction() {
+    return
+}
+
+function ignoreText(value: String) {
+    let ignored = value.count
+    return
+}
+
+function ignoreCodepoint(value: Int) {
+    let ignored = value + 0
+    return
+}
+
+function ignoreScroll(dx: Float, dy: Float) {
+    let ignored = dx + dy
+    return
+}
+
+// Content on the material, from the document's own vibrancy scale: black on the
+// light table, white on the dark one. White-on-everything was only ever right
+// because the app only ever had the dark-ish end of the scale — against a Thick or
+// Chrome wash it disappears.
+function glassForeground(at: Float) -> Color {
+    return schemeInk(1, at, 0.88)
+}
+
+// The secondary step of the same scale, for a placeholder.
+function glassInputForeground(at: Float) -> Color {
+    return schemeInk(2, at, 0.88)
+}
+
+// Blur is the Liquid Glass value the surface picks; frost only says how much white
+// sits over it.
+// `blur` is last because Kira binds defaults POSITIONALLY: a parameter in the
+// middle cannot be skipped, and every call here wants the step's own blur.
+function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = FoundationBlur.Step, at: Float = 0.0) -> FoundationView {
+    return glassSurfaceSized(
         children: move children,
         width: SizeMode.Fixed(w),
         height: SizeMode.Fixed(h),
-        flex: 0,
-        fill: Color { r: 1.0 g: 0.99215686 b: 0.9764706 a: fillAlpha },
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
-        borderWidth: 1.0,
         radius: radius,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.LiquidGlass,
-        effects: [],
+        frost: move frost,
+        edgeRefraction: edgeRefraction,
+        edgeLighting: edgeLighting,
+        blur: move blur,
+        at: at
+    )
+}
+
+// The same surface, sized by the layout rather than by a number the caller worked
+// out. Anything that should be as big as the space it is given asks for Fill and
+// lets the parent's padding decide — a height computed from the window is still a
+// hardcoded height, it just recomputes its mistake every frame.
+function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: SizeMode, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = FoundationBlur.Step, at: Float = 0.0) -> FoundationView {
+    return LiquidGlassSurface(
+        children: move children,
+        width: move width,
+        height: move height,
+        radius: radius,
+        frost: move frost,
+        // Untinted: the table's own colours are what the material is. A tint here
+        // would multiply the dark table's greys down as readily as it leaves the
+        // light table's whites alone, which is not what a hue override should do.
+        tint: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+        blur: move blur,
+        edgeRefraction: edgeRefraction,
+        glassMaterial: FoundationGlassMaterial {},
+        edgeLighting: edgeLighting,
+        // Spelled out because `scheme` is last and arguments bind POSITIONALLY:
+        // these three cannot be skipped on the way to it, even at their defaults.
+        flex: 0,
         padding: EdgeInsets {},
         clipContent: true,
-        blur: blur,
-        edgeRefraction: edgeRefraction
+        // Always described as moving TOWARD dark, with `at` as how far — so the
+        // mix is monotone in `at`. Handing it the nearer scheme and a distance
+        // measured from the midpoint instead made the mix run 1 -> 0 -> 1 while the
+        // position ran 0 -> 1, which played the whole crossfade twice.
+        scheme: FoundationScheme.Dark,
+        schemeMix: at
     )
 }
 
@@ -60,75 +309,476 @@ function centered(child: FoundationView) -> FoundationView {
     )
 }
 
-function addIcon() -> FoundationView {
+function addIcon(at: Float) -> FoundationView {
     return Icon(
         svg: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"><line x1=\"4\" y1=\"12\" x2=\"20\" y2=\"12\"/><line x1=\"12\" y1=\"4\" x2=\"12\" y2=\"20\"/></svg>",
-        color: glassForeground(),
+        color: glassForeground(at),
         size: 22.0
     )
 }
 
-// Big glass info card, centre screen.
-function glassCard() -> FoundationView {
-    return glassSurface(
-        children: [
-            centered(VStack(
-                children: [
-                    Text("Welcome to Kira", glassForeground(), 30.0, 700.0),
-                    Text("Everything behind this card is real content,", glassForeground(), 15.0, 500.0),
-                    Text("captured, blurred and refracted live.", glassForeground(), 15.0, 500.0)
-                ],
-                spacing: 10.0,
-                padding: EdgeInsets {}
-            ))
-        ],
-        w: 480.0, h: 300.0, radius: 44.0, fillAlpha: 0.14, blur: 0.6, edgeRefraction: 1.0
+// What the appearance row calls itself: the mode it is currently IN, not the one it
+// would switch to. It changes at the exact midpoint of the crossfade, which is where
+// the label is carrying no opacity — so the word is never caught mid-swap, and the
+// row reads as one word dissolving into another rather than as text being replaced.
+function schemeLabel(at: Float) -> String {
+    if schemeIsDark(at) {
+        return "Dark Mode"
+    }
+    return "Light Mode"
+}
+
+// Half-filled disc: the appearance toggle's icon, and the one row in the nav whose
+// selected state means "on" rather than "you are here".
+function schemeIcon() -> String {
+    return "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.0\"><circle cx=\"12\" cy=\"12\" r=\"8.0\"/><path d=\"M12 4.0 A8 8 0 0 1 12 20.0 Z\" fill=\"currentColor\" stroke=\"none\"/></svg>"
+}
+
+// The sidebar floats as its own island: inset from every edge it touches, so
+// the backdrop keeps running around it instead of being cut off by a wall.
+function sidebarWidth() -> Float {
+    return 300.0
+}
+
+function sidebarInset() -> Float {
+    return 16.0
+}
+
+function sidebarPadding() -> Float {
+    return 10.0
+}
+
+// Nav rows span the sidebar's content box, so a selected row's fill reaches the
+// island's inner margin on both sides.
+function sidebarRowWidth() -> Float {
+    return sidebarWidth() - sidebarPadding() * 2.0
+}
+
+// Nav labels take the scheme's own label colour — the sidebar's glass is already
+// dimming them, and a grey on top of that read as disabled. The selection carries
+// full opacity, the rest sit just under it.
+function sidebarRowTint(selected: Bool, at: Float) -> Color {
+    if selected {
+        return schemeInk(1, at, 1.0)
+    }
+    return schemeInk(1, at, 0.82)
+}
+
+// The row's fill: a plain grey tint for the selection, a fainter one under the
+// pointer, nothing otherwise. Not glass — a second glass surface inside the
+// sidebar refracted it, which read as a card floating in a card rather than as a
+// row being picked.
+// The tint reads as a row being picked only if it moves AWAY from the material
+// under it: darker than a light sidebar, lighter than a dark one.
+function sidebarRowFill(selected: Bool, hovered: Bool, at: Float) -> Color {
+    let onLight = Color { r: 0.32 g: 0.33 b: 0.36 a: 1.0 }
+    let onDark = Color { r: 0.86 g: 0.87 b: 0.90 a: 1.0 }
+    let tint = mixColor(onLight, onDark, at)
+    if selected {
+        return withAlpha(tint, 0.30)
+    }
+    if hovered {
+        return withAlpha(tint, 0.12)
+    }
+    return withAlpha(tint, 0.0)
+}
+
+function sidebarRow(index: Int, svg: String, label: String, selected: Bool, hovered: Bool, at: Float, labelAlpha: Float, onPress: () -> Void) -> FoundationView {
+    let content = Frame(
+        child: HStack(
+            children: [
+                Icon(svg: move svg, color: sidebarRowTint(selected, at), size: 19.0),
+                AdaptiveText(move label, withAlpha(sidebarRowTint(selected, at), labelAlpha), 15.0, 500.0)
+            ],
+            spacing: 13.0,
+            padding: EdgeInsets {}
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets { leading: 14.0 }
+    )
+    // One surface whatever the state: the fill is what changes, so a row never
+    // moves or resizes as it is selected, and every label starts on the same x.
+    let surface = Surface(
+        children: [move content],
+        width: SizeMode.Fixed(sidebarRowWidth()),
+        height: SizeMode.Fixed(42.0),
+        flex: 0,
+        fill: sidebarRowFill(selected, hovered, at),
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 14.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true
+    )
+    return GestureHitArea(
+        key: rowKey(index),
+        disabled: false,
+        onPress: move onPress,
+        interaction: FoundationInteraction {},
+        children: [move surface]
     )
 }
 
-// Bottom dock: a round glass button and a glass search pill, side by side.
-function glassDock() -> FoundationView {
-    let button = glassSurface(
-        children: [centered(addIcon())],
-        w: 50.0, h: 50.0, radius: 25.0, fillAlpha: 0.28, blur: 0.55, edgeRefraction: 1.0
+// A section caption, indented to the nav labels' text column. Dimmer than a row
+// label, but still white — it reads as a heading through weight and size.
+function sidebarSection(label: String, at: Float) -> FoundationView {
+    return Frame(
+        child: AdaptiveText(move label, schemeInk(2, at, 0.75), 11.0, 700.0),
+        width: SizeMode.Fixed(sidebarRowWidth()),
+        height: SizeMode.Fixed(26.0),
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets { top: 8.0 leading: 14.0 }
     )
-    let pill = glassSurface(
+}
+
+function homeIcon() -> String {
+    return "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.0\"><polyline points=\"3.5 11.5 12 4.5 20.5 11.5\"/><polyline points=\"6 10.5 6 19.5 18 19.5 18 10.5\"/></svg>"
+}
+
+function layersIcon() -> String {
+    return "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.0\"><polygon points=\"12 3.5 21 8.5 12 13.5 3 8.5\"/><polyline points=\"3 13 12 18 21 13\"/></svg>"
+}
+
+function sparkleIcon() -> String {
+    return "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.0\"><polygon points=\"12 3.5 14.4 9.6 20.5 12 14.4 14.4 12 20.5 9.6 14.4 3.5 12 9.6 9.6\"/></svg>"
+}
+
+function gearIcon() -> String {
+    return "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.0\"><circle cx=\"12\" cy=\"12\" r=\"3.4\"/><circle cx=\"12\" cy=\"12\" r=\"8.4\"/></svg>"
+}
+
+// The sidebar island: one liquid glass slab, docked left and inset, holding a
+// wordmark and the nav.
+function glassSidebar(context: borrow FoundationUiContext, demoUser: RawPtr, selected: Int, at: Float) -> FoundationView {
+    let selectOverview: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.selected = 0
+        return
+    }
+    let selectMaterials: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.selected = 1
+        return
+    }
+    let selectEffects: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.selected = 2
+        return
+    }
+    let selectSettings: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.selected = 3
+        return
+    }
+    // The only row that toggles rather than selects: it flips the whole app to the
+    // other material table.
+    let toggleScheme: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        // A new move starts from wherever the last one had got to, so interrupting
+        // one mid-flight carries its position across instead of jumping.
+        demo.schemeFrom = demo.schemeAt
+        demo.schemeProgress = 0.0
+        demo.dark = !demo.dark
+        return
+    }
+    return glassSurfaceSized(
         children: [
             Frame(
-                child: Text("Search", glassInputForeground(), 15.0, 500.0),
+                child: VStack(
+                    children: [
+                        sidebarSection("KIRA UI", at),
+                        sidebarRow(0, homeIcon(), "Overview", selected == 0, context.hoveredKey == rowKey(0), at, 1.0, move selectOverview),
+                        sidebarRow(1, layersIcon(), "Materials", selected == 1, context.hoveredKey == rowKey(1), at, 1.0, move selectMaterials),
+                        sidebarRow(2, sparkleIcon(), "Effects", selected == 2, context.hoveredKey == rowKey(2), at, 1.0, move selectEffects),
+                        sidebarSection("WORKSPACE", at),
+                        sidebarRow(3, gearIcon(), "Settings", selected == 3, context.hoveredKey == rowKey(3), at, 1.0, move selectSettings),
+                        sidebarRow(4, schemeIcon(), schemeLabel(at), schemeIsDark(at), context.hoveredKey == rowKey(4), at, schemeArrived(at), move toggleScheme)
+                    ],
+                    spacing: 6.0,
+                    padding: EdgeInsets {}
+                ),
                 width: SizeMode.Fill,
                 height: SizeMode.Fill,
                 flex: 0,
-                alignment: Alignment.Leading,
+                alignment: Alignment.TopLeading,
                 padding: EdgeInsets {
-                    top: 0.0
-                    trailing: 0.0
-                    bottom: 0.0
-                    leading: 22.0
+                    top: 26.0
+                    trailing: sidebarPadding()
+                    bottom: 26.0
+                    leading: sidebarPadding()
                 }
             )
         ],
-        w: 400.0, h: 50.0, radius: 25.0, fillAlpha: 0.28, blur: 0.55, edgeRefraction: 1.0
+        width: SizeMode.Fixed(sidebarWidth()), height: SizeMode.Fill, radius: 40.0,
+        frost: FoundationFrost.XHigh, edgeRefraction: 1.0,
+        edgeLighting: true, blur: FoundationBlur.Step, at: at
     )
+}
+
+function cardTitle(selected: Int) -> String {
+    if selected == 1 {
+        return "Materials"
+    }
+    if selected == 2 {
+        return "Effects"
+    }
+    if selected == 3 {
+        return "Settings"
+    }
+    return "Welcome to Kira"
+}
+
+function cardLead(selected: Int) -> String {
+    if selected == 1 {
+        return "Flat, frosted, metallic, crystal — and this,"
+    }
+    if selected == 2 {
+        return "Glow bleeds through from behind the layer,"
+    }
+    if selected == 3 {
+        return "Corner radius, blur and edge refraction are"
+    }
+    return "Everything behind this card is real content,"
+}
+
+function cardTrail(selected: Int) -> String {
+    if selected == 1 {
+        return "liquid glass, captured live."
+    }
+    if selected == 2 {
+        return "or radiates from the surface itself."
+    }
+    if selected == 3 {
+        return "per-surface, so no two need to match."
+    }
+    return "captured, blurred and refracted live."
+}
+
+// The pinned note: a small glass island parked over the card's lower-right corner.
+// It overlaps the card, so it starts a glass layer of its own and refracts the card
+// — the card's wash, its text, its rim — rather than the photo behind everything.
+function pinnedNote(at: Float) -> FoundationView {
+    return Frame(
+        child: glassSurface(
+            children: [
+                centered(AdaptiveText("Pinned", glassForeground(at), 14.0, 600.0))
+            ],
+            w: 132.0, h: 54.0, radius: 20.0, frost: FoundationFrost.XHigh, edgeRefraction: 0.9,
+            edgeLighting: true, blur: FoundationBlur.Step, at: at
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.BottomTrailing,
+        padding: EdgeInsets {
+            trailing: 26.0
+            bottom: 26.0
+        }
+    )
+}
+
+// Big glass info card, centre screen.
+function glassCard(selected: Int, notePinned: Bool, frostLevel: Int, at: Float) -> FoundationView {
+    var layers: [FoundationView] = [
+        centered(VStack(
+            children: [
+                AdaptiveText(cardTitle(selected), glassForeground(at), 30.0, 700.0),
+                AdaptiveText(cardLead(selected), glassForeground(at), 15.0, 500.0),
+                AdaptiveText(cardTrail(selected), glassForeground(at), 15.0, 500.0)
+            ],
+            spacing: 10.0,
+            padding: EdgeInsets {}
+        ))
+    ]
+    if notePinned {
+        layers.append(pinnedNote(at))
+    }
+    return glassSurface(
+        children: move layers,
+        w: 480.0, h: 300.0, radius: 44.0, frost: frostForLevel(frostLevel), edgeRefraction: 1.0,
+        edgeLighting: true, blur: FoundationBlur.Step, at: at
+    )
+}
+
+// The pill shows what has been typed; empty and unfocused it shows the prompt, and
+// focused it shows a caret so an empty field still reads as ready for input.
+function searchText(query: borrow String, focused: Bool) -> String {
+    if query.count > 0 {
+        return query
+    }
+    if focused {
+        return "|"
+    }
+    return "Search"
+}
+
+// One ink, like the sidebar labels: the placeholder separates itself by opacity,
+// not by hue. A blue-grey lost against the glass's own wash and the bright photo
+// behind it, so it read as no text at all.
+function searchTint(query: borrow String, focused: Bool, at: Float) -> Color {
+    if query.count > 0 || focused {
+        return schemeInk(1, at, 1.0)
+    }
+    return schemeInk(1, at, 0.72)
+}
+
+// Bottom dock: a round glass button that pins the note, and a glass search pill
+// that takes keyboard input while focused (click it, type, backspace, enter clears).
+function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query: String, notePinned: Bool, at: Float) -> FoundationView {
+    let togglePin: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.notePinned = !demo.notePinned
+        return
+    }
+    let typeCodepoint: (Int) -> Void = { codepoint in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.query = foundationAppendCodepoint(demo.query, codepoint)
+        return
+    }
+    let backspace: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.query = foundationDropLastScalar(demo.query)
+        return
+    }
+    let clear: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.query = ""
+        return
+    }
+    let searchFocused = context.focusedKey == searchKey()
+    let buttonHot = context.hoveredKey == addKey() || context.pressedKey == addKey() || notePinned
+    var buttonFrost = FoundationFrost.XHigh
+    if buttonHot {
+        buttonFrost = FoundationFrost.Max
+    }
+    let button = GestureHitArea(
+        key: addKey(),
+        disabled: false,
+        onPress: move togglePin,
+        interaction: FoundationInteraction {},
+        children: [
+            glassSurface(
+                children: [centered(addIcon(at))],
+                w: 44.0, h: 44.0, radius: 22.0, frost: move buttonFrost, edgeRefraction: 1.0,
+                edgeLighting: true, blur: FoundationBlur.Step, at: at
+            )
+        ]
+    )
+    var pillFrost = FoundationFrost.XHigh
+    if searchFocused {
+        pillFrost = FoundationFrost.Max
+    }
+    let pill = InteractiveHitArea(
+        key: searchKey(),
+        focusable: true,
+        disabled: false,
+        onPress: ignoreAction,
+        onTextInput: ignoreText,
+        onTextCodepoint: move typeCodepoint,
+        onBackspace: move backspace,
+        onSubmit: move clear,
+        onScroll: ignoreScroll,
+        children: [
+            glassSurface(
+                children: [
+                    Frame(
+                        child: AdaptiveText(searchText(query, searchFocused), searchTint(query, searchFocused, at), 15.0, 500.0),
+                        width: SizeMode.Fill,
+                        height: SizeMode.Fill,
+                        flex: 0,
+                        alignment: Alignment.Leading,
+                        padding: EdgeInsets {
+                            top: 0.0
+                            trailing: 0.0
+                            bottom: 0.0
+                            leading: 18.0
+                        }
+                    )
+                ],
+                w: 330.0, h: 44.0, radius: 22.0, frost: move pillFrost, edgeRefraction: 1.0,
+                edgeLighting: true, blur: FoundationBlur.Step, at: at
+            )
+        ]
+    )
+    // Search first, the round button hugging the corner: right-aligned chrome
+    // reads outward from the edge.
     return HStack(
-        children: [move button, move pill],
+        children: [move pill, move button],
+        spacing: 9.0,
+        padding: EdgeInsets {}
+    )
+}
+
+// One swatch of the frost scale: a small glass card carrying nothing but its step's
+// wash. Every swatch shares the radius and edge refraction of its neighbours, so the
+// strip isolates exactly one variable — the material a FoundationFrost step names.
+//
+// There is no blur strip beside it any more. Blur is not a scale a design picks
+// from: it is there to keep a half-resolution capture from reading as one, it
+// follows the step, and a row advertising it as a choice said otherwise.
+function frostSwatch(demoUser: RawPtr, level: Int, label: String, frost: FoundationFrost, selected: Bool, at: Float) -> FoundationView {
+    let choose: () -> Void = { in
+        var demo = nativeRecover<GlassDemoState>(demoUser)
+        demo.frostLevel = level
+        return
+    }
+    var weight = 600.0
+    if selected {
+        weight = 800.0
+    }
+    return GestureHitArea(
+        key: frostKey(level),
+        disabled: false,
+        onPress: move choose,
+        interaction: FoundationInteraction {},
+        children: [
+            glassSurface(
+                children: [
+                    centered(AdaptiveText(move label, glassForeground(at), 12.0, weight))
+                ],
+                w: 122.0, h: 74.0, radius: 22.0, frost: move frost, edgeRefraction: 1.0,
+                edgeLighting: true, blur: FoundationBlur.Step, at: at
+            )
+        ]
+    )
+}
+
+// The scale end to end, left to right: Translucent adds no wash at all (the
+// refracted backdrop as it is) through Max, the strongest tint the scale defines.
+function frostStrip(demoUser: RawPtr, selectedLevel: Int, at: Float) -> FoundationView {
+    return HStack(
+        children: [
+            frostSwatch(demoUser, 0, "Translucent", FoundationFrost.Translucent, selectedLevel == 0, at),
+            frostSwatch(demoUser, 1, "Light", FoundationFrost.Light, selectedLevel == 1, at),
+            frostSwatch(demoUser, 2, "Medium", FoundationFrost.Medium, selectedLevel == 2, at),
+            frostSwatch(demoUser, 3, "High", FoundationFrost.High, selectedLevel == 3, at),
+            frostSwatch(demoUser, 4, "XHigh", FoundationFrost.XHigh, selectedLevel == 4, at),
+            frostSwatch(demoUser, 5, "Max", FoundationFrost.Max, selectedLevel == 5, at)
+        ],
         spacing: 11.0,
         padding: EdgeInsets {}
     )
 }
 
-function headline() -> FoundationView {
+function headline(at: Float) -> FoundationView {
     return VStack(
         children: [
-            Text("Liquid Glass", glassForeground(), 42.0, 800.0),
-            Text("UI Foundation — real backdrop capture, blur and refraction", glassForeground(), 16.0, 500.0)
+            Text("Liquid Glass", glassForeground(at), 42.0, 800.0),
+            Text("UI Foundation — real backdrop capture and refraction", glassForeground(at), 16.0, 500.0)
         ],
         spacing: 8.0,
         padding: EdgeInsets {}
     )
 }
 
-function rootView(textureId: Int) -> FoundationView {
+function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, textureId: Int, darkTextureId: Int, backdropOff: Bool, selected: Int, frostLevel: Int, query: String, notePinned: Bool, at: Float) -> FoundationView {
     var layers: [FoundationView] = []
     if textureId > 0 {
         layers.append(TextureView(
@@ -137,12 +787,16 @@ function rootView(textureId: Int) -> FoundationView {
             height: SizeMode.Fill,
             flex: 0,
             opacity: 1.0,
-            radius: 0.0
+            radius: 0.0,
+            secondaryTexture: darkTextureId,
+            transition: at
         ))
-    } else {
-        // Backdrop blob not found: say so instead of refracting a blank wall.
+    }
+    if textureId == 0 && !backdropOff {
+        // Backdrop blob not found: say so instead of refracting a blank wall. A run
+        // that asked for no backdrop (KIRA_GLASS_BG="") skips the notice.
         layers.append(Frame(
-            child: Text("assets/background-cubes.rgba not found — run from the example directory (or set KIRA_GLASS_BG)", glassForeground(), 16.0, 600.0),
+            child: Text("assets/background-cubes-cool.rgba not found — run from the example directory (or set KIRA_GLASS_BG)", glassForeground(at), 16.0, 600.0),
             width: SizeMode.Fill,
             height: SizeMode.Fill,
             flex: 0,
@@ -155,8 +809,24 @@ function rootView(textureId: Int) -> FoundationView {
             }
         ))
     }
+    // Inset on every edge it touches by the same margin. The island is as tall as
+    // that leaves it — the layout works the height out, nobody writes it down.
     layers.append(Frame(
-        child: headline(),
+        child: glassSidebar(context, demoUser, selected, at),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets {
+            top: sidebarInset()
+            trailing: 0.0
+            bottom: sidebarInset()
+            leading: sidebarInset()
+        }
+    ))
+    // The headline starts past the sidebar island, not under it.
+    layers.append(Frame(
+        child: headline(at),
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
@@ -165,12 +835,14 @@ function rootView(textureId: Int) -> FoundationView {
             top: 44.0
             trailing: 0.0
             bottom: 0.0
-            leading: 52.0
+            leading: sidebarInset() + sidebarWidth() + 44.0
         }
     ))
-    layers.append(centered(glassCard()))
+    layers.append(centered(glassCard(selected, notePinned, frostLevel, at)))
+    // The frost scale, on the bottom margin like every other island: six identical
+    // surfaces that differ only in the material their FoundationFrost step names.
     layers.append(Frame(
-        child: glassDock(),
+        child: frostStrip(demoUser, frostLevel, at),
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
@@ -178,18 +850,43 @@ function rootView(textureId: Int) -> FoundationView {
         padding: EdgeInsets {
             top: 0.0
             trailing: 0.0
-            bottom: 44.0
+            bottom: sidebarInset()
+            leading: 0.0
+        }
+    ))
+    layers.append(Frame(
+        child: glassDock(context, demoUser, move query, notePinned, at),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopTrailing,
+        padding: EdgeInsets {
+            top: sidebarInset()
+            trailing: sidebarInset()
+            bottom: 0.0
             leading: 0.0
         }
     ))
     // A Fill-arranged Surface stacks its children over the same bounds: the photo
     // backdrop, then the chrome layers above it.
+    // The page behind everything. It only shows with the photo off, but it has to
+    // be the scheme's own page — glass over a white wall in dark mode is a light UI
+    // with dark chrome on it.
+    let pageLight = Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }
+    let pageDark = Color { r: 0.07 g: 0.07 b: 0.08 a: 1.0 }
+    var page = mixColor(pageLight, pageDark, at)
+    if textureId > 0 {
+        // The opaque photo covers the page completely. Keep the page only for the
+        // documented backdrop-off/missing-asset state instead of drawing another
+        // fullscreen 4K layer underneath it.
+        page.a = 0.0
+    }
     return Surface(
         children: move layers,
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: Color { r: 0.78 g: 0.78 b: 0.80 a: 1.0 },
+        fill: move page,
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
@@ -207,35 +904,100 @@ function main() {
     let demoUser = nativeUserData(storage)
     RunFoundationInteractiveApp(
         title: "Kira UI Foundation Liquid Glass",
-        width: 1600,
-        height: 900,
+        // 1920x1080 logical points on a 2x Retina display presents at native 4K.
+        width: 1920,
+        height: 1080,
         rootBuilder: { ui in
             var demo = nativeRecover<GlassDemoState>(demoUser)
-            let ignored = ui.frameCount
-            return rootView(demo.textureId)
+            return rootView(ui, demoUser, demo.textureId, demo.darkTextureId, demo.backdropOff, demo.selected, demo.frostLevel, demo.query, demo.notePinned, demo.schemeAt)
         },
         engineFrame: { frame in
             var demo = nativeRecover<GlassDemoState>(demoUser)
+            // Walk the scheme position toward whichever mode was asked for. A step
+            // per frame, and it lands exactly on the end rather than approaching it
+            // forever, so "arrived" is a state the app actually reaches.
+            var target = 0.0
+            if demo.dark {
+                target = 1.0
+            }
+            // Distance still to cover, measured from where this move began. The
+            // duration is scaled by it, so a move interrupted near its end finishes
+            // briskly instead of taking a full transition to travel a sliver.
+            var span = target - demo.schemeFrom
+            if span < 0.0 {
+                span = 0.0 - span
+            }
+            if span < 0.0001 {
+                demo.schemeProgress = 1.0
+                demo.schemeAt = target
+            } else {
+                if demo.schemeProgress < 1.0 {
+                    let seconds = foundationFrameDuration(frame, foundationFrameUsesMetal(frame))
+                    demo.schemeProgress = demo.schemeProgress + schemeStep(seconds) / span
+                    if demo.schemeProgress > 1.0 {
+                        demo.schemeProgress = 1.0
+                    }
+                }
+                // The curve shapes the MOVE: 0 is where it set off, 1 is the
+                // destination, and it reads the same run in either direction.
+                demo.schemeAt = demo.schemeFrom + (target - demo.schemeFrom) * schemeEase(demo.schemeProgress)
+            }
             if !demo.attempted {
                 demo.attempted = true
                 let graphics = foundationFrameGraphics(frame)
                 // Env override first (scripted runs), then the common launch
                 // directories: the example dir itself and the repo root.
-                var id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
-                if id == 0 {
-                    id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes.rgba", 1600, 900)
-                }
-                if id == 0 {
-                    id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes.rgba", 1600, 900)
-                }
-                if id == 0 {
-                    id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+                demo.backdropOff = uiEnvValueIsEmpty("KIRA_GLASS_BG")
+                var id = 0
+                if !demo.backdropOff {
+                    id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes-cool.rgba", 1600, 900)
+                    }
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes-cool.rgba", 1600, 900)
+                    }
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes-cool.rgba", 1600, 900)
+                    }
+                    // The original photograph, still here and still loadable — point
+                    // KIRA_GLASS_BG at it, or delete the cool one and this takes over.
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes.rgba", 1600, 900)
+                    }
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes.rgba", 1600, 900)
+                    }
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+                    }
                 }
                 demo.textureId = id
+                var darkId = 0
+                if !demo.backdropOff {
+                    darkId = uiLoadRgbaTextureFile(graphics, "assets/background-cubes-cool-dark.rgba", 1600, 900)
+                    if darkId == 0 {
+                        darkId = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes-cool-dark.rgba", 1600, 900)
+                    }
+                    if darkId == 0 {
+                        darkId = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes-cool-dark.rgba", 1600, 900)
+                    }
+                }
+                // If a checkout predates the dark asset, keep the primary texture
+                // valid at both ends instead of sampling the atlas fallback.
+                if darkId == 0 {
+                    darkId = id
+                }
+                demo.darkTextureId = darkId
             }
             return
         },
-        showFpsOverlay: false
+        needsRebuild: { in
+            var demo = nativeRecover<GlassDemoState>(demoUser)
+            return demo.schemeProgress < 1.0
+        },
+        showFpsOverlay: true,
+        showGraphicsHud: true
     )
     return
 }

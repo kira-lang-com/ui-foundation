@@ -1,0 +1,147 @@
+import Foundation
+import KiraLayout
+import KiraUIFoundation
+
+// One liquid glass card, and nothing else — the reference build of the design
+// document's element.
+//
+// The document puts four drop shadows under it, and they are what the shape reads
+// as: three hairlines in #DBDBDB that draw the edge, and one ambient shadow that
+// lifts the card off the page.
+//
+//   X  1.25   Y 0   blur  0   spread -0.75   #DBDBDB 100%
+//   X -1.25   Y 0   blur  0   spread -0.75   #DBDBDB 100%
+//   X  0      Y 0   blur  0   spread  0.5    #DBDBDB 100%
+//   X  0      Y 8   blur 48   spread  0      #000000  25%
+//
+// They live in the compositor's mode-3 shader (Shaders/UiBatch.ksl) rather than
+// here, because a shadow that a surface draws for itself is part of the material —
+// every glass surface in every app gets the same stack, from the same numbers.
+//
+// Nothing is layered over the card and the page behind it is plain, so what shows
+// is the element itself: the edge hairlines top and bottom, their thickening at
+// the left and right extremes where the +-1.25 pair peeks out, and the ambient
+// shadow below.
+
+function pageFill() -> Color {
+    return Color { r: 0.98 g: 0.98 b: 0.98 a: 1.0 }
+}
+
+function cardInk() -> Color {
+    return Color { r: 0.12 g: 0.13 b: 0.15 a: 1.0 }
+}
+
+function cardWidth() -> Float {
+    return 420.0
+}
+
+function cardHeight() -> Float {
+    return 260.0
+}
+
+function cardRadius() -> Float {
+    return 28.0
+}
+
+function centered(child: FoundationView) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Center,
+        padding: EdgeInsets {}
+    )
+}
+
+// The fill, as the document gives it: #FFFFFF at 70% LIGHTEN with #BFBFBF at 10%
+// DARKEN over it. Both layers travel to the shader now, so this is the document's
+// stack rather than an algebraic stand-in for it.
+//
+// (It reduces, over anything lighter than 0.163: LIGHTEN against white is white, so
+// the first layer gives 0.3B + 0.7; DARKEN leaves that alone, being already the
+// lighter of the pair, and mixes 10% of #BFBFBF in for 0.27B + 0.7049 — one layer
+// of #F6F6F6 at alpha 0.73. Below that the two forms part company, and the stack is
+// the one that is right.)
+function cardTint() -> FoundationTintStack {
+    return foundationLiquidGlassTint(FoundationScheme.Light)
+}
+
+function card() -> FoundationView {
+    // A raw Surface rather than LiquidGlassSurface: the wash this needs is past
+    // the top of the FoundationFrost scale, and the scale exists so a UI's glass
+    // agrees with itself — not so a reference build can be forced through it.
+    return Surface(
+        children: [
+            centered(Column(
+                children: [
+                    Text("Liquid Glass", cardInk(), 26.0, 700.0),
+                    Text("Four drop shadows, as the document specifies them.", cardInk(), 14.0, 500.0)
+                ],
+                width: SizeMode.Hug,
+                height: SizeMode.Hug,
+                spacing: 8.0,
+                padding: EdgeInsets {},
+                crossAxisAlignment: CrossAlignment.Center
+            ))
+        ],
+        width: SizeMode.Fixed(cardWidth()),
+        height: SizeMode.Fixed(cardHeight()),
+        flex: 0,
+        fill: foundationTintFill(cardTint()),
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 1.0,
+        radius: cardRadius(),
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.LiquidGlass,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true,
+        // Thin, like every other glass surface: enough to keep the half-resolution
+        // capture from reading as one, and no further. The document agrees — its
+        // glass effect on this element is radius 16, where its blur materials are
+        // 100.
+        blur: foundationBlurMix(FoundationBlur.Step),
+        edgeRefraction: 1.0,
+        // Nothing to override but the wash: the document's material IS the library
+        // default now, so this card and every other liquid glass surface shade
+        // identically. The tint carries the fill's second layer.
+        glassMaterial: foundationGlassMaterialWithTint(FoundationGlassMaterial {}, cardTint())
+    )
+}
+
+function rootView() -> FoundationView {
+    return Surface(
+        children: [centered(card())],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: pageFill(),
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+@Main
+function main() {
+    RunFoundationInteractiveApp(
+        title: "Liquid Glass Card",
+        width: 900,
+        height: 600,
+        rootBuilder: { ui in
+            let ignored = ui.frameCount
+            return rootView()
+        },
+        engineFrame: { frame in
+            return
+        },
+        showFpsOverlay: false
+    )
+    return
+}
