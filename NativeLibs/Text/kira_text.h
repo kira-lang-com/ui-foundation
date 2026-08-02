@@ -83,6 +83,14 @@ typedef struct {
 /* Rasterize a glyph (by glyph index) into an anti-aliased coverage bitmap.
  * Returns 1 on success, 0 on failure. A zero-area glyph (e.g. space) succeeds
  * with width==rows==0 and a valid advance. */
+/* As kira_text_face_render_glyph, with the outline shifted horizontally by
+ * x_offset_26_6 (26.6 fixed point: 64 = one pixel) before it is scan-converted.
+ * Both entry points render UNHINTED — see the note in kira_text.c. */
+int kira_text_face_render_glyph_offset(kira_text_face* face,
+                                       uint32_t glyph_index,
+                                       int x_offset_26_6,
+                                       kira_text_glyph_bitmap* out);
+
 int kira_text_face_render_glyph(kira_text_face* face,
                                 uint32_t glyph_index,
                                 kira_text_glyph_bitmap* out);

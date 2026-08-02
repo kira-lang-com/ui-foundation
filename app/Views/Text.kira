@@ -110,6 +110,20 @@ function Text(content: String, color: Color, size: Float, weight: Float) -> Foun
     }
 }
 
+// Text that reads the backdrop under it and inks itself dark or light accordingly.
+// `fallback` is what it uses where there is nothing to read — below every glass
+// layer, nothing has been captured, so the authored colour still decides.
+function AdaptiveText(content: String, fallback: Color, size: Float, weight: Float) -> FoundationView {
+    return FoundationView {
+        kind: FoundationViewKind.Text
+        content: content
+        color: fallback
+        size: size
+        weight: weight
+        adaptiveInk: true
+    }
+}
+
 // A vector icon leaf: `svg` is SVG text (see NativeLibs/Icon for the supported
 // subset), drawn as a `size`-by-`size` box tinted `color`.
 function Icon(svg: String, color: Color, size: Float) -> FoundationView {

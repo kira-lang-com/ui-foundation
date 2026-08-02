@@ -3,8 +3,8 @@ import KiraLayout
 // viewport primitive: the engine renders its scene into an offscreen render-target texture
 // and the UI composites that texture like any other view (layout-sized, clipped, batched).
 //
-// One external texture is supported per frame (the batch's slot-1 binding); registering a
-// second id in the same frame rebinds to the LAST one registered.
+// A primary texture is always supported. `secondaryTexture` enables an optional
+// GPU crossfade; the blended result is what later LiquidGlass surfaces capture.
 function TextureView(
     texture: Int,
     width: SizeMode,
@@ -12,6 +12,8 @@ function TextureView(
     flex: Int,
     opacity: Float,
     radius: Float,
+    secondaryTexture: Int = 0,
+    transition: Float = 0.0,
 ) -> FoundationView {
     return FoundationView {
         kind: FoundationViewKind.TextureView
@@ -20,6 +22,8 @@ function TextureView(
         flex: flex
         texture: texture
         textureOpacity: opacity
+        secondaryTexture: secondaryTexture
+        textureTransition: transition
         radius: radius
     }
 }

@@ -45,51 +45,14 @@ function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
     metalMemWriteF32(ptr, offset, value)
     return
 }
-// Write one vertex of a quad: the 24 floats the MSL `UiVertex` struct reads, in
-// its field order (see the layout comment in UiBatch.kira). `px`/`py` are pixel
-// coordinates, which the fragment stage clips against; `posX`/`posY` are the
-// same point in clip space, with the y flip a top-left-origin UI needs.
-@Native
-function uiWriteVertex(
-    ptr: RawPtr, at: U64,
-    px: Float, py: Float, lx: Float, ly: Float,
-    vw: Float, vh: Float,
-    halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
-    edgeRefraction: Float,
-    fr: Float, fg: Float, fb: Float, fa: Float,
-    br: Float, bg: Float, bb: Float, ba: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-) {
-    let bytes = at * U64(4)
-    uiMemWriteF32(ptr, bytes, px / vw * 2.0 - 1.0)
-    uiMemWriteF32(ptr, bytes + U64(4), 1.0 - py / vh * 2.0)
-    uiMemWriteF32(ptr, bytes + U64(8), px)
-    uiMemWriteF32(ptr, bytes + U64(12), py)
-    uiMemWriteF32(ptr, bytes + U64(16), lx)
-    uiMemWriteF32(ptr, bytes + U64(20), ly)
-    uiMemWriteF32(ptr, bytes + U64(24), halfW)
-    uiMemWriteF32(ptr, bytes + U64(28), halfH)
-    uiMemWriteF32(ptr, bytes + U64(32), radius)
-    uiMemWriteF32(ptr, bytes + U64(36), borderWidth)
-    uiMemWriteF32(ptr, bytes + U64(40), mode)
-    uiMemWriteF32(ptr, bytes + U64(44), edgeRefraction)
-    uiMemWriteF32(ptr, bytes + U64(48), fr)
-    uiMemWriteF32(ptr, bytes + U64(52), fg)
-    uiMemWriteF32(ptr, bytes + U64(56), fb)
-    uiMemWriteF32(ptr, bytes + U64(60), fa)
-    uiMemWriteF32(ptr, bytes + U64(64), br)
-    uiMemWriteF32(ptr, bytes + U64(68), bg)
-    uiMemWriteF32(ptr, bytes + U64(72), bb)
-    uiMemWriteF32(ptr, bytes + U64(76), ba)
-    uiMemWriteF32(ptr, bytes + U64(80), clipMinX)
-    uiMemWriteF32(ptr, bytes + U64(84), clipMinY)
-    uiMemWriteF32(ptr, bytes + U64(88), clipMaxX)
-    uiMemWriteF32(ptr, bytes + U64(92), clipMaxY)
-    return
-}
-
-// Write a whole quad: four corners in the winding the index buffer expects
-// (top-left, top-right, bottom-right, bottom-left — see uiBatchQuadIndices).
+// Write one quad's record: the thirty floats the KSL `UiQuad` struct reads for
+// every mode, in its field order (see uiBatchFloatsPerQuad in UiBatch.kira).
+// `px`/`py` are pixel coordinates, which the fragment stage clips against; `pos`
+// is the same point in clip space, with the y flip a top-left-origin UI needs.
+//
+// The clip position is computed HERE rather than in the vertex stage, so that the
+// stage only ever selects between two stored numbers and the bytes reaching the
+// rasterizer are the ones a per-vertex buffer used to hold.
 //
 // Written in Kira rather than behind a native fast-path symbol. A `kira_ui`
 // library existed for this and no toolchain shipped one, so every call trapped
@@ -98,7 +61,7 @@ function uiWriteVertex(
 // writes through the runtime's raw-memory helpers, which are on every native
 // link line and need no platform to have anything.
 @Native
-function uiWriteQuad(
+function uiWriteQuadRecord(
     ptr: RawPtr, baseFloats: U64,
     px0: Float, py0: Float, px1: Float, py1: Float,
     lx0: Float, ly0: Float, lx1: Float, ly1: Float,
@@ -109,11 +72,78 @@ function uiWriteQuad(
     br: Float, bg: Float, bb: Float, ba: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
 ) {
-    let stride = U64(24)
-    uiWriteVertex(ptr, baseFloats, px0, py0, lx0, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride, px1, py0, lx1, ly0, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride * U64(2), px1, py1, lx1, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
-    uiWriteVertex(ptr, baseFloats + stride * U64(3), px0, py1, lx0, ly1, vw, vh, halfW, halfH, radius, borderWidth, mode, edgeRefraction, fr, fg, fb, fa, br, bg, bb, ba, clipMinX, clipMinY, clipMaxX, clipMaxY)
+    let bytes = baseFloats * U64(4)
+    uiMemWriteF32(ptr, bytes, px0 / vw * 2.0 - 1.0)
+    uiMemWriteF32(ptr, bytes + U64(4), 1.0 - py0 / vh * 2.0)
+    uiMemWriteF32(ptr, bytes + U64(8), px1 / vw * 2.0 - 1.0)
+    uiMemWriteF32(ptr, bytes + U64(12), 1.0 - py1 / vh * 2.0)
+    uiMemWriteF32(ptr, bytes + U64(16), px0)
+    uiMemWriteF32(ptr, bytes + U64(20), py0)
+    uiMemWriteF32(ptr, bytes + U64(24), px1)
+    uiMemWriteF32(ptr, bytes + U64(28), py1)
+    uiMemWriteF32(ptr, bytes + U64(32), lx0)
+    uiMemWriteF32(ptr, bytes + U64(36), ly0)
+    uiMemWriteF32(ptr, bytes + U64(40), lx1)
+    uiMemWriteF32(ptr, bytes + U64(44), ly1)
+    uiMemWriteF32(ptr, bytes + U64(48), halfW)
+    uiMemWriteF32(ptr, bytes + U64(52), halfH)
+    uiMemWriteF32(ptr, bytes + U64(56), radius)
+    uiMemWriteF32(ptr, bytes + U64(60), borderWidth)
+    uiMemWriteF32(ptr, bytes + U64(64), mode)
+    uiMemWriteF32(ptr, bytes + U64(68), edgeRefraction)
+    uiMemWriteF32(ptr, bytes + U64(72), fr)
+    uiMemWriteF32(ptr, bytes + U64(76), fg)
+    uiMemWriteF32(ptr, bytes + U64(80), fb)
+    uiMemWriteF32(ptr, bytes + U64(84), fa)
+    uiMemWriteF32(ptr, bytes + U64(88), br)
+    uiMemWriteF32(ptr, bytes + U64(92), bg)
+    uiMemWriteF32(ptr, bytes + U64(96), bb)
+    uiMemWriteF32(ptr, bytes + U64(100), ba)
+    uiMemWriteF32(ptr, bytes + U64(104), clipMinX)
+    uiMemWriteF32(ptr, bytes + U64(108), clipMinY)
+    uiMemWriteF32(ptr, bytes + U64(112), clipMaxX)
+    uiMemWriteF32(ptr, bytes + U64(116), clipMaxY)
+    return
+}
+
+// The material block that follows a record: what a liquid-glass surface shades
+// itself with. Mode 3 is the only mode whose shader reads any of it, so it is the
+// only mode that writes it.
+@Native
+function uiWriteQuadMaterial(
+    ptr: RawPtr, baseFloats: U64,
+    m0: Float, m1: Float, m2: Float, m3: Float,
+    m4: Float, m5: Float, m6: Float, m7: Float,
+    m8: Float, m9: Float, m10: Float, m11: Float,
+    m12: Float, m13: Float, m14: Float, m15: Float,
+    m16: Float, m17: Float, m18: Float, m19: Float,
+    m20: Float, m21: Float, m22: Float, m23: Float,
+) {
+    let bytes = (baseFloats + U64(30)) * U64(4)
+    uiMemWriteF32(ptr, bytes, m0)
+    uiMemWriteF32(ptr, bytes + U64(4), m1)
+    uiMemWriteF32(ptr, bytes + U64(8), m2)
+    uiMemWriteF32(ptr, bytes + U64(12), m3)
+    uiMemWriteF32(ptr, bytes + U64(16), m4)
+    uiMemWriteF32(ptr, bytes + U64(20), m5)
+    uiMemWriteF32(ptr, bytes + U64(24), m6)
+    uiMemWriteF32(ptr, bytes + U64(28), m7)
+    uiMemWriteF32(ptr, bytes + U64(32), m8)
+    uiMemWriteF32(ptr, bytes + U64(36), m9)
+    uiMemWriteF32(ptr, bytes + U64(40), m10)
+    uiMemWriteF32(ptr, bytes + U64(44), m11)
+    uiMemWriteF32(ptr, bytes + U64(48), m12)
+    uiMemWriteF32(ptr, bytes + U64(52), m13)
+    uiMemWriteF32(ptr, bytes + U64(56), m14)
+    uiMemWriteF32(ptr, bytes + U64(60), m15)
+    uiMemWriteF32(ptr, bytes + U64(64), m16)
+    uiMemWriteF32(ptr, bytes + U64(68), m17)
+    uiMemWriteF32(ptr, bytes + U64(72), m18)
+    uiMemWriteF32(ptr, bytes + U64(76), m19)
+    uiMemWriteF32(ptr, bytes + U64(80), m20)
+    uiMemWriteF32(ptr, bytes + U64(84), m21)
+    uiMemWriteF32(ptr, bytes + U64(88), m22)
+    uiMemWriteF32(ptr, bytes + U64(92), m23)
     return
 }
 @Native
@@ -148,6 +178,12 @@ function uiTextFaceSetPixelSize(face: RawPtr, pixelSize: F32): I32;
 function uiTextFaceGlyphIndex(face: RawPtr, codepoint: U32): U32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph; abi: c; }
 function uiTextFaceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
+// Subpixel-positioned rasterization: the outline is shifted by xOffset26_6 (64 to a
+// pixel) before it is scan-converted, so coverage is computed for where the glyph
+// actually lands rather than computed once and resampled. Both entry points render
+// UNHINTED, which is the other half of what makes macOS text look the way it does.
+@FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph_offset; abi: c; }
+function uiTextFaceRenderGlyphOffset(face: RawPtr, glyphIndex: U32, xOffset26_6: I32, out: RawPtr): I32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_vmetrics; abi: c; }
 function uiTextFaceVMetrics(face: RawPtr, out: RawPtr): Void;
 @FFI.Extern { library: kiratext; symbol: kira_text_utf8_next; abi: c; }
@@ -253,6 +289,19 @@ function uiLoadRgbaTextureFile(graphics: borrow Graphics, path: borrow String, w
     uiMemFree(region)
     uiMemFree(buf)
     return textureId
+}
+
+// Is `name` present in the environment with an EMPTY value? Loading cannot report
+// this: a missing variable and a variable set to "" both fail to open a file and
+// both return 0. The difference is intent — an empty value is a run saying "no
+// image here", which callers use to skip their fallback paths entirely.
+@Native
+function uiEnvValueIsEmpty(name: borrow String) -> Bool {
+    let value = metalGetEnv(name)
+    if uiPtrIsNull(value) {
+        return false
+    }
+    return uiMemReadU32(value, 0) % 256 == 0
 }
 
 // As above, but the path is the VALUE of environment variable `envName` (the

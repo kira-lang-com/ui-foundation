@@ -1,0 +1,1294 @@
+import Foundation
+import KiraLayout
+import KiraUIFoundation
+
+// Liquid Glass Kitchen — an editor for the material itself.
+//
+// The canvas holds widgets that are nothing but liquid glass in different shapes
+// and sizes; the sidebar holds controls that move the numbers those widgets shade
+// themselves with, live. Every control is made of the same glass it edits, so the
+// editor is its own preview: drag `Stroke strength` and the sliders' own edges
+// move with the widgets'.
+//
+// What the sliders reach is FoundationGlassMaterial, carried per surface — the
+// shader compiles with none of these baked in, so the design happens here rather
+// than in a rebuild.
+
+struct KitchenState {
+    var textureId: Int = 0
+    var attempted: Bool = false
+    var backdropOff: Bool = false
+
+    // The material under design. Seeded with the library's defaults — which are the
+    // design document's — so the editor opens on the same glass every other surface
+    // draws, and a slider moves away from it rather than toward it.
+    var edgeStrokeStrength: Float = 0.0
+    var edgeStrokeDarken: Float = 0.62
+    var edgeStrokePeak: Float = 0.9
+    var edgeStrokeFade: Float = 2.0
+    var sheenStrength: Float = 0.0
+    var lensMaxBend: Float = 72.0
+    var refractionReach: Float = 180.0
+    var blurNearSplit: Float = 0.25
+
+    // The two named scales, as step indices (0..5).
+    var frostStep: Int = 2
+    var blurStep: Int = 3
+    // Shape and rim, the two things that are not part of the material struct.
+    var radius: Float = 28.0
+    var edgeLighting: Bool = true
+
+    // Where a drag started, so a slider moves from where it was grabbed rather
+    // than jumping: onDragMove reports the distance from the press, not a
+    // position, and a slider that added that distance every frame would run away.
+    var dragOrigin: Float = 0.0
+
+    // Every snapshot ever taken, flat: recordFields() numbers each, oldest first.
+    var snapshots: [Int] = []
+    // Edits made since the last snapshot. Reset refuses to throw those away on
+    // the first press — it arms instead, and says so.
+    var dirty: Bool = false
+    var resetArmed: Bool = false
+    // Set once the disk has been read, so the load happens on the first frame
+    // rather than on every one.
+    var loaded: Bool = false
+}
+
+// ---------------------------------------------------------------------------
+// Palette and shared chrome
+// ---------------------------------------------------------------------------
+
+function inkStrong() -> Color {
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }
+}
+
+function inkSoft() -> Color {
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.72 }
+}
+
+function inkFaint() -> Color {
+    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.5 }
+}
+
+// The wash colour every surface uses: #F6F6F6, which is the document's
+// "#BFBFBF 10% over white 70%" collapsed to one layer.
+function glassTint() -> Color {
+    return Color { r: 0.9657 g: 0.9657 b: 0.9657 a: 1.0 }
+}
+
+function frostForStep(step: Int) -> FoundationFrost {
+    if step <= 0 {
+        return FoundationFrost.Translucent
+    }
+    if step == 1 {
+        return FoundationFrost.Light
+    }
+    if step == 2 {
+        return FoundationFrost.Medium
+    }
+    if step == 3 {
+        return FoundationFrost.High
+    }
+    if step == 4 {
+        return FoundationFrost.XHigh
+    }
+    return FoundationFrost.Max
+}
+
+function blurForStep(step: Int) -> FoundationBlur {
+    if step <= 0 {
+        return FoundationBlur.None
+    }
+    if step == 1 {
+        return FoundationBlur.Light
+    }
+    if step == 2 {
+        return FoundationBlur.Medium
+    }
+    if step == 3 {
+        return FoundationBlur.High
+    }
+    if step == 4 {
+        return FoundationBlur.XHigh
+    }
+    return FoundationBlur.Max
+}
+
+function stepName(step: Int, zeroLabel: String) -> String {
+    if step <= 0 {
+        return move zeroLabel
+    }
+    if step == 1 {
+        return "Light"
+    }
+    if step == 2 {
+        return "Medium"
+    }
+    if step == 3 {
+        return "High"
+    }
+    if step == 4 {
+        return "XHigh"
+    }
+    return "Max"
+}
+
+// The material the whole editor renders with, rebuilt from state every frame.
+function kitchenMaterial(state: borrow KitchenState) -> FoundationGlassMaterial {
+    return FoundationGlassMaterial {
+        edgeStrokeStrength: state.edgeStrokeStrength
+        edgeStrokeDarken: state.edgeStrokeDarken
+        edgeStrokePeak: state.edgeStrokePeak
+        edgeStrokeFade: state.edgeStrokeFade
+        sheenStrength: state.sheenStrength
+        lensMaxBend: state.lensMaxBend
+        refractionReach: state.refractionReach
+        blurNearSplit: state.blurNearSplit
+    }
+}
+
+// Every piece of glass in the app — canvas widget and control alike — is this.
+function glass(
+    children: [FoundationView],
+    w: Float,
+    h: Float,
+    radius: Float,
+    frost: FoundationFrost,
+    blur: FoundationBlur,
+    material: FoundationGlassMaterial,
+    edgeLighting: Bool,
+) -> FoundationView {
+    return LiquidGlassSurface(
+        children: move children,
+        width: SizeMode.Fixed(w),
+        height: SizeMode.Fixed(h),
+        radius: radius,
+        frost: move frost,
+        tint: glassTint(),
+        blur: move blur,
+        edgeRefraction: 1.0,
+        glassMaterial: move material,
+        edgeLighting: edgeLighting
+    )
+}
+
+function centered(child: FoundationView) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Center,
+        padding: EdgeInsets {}
+    )
+}
+
+function leading(child: FoundationView, inset: Float) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets { leading: inset }
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Numbers as text (Kira has no float formatter, and a slider with no readout is
+// a guess)
+// ---------------------------------------------------------------------------
+
+function digitText(digit: Int) -> String {
+    if digit == 1 { return "1" }
+    if digit == 2 { return "2" }
+    if digit == 3 { return "3" }
+    if digit == 4 { return "4" }
+    if digit == 5 { return "5" }
+    if digit == 6 { return "6" }
+    if digit == 7 { return "7" }
+    if digit == 8 { return "8" }
+    if digit == 9 { return "9" }
+    return "0"
+}
+
+function intText(value: Int) -> String {
+    if value == 0 {
+        return "0"
+    }
+    var out = ""
+    var rest = value
+    while rest > 0 {
+        out = digitText(rest % 10) + out
+        rest = rest / 10
+    }
+    return out
+}
+
+// Two decimals: enough to see a slider move, short enough to sit in a label.
+function floatText(value: Float) -> String {
+    var v = value
+    var sign = ""
+    if v < 0.0 {
+        sign = "-"
+        v = 0.0 - v
+    }
+    var whole = Int(v)
+    var frac = Int((v - Float(whole)) * 100.0 + 0.5)
+    if frac >= 100 {
+        whole = whole + 1
+        frac = frac - 100
+    }
+    var fracText = intText(frac)
+    while fracText.count < 2 {
+        fracText = "0" + fracText
+    }
+    return sign + intText(whole) + "." + fracText
+}
+
+// ---------------------------------------------------------------------------
+// The slider
+// ---------------------------------------------------------------------------
+
+function sliderWidth() -> Float {
+    return 236.0
+}
+
+function sliderTrackHeight() -> Float {
+    return 8.0
+}
+
+// The filled part of the track, and the knob riding its end. Both are plain
+// surfaces rather than glass: a slider whose track refracts what is behind it
+// cannot be read at a glance, and the control's glass is the shell around it.
+function sliderTrack(fraction: Float) -> FoundationView {
+    var filled = fraction * sliderWidth()
+    if filled < 2.0 {
+        filled = 2.0
+    }
+    if filled > sliderWidth() {
+        filled = sliderWidth()
+    }
+    var layers: [FoundationView] = [
+        Surface(
+            children: [],
+            width: SizeMode.Fixed(sliderWidth()),
+            height: SizeMode.Fixed(sliderTrackHeight()),
+            flex: 0,
+            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.22 },
+            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            borderWidth: 0.0,
+            radius: sliderTrackHeight() / 2.0,
+            shape: FoundationShape.RegularRoundedRect,
+            material: FoundationMaterial.Flat,
+            effects: [],
+            padding: EdgeInsets {},
+            clipContent: false
+        )
+    ]
+    layers.append(Frame(
+        child: Surface(
+            children: [],
+            width: SizeMode.Fixed(filled),
+            height: SizeMode.Fixed(sliderTrackHeight()),
+            flex: 0,
+            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.85 },
+            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            borderWidth: 0.0,
+            radius: sliderTrackHeight() / 2.0,
+            shape: FoundationShape.RegularRoundedRect,
+            material: FoundationMaterial.Flat,
+            effects: [],
+            padding: EdgeInsets {},
+            clipContent: false
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets {}
+    ))
+    return Surface(
+        children: move layers,
+        width: SizeMode.Fixed(sliderWidth()),
+        height: SizeMode.Fixed(sliderTrackHeight()),
+        flex: 0,
+        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+// One labelled slider: name and value on top, track under, the whole row wrapped
+// in a hit area that turns horizontal drags into a value.
+//
+// `onSet` receives the new value already clamped to the range, so the caller only
+// has to store it. The drag arithmetic lives here because it is the same for every
+// control: a drag reports its distance from the press point, so the value is the
+// one the press started on plus that distance scaled to the range.
+function slider(
+    key: Int,
+    label: String,
+    value: Float,
+    minimum: Float,
+    maximum: Float,
+    material: FoundationGlassMaterial,
+    frost: FoundationFrost,
+    blur: FoundationBlur,
+    edgeLighting: Bool,
+    onPress: () -> Void,
+    onDragStart: (Float, Float) -> Void,
+    onDragMove: (Float, Float) -> Void,
+) -> FoundationView {
+    var fraction = 0.0
+    if maximum > minimum {
+        fraction = (value - minimum) / (maximum - minimum)
+    }
+    if fraction < 0.0 {
+        fraction = 0.0
+    }
+    if fraction > 1.0 {
+        fraction = 1.0
+    }
+    let head = Row(
+        children: [
+            AdaptiveText(move label, inkSoft(), 12.0, 600.0),
+            Expanded(child: Spacer(minLength: 0.0, flex: 1), flex: 1),
+            AdaptiveText(floatText(value), inkStrong(), 12.0, 700.0)
+        ],
+        width: SizeMode.Fixed(sliderWidth()),
+        height: SizeMode.Hug,
+        spacing: 8.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Center
+    )
+    let body = Column(
+        children: [move head, sliderTrack(fraction)],
+        width: SizeMode.Fixed(sliderWidth()),
+        height: SizeMode.Hug,
+        spacing: 10.0,
+        padding: EdgeInsets { top: 2.0 bottom: 4.0 },
+        crossAxisAlignment: CrossAlignment.Start
+    )
+    return GestureHitArea(
+        key: key,
+        disabled: false,
+        // A press sets the value where it lands: a drag has a threshold to cross
+        // before it is a drag at all, so without this a tap on the track does
+        // nothing and the row only responds once the pointer has travelled.
+        onPress: move onPress,
+        interaction: FoundationInteraction {
+            onDragStart: move onDragStart
+            onDragMove: move onDragMove
+        },
+        children: [
+            glass(
+                children: [centered(move body)],
+                w: sliderWidth() + 28.0,
+                h: 66.0,
+                radius: 18.0,
+                frost: move frost,
+                blur: move blur,
+                material: move material,
+                edgeLighting: edgeLighting
+            )
+        ]
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Disk: the current edit and the snapshots taken of it
+//
+// Values are written as INTEGER THOUSANDTHS, space separated, one snapshot per
+// line. Parsing a float from text needs a float parser; parsing an integer needs
+// a loop over digits, and the material is tuned to three decimals anyway — so the
+// format is the one that cannot be got subtly wrong.
+// ---------------------------------------------------------------------------
+
+function currentPath() -> String {
+    return "kitchen-current.txt"
+}
+
+function snapshotsPath() -> String {
+    return "kitchen-snapshots.txt"
+}
+
+// How many numbers one record holds: the eight material values, the two named
+// steps, the corner radius, and whether the rim is lit.
+function recordFields() -> Int {
+    return 12
+}
+
+function milli(value: Float) -> Int {
+    return Int(value * 1000.0 + 0.5)
+}
+
+function fromMilli(value: Int) -> Float {
+    return Float(value) / 1000.0
+}
+
+function boolInt(value: Bool) -> Int {
+    if value {
+        return 1
+    }
+    return 0
+}
+
+// One record as text: the state a snapshot restores.
+function encodeState(state: borrow KitchenState) -> String {
+    var out = intText(milli(state.edgeStrokeStrength))
+    out = out + " " + intText(milli(state.edgeStrokeDarken))
+    out = out + " " + intText(milli(state.edgeStrokePeak))
+    out = out + " " + intText(milli(state.edgeStrokeFade))
+    out = out + " " + intText(milli(state.sheenStrength))
+    out = out + " " + intText(milli(state.lensMaxBend))
+    out = out + " " + intText(milli(state.refractionReach))
+    out = out + " " + intText(milli(state.blurNearSplit))
+    out = out + " " + intText(state.frostStep)
+    out = out + " " + intText(state.blurStep)
+    out = out + " " + intText(milli(state.radius))
+    out = out + " " + intText(boolInt(state.edgeLighting))
+    return out
+}
+
+// Every integer in a file, in order. Read as bytes because that is what can be
+// walked a character at a time; a record is `recordFields()` of them.
+function readNumbers(path: borrow String) -> [Int] {
+    var out: [Int] = []
+    if !fileExists(path) {
+        return out
+    }
+    let size = Int(fileSize(path))
+    if size <= 0 {
+        return out
+    }
+    let bytes = readFileRange(path, 0, size)
+    var value = 0
+    var reading = false
+    var i = 0
+    while i < bytes.count {
+        let byte = Int(bytes[i])
+        if byte >= 48 && byte <= 57 {
+            value = value * 10 + (byte - 48)
+            reading = true
+        } else {
+            if reading {
+                out.append(value)
+            }
+            value = 0
+            reading = false
+        }
+        i = i + 1
+    }
+    if reading {
+        out.append(value)
+    }
+    return out
+}
+
+// Apply the record starting at `at` to the state. A short or truncated file
+// leaves the state alone rather than half-applying one.
+function applyRecord(state: borrow mut KitchenState, numbers: borrow [Int], at: Int) {
+    if at + recordFields() > numbers.count {
+        return
+    }
+    state.edgeStrokeStrength = fromMilli(numbers[at])
+    state.edgeStrokeDarken = fromMilli(numbers[at + 1])
+    state.edgeStrokePeak = fromMilli(numbers[at + 2])
+    state.edgeStrokeFade = fromMilli(numbers[at + 3])
+    state.sheenStrength = fromMilli(numbers[at + 4])
+    state.lensMaxBend = fromMilli(numbers[at + 5])
+    state.refractionReach = fromMilli(numbers[at + 6])
+    state.blurNearSplit = fromMilli(numbers[at + 7])
+    state.frostStep = numbers[at + 8]
+    state.blurStep = numbers[at + 9]
+    state.radius = fromMilli(numbers[at + 10])
+    state.edgeLighting = numbers[at + 11] == 1
+    return
+}
+
+// The working edit, written on every change so closing the window loses nothing.
+function saveCurrent(state: borrow KitchenState) {
+    let ignored = writeFile(currentPath(), encodeState(state) + "\n")
+    return
+}
+
+// Snapshots are appended, so the file IS the history: the newest is the last
+// record, and nothing a snapshot captured is ever rewritten.
+function saveSnapshots(snapshots: borrow [Int]) {
+    var out = ""
+    var i = 0
+    while i + recordFields() <= snapshots.count {
+        var field = 0
+        while field < recordFields() {
+            if field > 0 {
+                out = out + " "
+            }
+            out = out + intText(snapshots[i + field])
+            field = field + 1
+        }
+        out = out + "\n"
+        i = i + recordFields()
+    }
+    let ignored = writeFile(snapshotsPath(), out)
+    return
+}
+
+// Take a snapshot of the state as it stands, and remember that nothing is
+// unsaved any more.
+function takeSnapshot(state: borrow mut KitchenState) {
+    state.snapshots.append(milli(state.edgeStrokeStrength))
+    state.snapshots.append(milli(state.edgeStrokeDarken))
+    state.snapshots.append(milli(state.edgeStrokePeak))
+    state.snapshots.append(milli(state.edgeStrokeFade))
+    state.snapshots.append(milli(state.sheenStrength))
+    state.snapshots.append(milli(state.lensMaxBend))
+    state.snapshots.append(milli(state.refractionReach))
+    state.snapshots.append(milli(state.blurNearSplit))
+    state.snapshots.append(state.frostStep)
+    state.snapshots.append(state.blurStep)
+    state.snapshots.append(milli(state.radius))
+    state.snapshots.append(boolInt(state.edgeLighting))
+    state.dirty = false
+    state.resetArmed = false
+    saveSnapshots(state.snapshots)
+    saveCurrent(state)
+    return
+}
+
+function snapshotCount(state: borrow KitchenState) -> Int {
+    return state.snapshots.count / recordFields()
+}
+
+// A stepper for the two NAMED scales, which have steps rather than a range: press
+// to advance, wrapping at the top.
+function stepper(
+    key: Int,
+    label: String,
+    stepLabel: String,
+    material: FoundationGlassMaterial,
+    frost: FoundationFrost,
+    blur: FoundationBlur,
+    edgeLighting: Bool,
+    onPress: () -> Void,
+) -> FoundationView {
+    let body = Row(
+        children: [
+            AdaptiveText(move label, inkSoft(), 12.0, 600.0),
+            Expanded(child: Spacer(minLength: 0.0, flex: 1), flex: 1),
+            AdaptiveText(move stepLabel, inkStrong(), 12.0, 700.0)
+        ],
+        width: SizeMode.Fixed(sliderWidth()),
+        height: SizeMode.Hug,
+        spacing: 8.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Center
+    )
+    return GestureHitArea(
+        key: key,
+        disabled: false,
+        onPress: move onPress,
+        interaction: FoundationInteraction {},
+        children: [
+            glass(
+                children: [centered(move body)],
+                w: sliderWidth() + 28.0,
+                h: 38.0,
+                radius: 14.0,
+                frost: move frost,
+                blur: move blur,
+                material: move material,
+                edgeLighting: edgeLighting
+            )
+        ]
+    )
+}
+
+function sectionLabel(text: String) -> FoundationView {
+    return Frame(
+        child: AdaptiveText(move text, inkFaint(), 11.0, 700.0),
+        width: SizeMode.Fixed(sliderWidth() + 28.0),
+        height: SizeMode.Fixed(18.0),
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets { top: 4.0 leading: 4.0 }
+    )
+}
+
+function kitchenIgnore() {
+    return
+}
+
+// The value the pointer is over, as a fraction of the pressed row's width.
+//
+// A slider that only responds to the DELTA of a drag has two holes: a press that
+// does not travel past the drag threshold does nothing at all, so tapping a
+// track is dead, and the handle never lands where the cursor is — it lands wherever
+// it already was plus how far the mouse moved. Both are why it felt like it had to
+// be grabbed exactly. The press bounds and the pointer are both ambient, so the row
+// can just ask where in itself the pointer is.
+//
+// The track is inset from the row by the glass padding, so the usable span is the
+// row minus that inset at each end; a press in the padding clamps to the ends
+// rather than jumping.
+function kitchenPointerFraction() -> Float {
+    let width = foundationPressBoundsW()
+    if width <= 0.0 {
+        return 0.0
+    }
+    let inset = (width - sliderWidth()) / 2.0
+    let span = width - inset * 2.0
+    if span <= 0.0 {
+        return 0.0
+    }
+    return kitchenClamp((foundationPointerX() - foundationPressBoundsX() - inset) / span, 0.0, 1.0)
+}
+
+// ---------------------------------------------------------------------------
+// The canvas: six widgets, every one of them the material under design
+// ---------------------------------------------------------------------------
+
+function widgetCaption(text: String) -> FoundationView {
+    return centered(AdaptiveText(move text, inkStrong(), 13.0, 600.0))
+}
+
+function canvas(state: borrow KitchenState) -> FoundationView {
+    let material = kitchenMaterial(state)
+    let frost = frostForStep(state.frostStep)
+    let blur = blurForStep(state.blurStep)
+    let lighting = state.edgeLighting
+
+    // A card, a pill, a circle, a tile, a bar and a chip: the shapes a UI is
+    // actually built from, so a material tuned here is tuned for all of them —
+    // the lens and the edge behave differently at each radius and size.
+    let card = glass(
+        children: [widgetCaption("Card")],
+        w: 300.0, h: 190.0, radius: state.radius,
+        frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+        material: kitchenMaterial(state), edgeLighting: lighting
+    )
+    let pill = glass(
+        children: [widgetCaption("Pill")],
+        w: 300.0, h: 56.0, radius: 28.0,
+        frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+        material: kitchenMaterial(state), edgeLighting: lighting
+    )
+    let circle = glass(
+        children: [widgetCaption("Round")],
+        w: 132.0, h: 132.0, radius: 66.0,
+        frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+        material: kitchenMaterial(state), edgeLighting: lighting
+    )
+    let tile = glass(
+        children: [widgetCaption("Tile")],
+        w: 148.0, h: 132.0, radius: state.radius,
+        frost: move frost, blur: move blur,
+        material: move material, edgeLighting: lighting
+    )
+    let bar = glass(
+        children: [widgetCaption("Toolbar")],
+        w: 464.0, h: 64.0, radius: 20.0,
+        frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+        material: kitchenMaterial(state), edgeLighting: lighting
+    )
+    let chip = glass(
+        children: [widgetCaption("Chip")],
+        w: 132.0, h: 56.0, radius: 16.0,
+        frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+        material: kitchenMaterial(state), edgeLighting: lighting
+    )
+
+    let topRow = Row(
+        children: [move card, Column(
+            children: [move circle, move chip],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 18.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ), move tile],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 18.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+    return Column(
+        children: [move topRow, move bar, move pill],
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 18.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+}
+
+// ---------------------------------------------------------------------------
+// The sidebar: every control, each one glass
+// ---------------------------------------------------------------------------
+
+function sidebarWidth() -> Float {
+    return sliderWidth() + 28.0 + 36.0
+}
+
+function controls(state: borrow KitchenState, stateUser: RawPtr) -> FoundationView {
+    let material = kitchenMaterial(state)
+    let frost = frostForStep(state.frostStep)
+    let blur = blurForStep(state.blurStep)
+    let lighting = state.edgeLighting
+
+    // Each control gets its own pair of closures: the press remembers where the
+    // value was, the move walks it from there.
+    let strokeSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeStrength = 0.0 + (0.6 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let strokeStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeStrength = 0.0 + (0.6 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let strokeMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeStrength = 0.0 + (0.6 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let darkenSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeDarken = 0.0 + (1.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let darkenStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeDarken = 0.0 + (1.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let darkenMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeDarken = 0.0 + (1.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let peakSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokePeak = 0.0 + (6.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let peakStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokePeak = 0.0 + (6.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let peakMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokePeak = 0.0 + (6.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let fadeSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeFade = 0.2 + (12.0 - 0.2) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let fadeStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeFade = 0.2 + (12.0 - 0.2) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let fadeMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeStrokeFade = 0.2 + (12.0 - 0.2) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let sheenSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.sheenStrength = 0.0 + (0.4 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let sheenStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.sheenStrength = 0.0 + (0.4 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let sheenMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.sheenStrength = 0.0 + (0.4 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let bendSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.lensMaxBend = 0.0 + (200.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let bendStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.lensMaxBend = 0.0 + (200.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let bendMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.lensMaxBend = 0.0 + (200.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let reachSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.refractionReach = 20.0 + (600.0 - 20.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let reachStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.refractionReach = 20.0 + (600.0 - 20.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let reachMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.refractionReach = 20.0 + (600.0 - 20.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let splitSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.blurNearSplit = 0.05 + (0.95 - 0.05) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let splitStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.blurNearSplit = 0.05 + (0.95 - 0.05) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let splitMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.blurNearSplit = 0.05 + (0.95 - 0.05) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let radiusSet: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.radius = 0.0 + (90.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let radiusStart: (Float, Float) -> Void = { x, y in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.radius = 0.0 + (90.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let radiusMove: (Float, Float) -> Void = { dx, dy in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.radius = 0.0 + (90.0 - 0.0) * kitchenPointerFraction()
+        kitchenEdited(s)
+        return
+    }
+    let frostPress: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.frostStep = (s.frostStep + 1) % 6
+        kitchenEdited(s)
+        return
+    }
+    let blurPress: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.blurStep = (s.blurStep + 1) % 6
+        kitchenEdited(s)
+        return
+    }
+    let lightingPress: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        s.edgeLighting = !s.edgeLighting
+        kitchenEdited(s)
+        return
+    }
+    let resetPress: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        // Edits nobody snapshotted are the only thing here that cannot be got
+        // back, so the first press arms rather than discards, and the label says
+        // what the second one will do.
+        if s.dirty && !s.resetArmed {
+            s.resetArmed = true
+            return
+        }
+        s.edgeStrokeStrength = 0.0
+        s.edgeStrokeDarken = 0.62
+        s.edgeStrokePeak = 0.9
+        s.edgeStrokeFade = 2.0
+        s.sheenStrength = 0.0
+        s.lensMaxBend = 72.0
+        s.refractionReach = 180.0
+        s.blurNearSplit = 0.25
+        s.frostStep = 2
+        s.blurStep = 3
+        s.radius = 28.0
+        s.edgeLighting = true
+        s.dirty = false
+        s.resetArmed = false
+        saveCurrent(s)
+        return
+    }
+    let snapshotPress: () -> Void = { in
+        var s = nativeRecover<KitchenState>(stateUser)
+        takeSnapshot(s)
+        return
+    }
+
+    var rows: [FoundationView] = [
+        sectionLabel("SCALES"),
+        stepper(
+            key: 301, label: "Frost", stepLabel: stepName(state.frostStep, "Translucent"),
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting, onPress: move frostPress
+        ),
+        stepper(
+            key: 302, label: "Blur", stepLabel: stepName(state.blurStep, "None"),
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting, onPress: move blurPress
+        ),
+        sectionLabel("EDGE"),
+        slider(
+            key: 311, label: "Stroke strength", value: state.edgeStrokeStrength,
+            minimum: 0.0, maximum: 0.6,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move strokeSet,
+            onDragStart: move strokeStart, onDragMove: move strokeMove
+        ),
+        slider(
+            key: 312, label: "Stroke darken", value: state.edgeStrokeDarken,
+            minimum: 0.0, maximum: 1.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move darkenSet,
+            onDragStart: move darkenStart, onDragMove: move darkenMove
+        ),
+        slider(
+            key: 313, label: "Stroke peak", value: state.edgeStrokePeak,
+            minimum: 0.0, maximum: 6.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move peakSet,
+            onDragStart: move peakStart, onDragMove: move peakMove
+        ),
+        slider(
+            key: 314, label: "Stroke fade", value: state.edgeStrokeFade,
+            minimum: 0.2, maximum: 12.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move fadeSet,
+            onDragStart: move fadeStart, onDragMove: move fadeMove
+        ),
+        slider(
+            key: 315, label: "Sheen", value: state.sheenStrength,
+            minimum: 0.0, maximum: 0.4,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move sheenSet,
+            onDragStart: move sheenStart, onDragMove: move sheenMove
+        ),
+        sectionLabel("LENS"),
+        slider(
+            key: 321, label: "Lens bend", value: state.lensMaxBend,
+            minimum: 0.0, maximum: 200.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move bendSet,
+            onDragStart: move bendStart, onDragMove: move bendMove
+        ),
+        slider(
+            key: 322, label: "Refraction reach", value: state.refractionReach,
+            minimum: 20.0, maximum: 600.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move reachSet,
+            onDragStart: move reachStart, onDragMove: move reachMove
+        ),
+        slider(
+            key: 323, label: "Blur split", value: state.blurNearSplit,
+            minimum: 0.05, maximum: 0.95,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move splitSet,
+            onDragStart: move splitStart, onDragMove: move splitMove
+        ),
+        sectionLabel("SHAPE"),
+        slider(
+            key: 331, label: "Corner radius", value: state.radius,
+            minimum: 0.0, maximum: 90.0,
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting,
+            onPress: move radiusSet,
+            onDragStart: move radiusStart, onDragMove: move radiusMove
+        ),
+        stepper(
+            key: 332, label: "Edge lighting", stepLabel: onOffText(state.edgeLighting),
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting, onPress: move lightingPress
+        ),
+        stepper(
+            key: 333, label: resetLabel(state), stepLabel: resetAction(state),
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting, onPress: move resetPress
+        ),
+        sectionLabel("SNAPSHOTS"),
+        stepper(
+            key: 334, label: snapshotStatus(state), stepLabel: "Take",
+            material: move material, frost: move frost,
+            blur: move blur, edgeLighting: lighting, onPress: move snapshotPress
+        )
+    ]
+    // The snapshots themselves, newest first: press one to load it back. Only the
+    // last few are listed — the file keeps every one, the sidebar shows what fits.
+    var shown = 0
+    var index = snapshotCount(state) - 1
+    while index >= 0 && shown < 4 {
+        let at = index * recordFields()
+        let applyPress: () -> Void = { in
+            var s = nativeRecover<KitchenState>(stateUser)
+            applyRecord(s, s.snapshots, at)
+            s.dirty = false
+            s.resetArmed = false
+            saveCurrent(s)
+            return
+        }
+        rows.append(stepper(
+            key: 400 + index,
+            label: "Snapshot " + intText(index + 1),
+            stepLabel: snapshotSummary(state.snapshots, at),
+            material: kitchenMaterial(state), frost: frostForStep(state.frostStep),
+            blur: blurForStep(state.blurStep), edgeLighting: lighting, onPress: move applyPress
+        ))
+        shown = shown + 1
+        index = index - 1
+    }
+    return Column(
+        children: move rows,
+        width: SizeMode.Hug,
+        height: SizeMode.Hug,
+        spacing: 6.0,
+        padding: EdgeInsets {},
+        crossAxisAlignment: CrossAlignment.Start
+    )
+}
+
+// What the reset row says, which is what pressing it will do.
+function resetLabel(state: borrow KitchenState) -> String {
+    if state.resetArmed {
+        return "Discard unsaved edits?"
+    }
+    return "Reset"
+}
+
+function resetAction(state: borrow KitchenState) -> String {
+    if state.resetArmed {
+        return "Confirm"
+    }
+    if state.dirty {
+        return "Unsaved"
+    }
+    return "Defaults"
+}
+
+// The snapshot row's own label: how many there are, and whether the edit on
+// screen is in any of them.
+function snapshotStatus(state: borrow KitchenState) -> String {
+    let count = snapshotCount(state)
+    if count == 0 {
+        return "No snapshots yet"
+    }
+    if state.dirty {
+        return intText(count) + " saved, edits unsaved"
+    }
+    return intText(count) + " saved"
+}
+
+// A snapshot in three numbers — frost step, blur step, stroke strength — which is
+// enough to tell two apart in a list.
+function snapshotSummary(snapshots: borrow [Int], at: Int) -> String {
+    if at + recordFields() > snapshots.count {
+        return ""
+    }
+    return stepName(snapshots[at + 8], "Clear") + " / " + stepName(snapshots[at + 9], "Sharp") + " / " + floatText(fromMilli(snapshots[at]))
+}
+
+function onOffText(on: Bool) -> String {
+    if on {
+        return "On"
+    }
+    return "Off"
+}
+
+// Every control calls this after it changes something: the edit is now unsaved,
+// a primed reset is no longer primed for the state it was primed against, and the
+// working file matches what is on screen.
+function kitchenEdited(state: borrow mut KitchenState) {
+    state.dirty = true
+    state.resetArmed = false
+    saveCurrent(state)
+    return
+}
+
+function kitchenClamp(value: Float, low: Float, high: Float) -> Float {
+    if value < low {
+        return low
+    }
+    if value > high {
+        return high
+    }
+    return value
+}
+
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
+
+function rootView(context: borrow FoundationUiContext, stateUser: RawPtr, state: borrow KitchenState) -> FoundationView {
+    var layers: [FoundationView] = []
+    if state.textureId > 0 {
+        layers.append(TextureView(
+            texture: state.textureId,
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            opacity: 1.0,
+            radius: 0.0
+        ))
+    }
+    // The sidebar is one tall pane of glass with the controls stacked inside it,
+    // so the controls are glass ON glass — the stacked case the compositor has to
+    // get right, and the one an editor exercises constantly.
+    layers.append(Frame(
+        child: glass(
+            children: [
+                Frame(
+                    child: controls(state, stateUser),
+                    width: SizeMode.Fill,
+                    height: SizeMode.Fill,
+                    flex: 0,
+                    alignment: Alignment.TopLeading,
+                    padding: EdgeInsets { top: 14.0 trailing: 18.0 bottom: 14.0 leading: 18.0 }
+                )
+            ],
+            w: sidebarWidth(), h: context.viewport.height - 36.0, radius: 28.0,
+            frost: frostForStep(state.frostStep), blur: blurForStep(state.blurStep),
+            material: kitchenMaterial(state), edgeLighting: state.edgeLighting
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.Leading,
+        padding: EdgeInsets { leading: 18.0 }
+    ))
+    layers.append(Frame(
+        child: Column(
+            children: [
+                AdaptiveText("Liquid Glass Kitchen", inkStrong(), 34.0, 800.0),
+                AdaptiveText("Drag a control. Every widget and every control is the material you are editing.", inkSoft(), 14.0, 500.0)
+            ],
+            width: SizeMode.Hug,
+            height: SizeMode.Hug,
+            spacing: 6.0,
+            padding: EdgeInsets {},
+            crossAxisAlignment: CrossAlignment.Start
+        ),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets { top: 40.0 leading: sidebarWidth() + 64.0 }
+    ))
+    layers.append(Frame(
+        child: canvas(state),
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets { top: 132.0 leading: sidebarWidth() + 64.0 }
+    ))
+    return Surface(
+        children: move layers,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.09 g: 0.10 b: 0.13 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+@Main
+function main() {
+    let storage = nativeState(KitchenState {})
+    let stateUser = nativeUserData(storage)
+    RunFoundationInteractiveApp(
+        title: "Liquid Glass Kitchen",
+        width: 1600,
+        height: 900,
+        rootBuilder: { ui in
+            var state = nativeRecover<KitchenState>(stateUser)
+            return rootView(ui, stateUser, state)
+        },
+        engineFrame: { frame in
+            var state = nativeRecover<KitchenState>(stateUser)
+            if !state.loaded {
+                state.loaded = true
+                // Snapshots first, then the working edit on top of them: the file
+                // that was open when the window closed is what opens with it.
+                state.snapshots = readNumbers(snapshotsPath())
+                let current = readNumbers(currentPath())
+                if current.count >= recordFields() {
+                    applyRecord(state, current, 0)
+                }
+            }
+            if !state.attempted {
+                state.attempted = true
+                let graphics = foundationFrameGraphics(frame)
+                state.backdropOff = uiEnvValueIsEmpty("KIRA_GLASS_BG")
+                var id = 0
+                if !state.backdropOff {
+                    id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "../liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+                    }
+                    if id == 0 {
+                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+                    }
+                }
+                state.textureId = id
+            }
+            return
+        },
+        showFpsOverlay: false
+    )
+    return
+}

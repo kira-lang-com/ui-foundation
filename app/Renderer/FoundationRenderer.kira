@@ -28,7 +28,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         Surface -> {
             let frame = layoutFrame(tree, nodeIndex)
             if view.material != FoundationMaterial.Flat || view.effects.count > 0 {
-                current.beginBackdrop(frame, view.material, view.radius, view.blur, view.edgeRefraction, view.fill)
+                current.beginBackdrop(frame, view.material, view.radius, view.blur, view.edgeRefraction, view.fill, view.glassMaterial)
                 var effectIndex = 0
                 while effectIndex < view.effects.count {
                     current.applyBackdropEffect(frame, view.effects[effectIndex])
@@ -54,7 +54,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         Text -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextFields(frame, view.content, view.color, view.size)
+            current.drawTextFields(frame, view.content, view.color, view.size, view.adaptiveInk)
             return 1
         }
         HitArea -> {
@@ -69,7 +69,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         TextureView -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextureFields(frame, view.texture, view.textureOpacity, view.radius)
+            current.drawTextureFields(frame, view.texture, view.secondaryTexture, view.textureTransition, view.textureOpacity, view.radius)
             return 1
         }
         Icon -> {

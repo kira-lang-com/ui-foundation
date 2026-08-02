@@ -17,11 +17,13 @@ function Surface(
     clipContent: Bool,
     blur: Float = 1.0,
     edgeRefraction: Float = 1.0,
+    glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
 ) -> FoundationView {
     return FoundationView {
         kind: FoundationViewKind.Surface
         blur: blur
         edgeRefraction: edgeRefraction
+        glassMaterial: glassMaterial
         children: move children
         width: width
         height: height
@@ -36,6 +38,76 @@ function Surface(
         padding: padding
         clipContent: clipContent
     }
+}
+
+// A liquid glass surface, named-frost edition: the same Surface every other
+// material goes through, with `material` fixed and the white wash named by a
+// FoundationFrost step instead of written as a loose alpha. The step moves the
+// wash and nothing else — `blur`, refraction, lens and rims are exactly what a
+// hand-written Surface would give, so frosting up never costs the see-through-ness
+// that makes this glass. `tint` supplies the wash COLOUR (white is the platform
+// look); its own alpha is replaced by the step. `blur` follows the step by default
+// and is thin at every one of them — it is there to keep a half-resolution capture
+// from reading as one, not to compose a look. A surface needing a value between two
+// steps writes a raw Surface instead.
+function LiquidGlassSurface(
+    children: [FoundationView],
+    width: SizeMode,
+    height: SizeMode,
+    radius: Float,
+    frost: FoundationFrost = FoundationFrost.XHigh,
+    // Overrides the table's colour while keeping its opacities and blend modes,
+    // for a surface that wants the platform's material in a hue of its own. White
+    // leaves the Light table exactly as the platform ships it.
+    tint: Color = Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+    blur: FoundationBlur = FoundationBlur.Step,
+    edgeRefraction: Float = 1.0,
+    glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
+    // The thin white line the edges catch, on by default — it is what gives the
+    // shape a defined edge against a light backdrop. `edgeRefraction` scales it;
+    // false removes it outright, leaving lens, wash and shadow.
+    edgeLighting: Bool = true,
+    flex: Int = 0,
+    padding: EdgeInsets = EdgeInsets {},
+    clipContent: Bool = true,
+    // Which colour scheme the step is read in. The platform's materials are two
+    // different tables, not one table inverted — Light washes white and dodges,
+    // Dark lays black down flat — so this picks a row rather than flipping a sign.
+    //
+    // Last in the list because defaults bind POSITIONALLY: a parameter added in
+    // the middle silently shifts every argument after it at every call site.
+    scheme: FoundationScheme = FoundationScheme.Light,
+    // How far the surface has got MOVING to `scheme`. 1 means arrived, which is
+    // what a surface that is not animating anything wants; below that the material
+    // is partway across from the other scheme's table, passing through clear glass
+    // at 0.5 (see foundationTintStackCrossfade — the blend modes cannot be mixed,
+    // so the opacities are what travel).
+    schemeMix: Float = 1.0,
+) -> FoundationView {
+    let arriving = foundationFrostStack(frost, scheme)
+    let leaving = foundationFrostStack(frost, foundationSchemeOther(scheme))
+    let stack = foundationTintStackShaded(
+        foundationTintStackCrossfade(leaving, arriving, schemeMix),
+        tint
+    )
+    return Surface(
+        children: move children,
+        width: move width,
+        height: move height,
+        flex: flex,
+        fill: foundationTintFill(stack),
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 1.0,
+        radius: radius,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.LiquidGlass,
+        effects: [],
+        padding: move padding,
+        clipContent: clipContent,
+        blur: foundationBlurAmount(blur, frost),
+        edgeRefraction: foundationEdgeLightingScale(edgeLighting, edgeRefraction),
+        glassMaterial: foundationGlassMaterialWithTint(glassMaterial, stack)
+    )
 }
 
 function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> FoundationView {

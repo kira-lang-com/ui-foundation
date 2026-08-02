@@ -107,6 +107,11 @@ class KiraGraphicsFoundationBackend {
     // Set by a LiquidGlass beginBackdrop: the surface's next fill quad is skipped
     // (its fill became the shader-side adaptive wash); the border still draws.
     var suppressNextFill: Bool = false
+    // The wash of the glass surface currently being filled — strength and the
+    // luminance of its colour — so adaptive text drawn on it can mix back what the
+    // capture underneath does not contain.
+    var glassWash: Float = 0.0
+    var glassWashLuma: Float = 1.0
 
     function beginFrame(width: Int, height: Int) {
         self.hitRegions = []
@@ -137,7 +142,9 @@ class KiraGraphicsFoundationBackend {
             // Claim this frame's slot in each vertex stream before anything emits into
             // one; the frames still on the GPU keep theirs.
             uiBatchBeginFrameSlots(self.uiBatchPtr, self.graphics)
-            uiBatchPushRect(self.uiBatchPtr, 0.0, 0.0, intAsFloat(value: width), intAsFloat(value: height), bg, transparent, 0.0, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            // Metal capture and presentation passes already clear to this exact
+            // page colour. Emitting the same opaque fullscreen quad shaded every
+            // 4K pixel again and was invisible under any application content.
             return
         }
         self.encoder.drawSurface(
@@ -152,6 +159,31 @@ class KiraGraphicsFoundationBackend {
             0.0,
             0.0
         )
+        return
+    }
+
+    // Begin a HUD-only walk. The clip state is reset exactly as beginFrame resets
+    // it, but the batch is NOT rewound: the UI streams keep the vertices, counts and
+    // ring slots the last full frame left them, and everything emitted from here
+    // until endHudFrame lands in the HUD's own stream. Metal only — the immediate
+    // Sokol path has no retained batch to leave alone, so it redraws whole frames.
+    function beginHudFrame(width: Int, height: Int) {
+        self.clipDepth = 0
+        self.backdropDepth = 0
+        self.offscreenDepth = 0
+        self.clipStack = []
+        self.clipRadiusStack = []
+        self.clipRadius = 0.0
+        self.clipMinX = 0.0
+        self.clipMinY = 0.0
+        self.clipMaxX = intAsFloat(value: width)
+        self.clipMaxY = intAsFloat(value: height)
+        uiBatchBeginHud(self.uiBatchPtr, self.graphics)
+        return
+    }
+
+    function endHudFrame() {
+        uiBatchEndHud(self.uiBatchPtr)
         return
     }
 
@@ -274,7 +306,7 @@ class KiraGraphicsFoundationBackend {
     // cached per id) and emit its mode-2 quad on the Metal path. The Sokol path
     // composites through the immediate-2D textured pipeline (kg_ui_draw_texture),
     // which samples the registered render-target texture directly.
-    function drawTextureFields(bounds: borrow Rect, texture: Int, opacity: Float, radius: Float) {
+    function drawTextureFields(bounds: borrow Rect, texture: Int, secondaryTexture: Int, transition: Float, opacity: Float, radius: Float) {
         self.drewVisibleUi = true
         if texture <= 0 {
             return
@@ -284,11 +316,16 @@ class KiraGraphicsFoundationBackend {
             // apply a rounded-rect coverage mask, so `radius` is a no-op here; the
             // viewport composites square-cornered on Metal. The Sokol path below
             // rounds it. Rounding the Metal external quad is a separate task.
-            uiBatchSetExternalTexture(self.uiBatchPtr, self.graphics, U32(texture))
-            uiBatchPushExternalRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, opacity, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            uiBatchSetExternalTextures(self.uiBatchPtr, self.graphics, U32(texture), U32(secondaryTexture))
+            uiBatchPushExternalRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, opacity, transition, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
-        self.encoder.drawTexture(graphicsRect(bounds), texture, opacity, radius)
+        if secondaryTexture > 0 && transition > 0.0 {
+            self.encoder.drawTexture(graphicsRect(bounds), texture, opacity * (1.0 - transition), radius)
+            self.encoder.drawTexture(graphicsRect(bounds), secondaryTexture, opacity * transition, radius)
+        } else {
+            self.encoder.drawTexture(graphicsRect(bounds), texture, opacity, radius)
+        }
         return
     }
 
@@ -308,16 +345,18 @@ class KiraGraphicsFoundationBackend {
     }
 
     function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
-        drawTextFields(bounds, paint.content, paint.color, paint.size)
+        drawTextFields(bounds, paint.content, paint.color, paint.size, false)
         return
     }
 
-    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float) {
+    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, adaptiveInk: Bool) {
         self.drewVisibleUi = true
         if self.metalActive {
-            uiBatchPushText(self.uiBatchPtr, self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            uiBatchPushText(self.uiBatchPtr, self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma)
             return
         }
+        // The immediate-mode path has no capture to read: adaptive text keeps the
+        // colour it was authored with.
         foundationDrawText(content, bounds, color, size)
         return
     }
@@ -332,19 +371,23 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, edgeRefraction: Float, fill: borrow Color) {
+    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, edgeRefraction: Float, fill: borrow Color, glassMaterial: borrow FoundationGlassMaterial) {
         self.backdropDepth = self.backdropDepth + 1
-        // REAL liquid glass on the batched Metal path: split the quad stream so
-        // everything already emitted becomes the captured-and-blurred backdrop, and
-        // emit the refracting mode-3 quad in the surface's rounded shape. The
+        // REAL liquid glass on the batched Metal path: cut the quad stream so
+        // everything below this surface becomes the captured-and-blurred backdrop,
+        // and emit the refracting mode-3 quad in the surface's rounded shape. The
         // surface's own fill/border/children draw over it through the normal path.
+        // The bounds decide whether this surface can share the layer already open or
+        // is stacked on it and needs a capture of its own.
         if material == FoundationMaterial.LiquidGlass && self.metalActive {
             self.drewVisibleUi = true
-            uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics)
+            uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
+            self.glassWash = fill.a
+            self.glassWashLuma = fill.r * 0.299 + fill.g * 0.587 + fill.b * 0.114
             // The surface's fill IS the glass wash: the shader applies it
             // adaptively (stronger over dark backdrop, near invisible over light),
             // so the separate fill quad is suppressed for this surface.
-            uiBatchPushGlass(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            uiBatchPushGlass(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, glassMaterial)
             self.suppressNextFill = true
             return
         }
@@ -399,6 +442,10 @@ class KiraGraphicsFoundationBackend {
     function endBackdrop(bounds: borrow Rect) {
         if self.backdropDepth > 0 {
             self.backdropDepth = self.backdropDepth - 1
+        }
+        if self.backdropDepth == 0 {
+            self.glassWash = 0.0
+            self.glassWashLuma = 1.0
         }
         let ignored = bounds
         return

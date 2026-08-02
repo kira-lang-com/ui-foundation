@@ -62,13 +62,34 @@ function foundationRegionIndexByKey(regions: borrow [FoundationHitRegionRecord],
     return -1
 }
 
+// Is the pointer over the window's own content? The platform routes moves to the
+// app while system chrome sits over the frame — hovering Stage Manager's window
+// strip on macOS is the reproducible case — and those arrive carrying locations
+// outside the view. Hit testing them hovers whatever element happens to lie under
+// the overlay, so a position outside the viewport counts as over nothing at all.
+// Before the first event carrying a window size there is no viewport to test
+// against, and everything is treated as inside.
+function foundationPointerInsideViewport(ui: borrow FoundationUiContext, x: Float, y: Float) -> Bool {
+    let width = ui.viewport.width
+    let height = ui.viewport.height
+    if width <= 0.0 || height <= 0.0 {
+        return true
+    }
+    return x >= 0.0 && y >= 0.0 && x < width && y < height
+}
+
 // Update the cached pointer position, recompute the hovered region, fire hover
 // exit on the region left and hover enter on the region entered, and return the
 // hit region index (-1 when over nothing).
 function foundationUpdatePointer(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    // The position is recorded even when it lands outside: a drag reports its
+    // distance from the press point, and dragging past the window edge is normal.
     ui.pointerX = x
     ui.pointerY = y
-    let index = foundationHitRegionIndexAtPoint(regions, x, y)
+    var index = -1
+    if foundationPointerInsideViewport(ui, x, y) {
+        index = foundationHitRegionIndexAtPoint(regions, x, y)
+    }
     var newKey = 0
     if index >= 0 {
         newKey = regions[index].key
@@ -105,6 +126,11 @@ function foundationClearHover(ui: borrow mut FoundationUiContext, regions: borro
         if oldIndex >= 0 {
             regions[oldIndex].interaction.onHoverExit()
         }
+        // Something was actually hovered: widgets have to restyle, so force the
+        // rebuild here rather than on every exit. An exit with nothing hovered is
+        // a no-op — and one arrives for each move the pointer makes across another
+        // application's overlay, which must not cost a rebuild apiece.
+        ui.eventCount = ui.eventCount + 1
     }
     ui.hoveredKey = 0
     ui.pressedKey = 0
@@ -356,7 +382,11 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
     // rebuild), UI-visible state changes only on press/release/scroll/keys —
     // and every rebuild leaks native memory today (the leak the old live-resize
     // path exposed), so mouse motion must keep hitting the retained fast path.
-    if event.kind != GraphicsEventKind.PointerMoved {
+    // PointerExited joins the moves in NOT bumping it here: an overlay drawn over
+    // the window (Stage Manager) turns every move it swallows into an exit, and
+    // only the first one — the one that actually clears a hover — changes what the
+    // UI looks like. foundationClearHover bumps it in exactly that case.
+    if event.kind != GraphicsEventKind.PointerMoved && event.kind != GraphicsEventKind.PointerExited {
         state.ui.eventCount = state.ui.eventCount + 1
     }
     state.ui.modShift = event.modifiers.shift
