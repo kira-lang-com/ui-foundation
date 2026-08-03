@@ -1,0 +1,384 @@
+// Liquid glass, INTERIOR BAND pipeline: pixels at least 0.5pt inside the shape
+// boundary and within the lens/edge bands (the host emits band quads only over
+// that region). The math is the glass branch of `UiBatch.ksl` verbatim with the
+// border-shadow stack deleted: at 0.5pt inside, `distancePx > -0.5` is false, so
+// the full shader computes shadowAlpha = 0 and shadowRgb = 0 for every pixel
+// this pipeline can receive — omitting the block changes no pixel, it only
+// releases the registers the block's three SDFs and composite pin, which is
+// what throttles occupancy for every fragment the full pipeline shades.
+//
+// KSL has no include mechanism yet, so the quad record, vertex stage and shared
+// helpers are duplicated from `UiBatch.ksl`; a change there lands here too.
+
+type UiQuad {
+    let posX0: Float
+    let posY0: Float
+    let posX1: Float
+    let posY1: Float
+    let pxX0: Float
+    let pxY0: Float
+    let pxX1: Float
+    let pxY1: Float
+    let localX0: Float
+    let localY0: Float
+    let localX1: Float
+    let localY1: Float
+    let halfW: Float
+    let halfH: Float
+    let radius: Float
+    let borderWidth: Float
+    let mode: Float
+    let edgeRefraction: Float
+    let fillR: Float
+    let fillG: Float
+    let fillB: Float
+    let fillA: Float
+    let borderR: Float
+    let borderG: Float
+    let borderB: Float
+    let borderA: Float
+    let clipMinX: Float
+    let clipMinY: Float
+    let clipMaxX: Float
+    let clipMaxY: Float
+    let edgeStrokeStrength: Float
+    let edgeStrokeDarken: Float
+    let edgeStrokePeak: Float
+    let edgeStrokeFade: Float
+    let sheenStrength: Float
+    let lensMaxBend: Float
+    let refractionReach: Float
+    let blurNearSplit: Float
+    let borderSpread: Float
+    let borderSideOffset: Float
+    let borderSideSpread: Float
+    let borderGrey: Float
+    let borderSideGrey: Float
+    let innerRimStrength: Float
+    let innerRimWidth: Float
+    let washBlend: Float
+    let washUpperR: Float
+    let washUpperG: Float
+    let washUpperB: Float
+    let washUpperAlpha: Float
+    let washUpperBlend: Float
+    let materialSpare0: Float
+    let materialSpare1: Float
+    let materialSpare2: Float
+}
+
+type VertexIn {
+    @builtin(vertex_index)
+    let vid: UInt
+}
+
+type VertexOut {
+    @builtin(position)
+    let clip_position: Float4
+
+    let local: Float2
+    let px: Float2
+    let hsize: Float2
+    let radius: Float
+    let borderWidth: Float
+    let mode: Float
+    let edgeRefraction: Float
+    let fill: Float4
+    let border: Float4
+    let clip: Float4
+    let edge: Float4
+    let lens: Float4
+    let borderStack: Float4
+    let borderInk: Float4
+    let wash: Float4
+    let washBlend: Float2
+}
+
+type FragmentOut {
+    let color: Float4
+}
+
+function sheenStart() -> Float { return 2.0 }
+function sheenEnd() -> Float { return 5.0 }
+function washCeiling() -> Float { return 0.9 }
+function blurEdgeStart() -> Float { return 2.0 }
+function blurEdgeEnd() -> Float { return 22.0 }
+
+function absolute(value: Float) -> Float {
+    if value < 0.0 { return 0.0 - value }
+    return value
+}
+
+function minimum(left: Float, right: Float) -> Float {
+    if left < right { return left }
+    return right
+}
+
+function maximum(left: Float, right: Float) -> Float {
+    if left > right { return left }
+    return right
+}
+
+function blendChannel(base: Float, layer: Float, mode: Float) -> Float {
+    if mode < 0.5 { return layer }
+    if mode < 1.5 { return clamp(base + layer, 0.0, 1.0) }
+    if mode < 2.5 {
+        if layer >= 1.0 {
+            if base > 0.0 { return 1.0 }
+            return 0.0
+        }
+        return minimum(1.0, base / (1.0 - layer))
+    }
+    if mode < 3.5 {
+        if layer <= 0.5 { return 2.0 * base * layer }
+        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
+    }
+    if mode < 4.5 {
+        if base <= 0.5 { return 2.0 * base * layer }
+        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
+    }
+    if mode < 5.5 { return maximum(base, layer) }
+    if mode < 6.5 { return minimum(base, layer) }
+    return base * layer
+}
+
+function blendLayer(base: Float3, layer: Float3, alpha: Float, mode: Float) -> Float3 {
+    if alpha <= 0.0 { return base }
+    if mode < 0.5 { return mix(base, layer, alpha) }
+    if mode < 1.5 {
+        let added = Float3(
+            clamp(base.x + layer.x, 0.0, 1.0),
+            clamp(base.y + layer.y, 0.0, 1.0),
+            clamp(base.z + layer.z, 0.0, 1.0)
+        )
+        return mix(base, added, alpha)
+    }
+    if mode >= 4.5 {
+        if mode < 5.5 {
+            let lightened = Float3(
+                maximum(base.x, layer.x),
+                maximum(base.y, layer.y),
+                maximum(base.z, layer.z)
+            )
+            return mix(base, lightened, alpha)
+        }
+        if mode < 6.5 {
+            let darkened = Float3(
+                minimum(base.x, layer.x),
+                minimum(base.y, layer.y),
+                minimum(base.z, layer.z)
+            )
+            return mix(base, darkened, alpha)
+        }
+        return mix(base, base * layer, alpha)
+    }
+    let blended = Float3(
+        blendChannel(base.x, layer.x, mode),
+        blendChannel(base.y, layer.y, mode),
+        blendChannel(base.z, layer.z, mode)
+    )
+    return mix(base, blended, alpha)
+}
+
+function sdRound(point: Float2, halfSize: Float2, radius: Float) -> Float {
+    let q = Float2(
+        absolute(point.x) - halfSize.x + radius,
+        absolute(point.y) - halfSize.y + radius
+    )
+    let outside = Float2(maximum(q.x, 0.0), maximum(q.y, 0.0))
+    return minimum(maximum(q.x, q.y), 0.0) + length(outside) - radius
+}
+
+function sdRoundNormal(point: Float2, halfSize: Float2, radius: Float) -> Float2 {
+    let sx = -1.0
+    if point.x >= 0.0 { sx = 1.0 }
+    let sy = -1.0
+    if point.y >= 0.0 { sy = 1.0 }
+    let q = Float2(
+        absolute(point.x) - halfSize.x + radius,
+        absolute(point.y) - halfSize.y + radius
+    )
+    let ox = maximum(q.x, 0.0)
+    let oy = maximum(q.y, 0.0)
+    if ox > 0.0 {
+        if oy > 0.0 {
+            return normalize(Float2(ox * sx, oy * sy) + Float2(0.0001, 0.0))
+        }
+        return Float2(sx, 0.0)
+    }
+    if oy > 0.0 {
+        return Float2(0.0, sy)
+    }
+    if q.x > q.y {
+        return Float2(sx, 0.0)
+    }
+    return Float2(0.0, sy)
+}
+
+function refractionCurve(value: Float) -> Float {
+    let e = 2.718281828459045
+    return 1.0 - 2.3 * pow(5.2 * e, -6.9 * value - 0.7)
+}
+
+shader UiGlassBand {
+    group Batch {
+        storage read verts: [UiQuad]
+        texture atlas: Texture2d
+        sampler atlasSmp: Sampler
+        texture external: Texture2d
+        sampler externalSmp: Sampler
+        texture backdrop: Texture2d
+        sampler backdropSmp: Sampler
+        texture nearBlur: Texture2d
+        sampler nearSmp: Sampler
+    }
+
+    vertex {
+        input VertexIn
+        output VertexOut
+
+        function entry(input: VertexIn) -> VertexOut {
+            let v = verts[input.vid / UInt(4)]
+            let corner = input.vid % UInt(4)
+            let right = Float((corner + UInt(1)) % UInt(4) / UInt(2))
+            let bottom = Float(corner / UInt(2))
+            let out: VertexOut
+            out.clip_position = Float4(
+                mix(v.posX0, v.posX1, right),
+                mix(v.posY0, v.posY1, bottom),
+                0.0,
+                1.0,
+            )
+            out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
+            out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
+            out.hsize = Float2(v.halfW, v.halfH)
+            out.radius = v.radius
+            out.borderWidth = v.borderWidth
+            out.mode = v.mode
+            out.edgeRefraction = v.edgeRefraction
+            out.fill = Float4(v.fillR, v.fillG, v.fillB, v.fillA)
+            out.border = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
+            out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
+            out.edge = Float4(v.edgeStrokeStrength, v.edgeStrokeDarken, v.edgeStrokePeak, v.edgeStrokeFade)
+            out.lens = Float4(v.sheenStrength, v.lensMaxBend, v.refractionReach, v.blurNearSplit)
+            out.borderStack = Float4(v.borderSpread, v.borderSideOffset, v.borderSideSpread, v.borderGrey)
+            out.borderInk = Float4(v.borderGrey, v.borderSideGrey, v.innerRimStrength, v.innerRimWidth)
+            out.wash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperAlpha)
+            out.washBlend = Float2(v.washBlend, v.washUpperBlend)
+            return out
+        }
+    }
+
+    fragment {
+        input VertexOut
+        output FragmentOut
+
+        function entry(input: VertexOut) -> FragmentOut {
+            let out: FragmentOut
+
+            if input.px.x < input.clip.x {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.y < input.clip.y {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.x > input.clip.z {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.y > input.clip.w {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+
+
+            let distancePx = sdRound(input.local, input.hsize, input.radius)
+            let shadowAlpha = 0.0
+            let shadowRgb = Float3(0.0, 0.0, 0.0)
+            let cov = clamp(0.5 - distancePx, 0.0, 1.0)
+            let minHalf = maximum(minimum(input.hsize.x, input.hsize.y), 1.0)
+            let inside = maximum(0.0 - distancePx, 0.0)
+
+            let gp = input.local / input.hsize
+            let uvFrag = Float2(
+                input.border.x + gp.x * input.border.z,
+                input.border.y + gp.y * input.border.w
+            )
+            let n = Float2(0.0, -1.0)
+            let coord = uvFrag
+            if inside < 72.0 {
+                let ref = refractionCurve(inside / maximum(input.lens.z, 1.0))
+                n = sdRoundNormal(input.local, input.hsize, input.radius)
+                let bend = (1.0 - ref) * minimum(minHalf, input.lens.y)
+                let uvScale = Float2(input.border.z / input.hsize.x, input.border.w / input.hsize.y)
+                coord = uvFrag - n * bend * uvScale
+            }
+
+            let dial = clamp(input.fill.w, 0.0, 1.0)
+            if inside < blurEdgeEnd() {
+                dial = dial * smoothstep(blurEdgeStart(), blurEdgeEnd(), inside)
+            }
+            let split = clamp(input.lens.w, 0.01, 0.99)
+            // Taps hoisted out of the dial branches: sampling inside
+            // non-uniform control flow costs far more than the extra fetch,
+            // and the selection arithmetic below reproduces each branch's
+            // expression exactly for that branch's dial range.
+            let sharpTap = sample(external, externalSmp, coord)
+            let nearTap = sample(nearBlur, nearSmp, coord)
+            let softTap = sample(backdrop, backdropSmp, coord)
+            let rgb = Float3(0.0, 0.0, 0.0)
+            if dial <= 0.0 {
+                rgb = Float3(sharpTap.x, sharpTap.y, sharpTap.z)
+            } else if dial >= 1.0 {
+                rgb = Float3(softTap.x, softTap.y, softTap.z)
+            } else if dial < split {
+                rgb = mix(
+                    Float3(sharpTap.x, sharpTap.y, sharpTap.z),
+                    Float3(nearTap.x, nearTap.y, nearTap.z),
+                    dial / split
+                )
+            } else {
+                rgb = mix(
+                    Float3(nearTap.x, nearTap.y, nearTap.z),
+                    Float3(softTap.x, softTap.y, softTap.z),
+                    (dial - split) / (1.0 - split)
+                )
+            }
+
+            let washA = clamp(input.borderWidth, 0.0, washCeiling())
+            rgb = blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washBlend.x)
+            let washUpperA = clamp(input.wash.w, 0.0, 1.0)
+            rgb = blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washBlend.y)
+
+            let lighting = clamp(input.edgeRefraction, 0.0, 2.0)
+            let peak = input.edge.z
+            let stroke = 0.0
+            if inside < maximum(input.edge.w, peak + 0.01) {
+                stroke = smoothstep(0.0, peak, inside) * (1.0 - smoothstep(peak, maximum(input.edge.w, peak + 0.01), inside)) * input.edge.x * lighting
+            }
+            let sheen = 0.0
+            if inside < sheenEnd() {
+                sheen = (1.0 - smoothstep(sheenStart(), sheenEnd(), inside)) * input.lens.x * clamp(0.0 - n.y, 0.0, 1.0) * lighting
+            }
+            rgb = mix(rgb, rgb * input.edge.y, stroke)
+            rgb = rgb + Float3(sheen, sheen, sheen)
+
+            let rimWidth = input.borderInk.w
+            let rimInk = input.borderInk.y
+            let rim = 0.0
+            if inside < rimWidth {
+                rim = clamp(rimWidth - inside, 0.0, 1.0) * input.borderInk.z
+            }
+            rgb = mix(rgb, Float3(rimInk, rimInk, rimInk), rim)
+
+            let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
+            let over = 1.0 - cov
+            let outRgb = glassRgb * cov + shadowRgb * over
+            let outAlpha = cov + shadowAlpha * over
+            out.color = Float4(outRgb.x, outRgb.y, outRgb.z, outAlpha)
+            return out
+        }
+    }
+}

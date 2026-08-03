@@ -1,0 +1,353 @@
+// Liquid glass, LENS-BAND pipeline: pixels past the edge effects but still
+// inside the lens's reach — at least ~23pt inside the shape (past the 22pt
+// blur-edge fade, the 5pt sheen, the edge stroke and the inner rim) and below
+// the 72pt limit where the bend goes flat. Over that region `UiBatch.ksl`'s
+// glass branch provably reduces to: coverage exactly 1, no shadow, the lens
+// displacement, the backdrop taps and the two washes. This shader is those
+// expressions verbatim, with the per-quad clamps folded into the vertex stage
+// (they act on per-quad constants, so folding changes no value) and the unused
+// varyings dropped — the fragment's register and interpolant footprint is what
+// sets GPU occupancy, measured at ~3x between the full glass pipeline and the
+// slim core.
+//
+// The host guarantees the region (uiBatchPushGlass frame tiling); the emitted
+// bounds add the corner radius on corner pieces because the SDF's interior
+// distance at a rectangular inset t is only t - radius on the corner diagonal.
+// KSL has no include mechanism yet, so shared declarations are duplicated from
+// `UiBatch.ksl`.
+
+type UiQuad {
+    let posX0: Float
+    let posY0: Float
+    let posX1: Float
+    let posY1: Float
+    let pxX0: Float
+    let pxY0: Float
+    let pxX1: Float
+    let pxY1: Float
+    let localX0: Float
+    let localY0: Float
+    let localX1: Float
+    let localY1: Float
+    let halfW: Float
+    let halfH: Float
+    let radius: Float
+    let borderWidth: Float
+    let mode: Float
+    let edgeRefraction: Float
+    let fillR: Float
+    let fillG: Float
+    let fillB: Float
+    let fillA: Float
+    let borderR: Float
+    let borderG: Float
+    let borderB: Float
+    let borderA: Float
+    let clipMinX: Float
+    let clipMinY: Float
+    let clipMaxX: Float
+    let clipMaxY: Float
+    let edgeStrokeStrength: Float
+    let edgeStrokeDarken: Float
+    let edgeStrokePeak: Float
+    let edgeStrokeFade: Float
+    let sheenStrength: Float
+    let lensMaxBend: Float
+    let refractionReach: Float
+    let blurNearSplit: Float
+    let borderSpread: Float
+    let borderSideOffset: Float
+    let borderSideSpread: Float
+    let borderGrey: Float
+    let borderSideGrey: Float
+    let innerRimStrength: Float
+    let innerRimWidth: Float
+    let washBlend: Float
+    let washUpperR: Float
+    let washUpperG: Float
+    let washUpperB: Float
+    let washUpperAlpha: Float
+    let washUpperBlend: Float
+    let materialSpare0: Float
+    let materialSpare1: Float
+    let materialSpare2: Float
+}
+
+type VertexIn {
+    @builtin(vertex_index)
+    let vid: UInt
+}
+
+type VertexOut {
+    @builtin(position)
+    let clip_position: Float4
+
+    let local: Float2
+    let px: Float2
+    let clip: Float4
+    // Shape: half size in xy, corner radius in z, lower wash alpha in w.
+    let shape: Float4
+    // The uv transform: centre in xy, half extent in zw (border reuse).
+    let uvmap: Float4
+    // x: lens max bend, y: refraction reach, z: near/far split, w: blur dial.
+    let lensPack: Float4
+    // Lower wash colour, and its blend mode in w.
+    let fillWash: Float4
+    // Upper wash colour: blend mode in w; its alpha rides in upperA.
+    let upperWash: Float4
+    let upperA: Float
+}
+
+type FragmentOut {
+    let color: Float4
+}
+
+function washCeiling() -> Float { return 0.9 }
+
+function absolute(value: Float) -> Float {
+    if value < 0.0 { return 0.0 - value }
+    return value
+}
+
+function minimum(left: Float, right: Float) -> Float {
+    if left < right { return left }
+    return right
+}
+
+function maximum(left: Float, right: Float) -> Float {
+    if left > right { return left }
+    return right
+}
+
+function blendChannel(base: Float, layer: Float, mode: Float) -> Float {
+    if mode < 0.5 { return layer }
+    if mode < 1.5 { return clamp(base + layer, 0.0, 1.0) }
+    if mode < 2.5 {
+        if layer >= 1.0 {
+            if base > 0.0 { return 1.0 }
+            return 0.0
+        }
+        return minimum(1.0, base / (1.0 - layer))
+    }
+    if mode < 3.5 {
+        if layer <= 0.5 { return 2.0 * base * layer }
+        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
+    }
+    if mode < 4.5 {
+        if base <= 0.5 { return 2.0 * base * layer }
+        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
+    }
+    if mode < 5.5 { return maximum(base, layer) }
+    if mode < 6.5 { return minimum(base, layer) }
+    return base * layer
+}
+
+function blendLayer(base: Float3, layer: Float3, alpha: Float, mode: Float) -> Float3 {
+    if alpha <= 0.0 { return base }
+    if mode < 0.5 { return mix(base, layer, alpha) }
+    if mode < 1.5 {
+        let added = Float3(
+            clamp(base.x + layer.x, 0.0, 1.0),
+            clamp(base.y + layer.y, 0.0, 1.0),
+            clamp(base.z + layer.z, 0.0, 1.0)
+        )
+        return mix(base, added, alpha)
+    }
+    if mode >= 4.5 {
+        if mode < 5.5 {
+            let lightened = Float3(
+                maximum(base.x, layer.x),
+                maximum(base.y, layer.y),
+                maximum(base.z, layer.z)
+            )
+            return mix(base, lightened, alpha)
+        }
+        if mode < 6.5 {
+            let darkened = Float3(
+                minimum(base.x, layer.x),
+                minimum(base.y, layer.y),
+                minimum(base.z, layer.z)
+            )
+            return mix(base, darkened, alpha)
+        }
+        return mix(base, base * layer, alpha)
+    }
+    let blended = Float3(
+        blendChannel(base.x, layer.x, mode),
+        blendChannel(base.y, layer.y, mode),
+        blendChannel(base.z, layer.z, mode)
+    )
+    return mix(base, blended, alpha)
+}
+
+function sdRound(point: Float2, halfSize: Float2, radius: Float) -> Float {
+    let q = Float2(
+        absolute(point.x) - halfSize.x + radius,
+        absolute(point.y) - halfSize.y + radius
+    )
+    let outside = Float2(maximum(q.x, 0.0), maximum(q.y, 0.0))
+    return minimum(maximum(q.x, q.y), 0.0) + length(outside) - radius
+}
+
+function sdRoundNormal(point: Float2, halfSize: Float2, radius: Float) -> Float2 {
+    let sx = -1.0
+    if point.x >= 0.0 { sx = 1.0 }
+    let sy = -1.0
+    if point.y >= 0.0 { sy = 1.0 }
+    let q = Float2(
+        absolute(point.x) - halfSize.x + radius,
+        absolute(point.y) - halfSize.y + radius
+    )
+    let ox = maximum(q.x, 0.0)
+    let oy = maximum(q.y, 0.0)
+    if ox > 0.0 {
+        if oy > 0.0 {
+            return normalize(Float2(ox * sx, oy * sy) + Float2(0.0001, 0.0))
+        }
+        return Float2(sx, 0.0)
+    }
+    if oy > 0.0 {
+        return Float2(0.0, sy)
+    }
+    if q.x > q.y {
+        return Float2(sx, 0.0)
+    }
+    return Float2(0.0, sy)
+}
+
+function refractionCurve(value: Float) -> Float {
+    let e = 2.718281828459045
+    return 1.0 - 2.3 * pow(5.2 * e, -6.9 * value - 0.7)
+}
+
+shader UiGlassLens {
+    group Batch {
+        storage read verts: [UiQuad]
+        texture atlas: Texture2d
+        sampler atlasSmp: Sampler
+        texture external: Texture2d
+        sampler externalSmp: Sampler
+        texture backdrop: Texture2d
+        sampler backdropSmp: Sampler
+        texture nearBlur: Texture2d
+        sampler nearSmp: Sampler
+    }
+
+    vertex {
+        input VertexIn
+        output VertexOut
+
+        function entry(input: VertexIn) -> VertexOut {
+            let v = verts[input.vid / UInt(4)]
+            let corner = input.vid % UInt(4)
+            let right = Float((corner + UInt(1)) % UInt(4) / UInt(2))
+            let bottom = Float(corner / UInt(2))
+            let out: VertexOut
+            out.clip_position = Float4(
+                mix(v.posX0, v.posX1, right),
+                mix(v.posY0, v.posY1, bottom),
+                0.0,
+                1.0,
+            )
+            out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
+            out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
+            out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
+            // The clamps below act on per-quad constants, so folding them here
+            // yields the exact values the full shader computes per fragment.
+            out.shape = Float4(v.halfW, v.halfH, v.radius, clamp(v.borderWidth, 0.0, washCeiling()))
+            out.uvmap = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
+            out.lensPack = Float4(
+                v.lensMaxBend,
+                v.refractionReach,
+                clamp(v.blurNearSplit, 0.01, 0.99),
+                clamp(v.fillA, 0.0, 1.0),
+            )
+            out.fillWash = Float4(v.fillR, v.fillG, v.fillB, v.washBlend)
+            out.upperWash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperBlend)
+            out.upperA = clamp(v.washUpperAlpha, 0.0, 1.0)
+            return out
+        }
+    }
+
+    fragment {
+        input VertexOut
+        output FragmentOut
+
+        function entry(input: VertexOut) -> FragmentOut {
+            let out: FragmentOut
+
+            if input.px.x < input.clip.x {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.y < input.clip.y {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.x > input.clip.z {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if input.px.y > input.clip.w {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+
+
+            let hsize = Float2(input.shape.x, input.shape.y)
+            let radius = input.shape.z
+            let distancePx = sdRound(input.local, hsize, radius)
+            let minHalf = maximum(minimum(hsize.x, hsize.y), 1.0)
+            let inside = maximum(0.0 - distancePx, 0.0)
+
+            let gp = input.local / hsize
+            let uvFrag = Float2(
+                input.uvmap.x + gp.x * input.uvmap.z,
+                input.uvmap.y + gp.y * input.uvmap.w
+            )
+            let coord = uvFrag
+            if inside < 72.0 {
+                let ref = refractionCurve(inside / maximum(input.lensPack.y, 1.0))
+                let n = sdRoundNormal(input.local, hsize, radius)
+                let bend = (1.0 - ref) * minimum(minHalf, input.lensPack.x)
+                let uvScale = Float2(input.uvmap.z / hsize.x, input.uvmap.w / hsize.y)
+                coord = uvFrag - n * bend * uvScale
+            }
+
+            let dial = input.lensPack.w
+            let split = input.lensPack.z
+            // Taps hoisted out of the dial branches: sampling inside
+            // non-uniform control flow costs far more than the extra fetch,
+            // and the selection arithmetic below reproduces each branch's
+            // expression exactly for that branch's dial range.
+            let sharpTap = sample(external, externalSmp, coord)
+            let nearTap = sample(nearBlur, nearSmp, coord)
+            let softTap = sample(backdrop, backdropSmp, coord)
+            let rgb = Float3(0.0, 0.0, 0.0)
+            if dial <= 0.0 {
+                rgb = Float3(sharpTap.x, sharpTap.y, sharpTap.z)
+            } else if dial >= 1.0 {
+                rgb = Float3(softTap.x, softTap.y, softTap.z)
+            } else if dial < split {
+                rgb = mix(
+                    Float3(sharpTap.x, sharpTap.y, sharpTap.z),
+                    Float3(nearTap.x, nearTap.y, nearTap.z),
+                    dial / split
+                )
+            } else {
+                rgb = mix(
+                    Float3(nearTap.x, nearTap.y, nearTap.z),
+                    Float3(softTap.x, softTap.y, softTap.z),
+                    (dial - split) / (1.0 - split)
+                )
+            }
+
+            rgb = blendLayer(rgb, Float3(input.fillWash.x, input.fillWash.y, input.fillWash.z), input.shape.w, input.fillWash.w)
+            rgb = blendLayer(rgb, Float3(input.upperWash.x, input.upperWash.y, input.upperWash.z), input.upperA, input.upperWash.w)
+
+            let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
+            out.color = Float4(glassRgb.x, glassRgb.y, glassRgb.z, 1.0)
+            return out
+        }
+    }
+}

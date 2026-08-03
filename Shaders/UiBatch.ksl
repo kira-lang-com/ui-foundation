@@ -449,8 +449,19 @@ shader UiBatch {
                 return out
             }
 
-            // --- mode 3: liquid glass ---
+            // --- mode 3: liquid glass — LIVES IN ITS OWN PIPELINES ---
+            // Glass region patches route to UiGlassFull / UiGlassBand /
+            // UiGlassCore in uiBatchDrawStream, so no glass quad reaches this
+            // shader; a stray one draws transparent. The branch body below is
+            // compiled out (`if false`) rather than deleted: it stays the
+            // reference copy of the math, while its static register allocation
+            // — which taxed every chrome fragment this pipeline shades — is
+            // released.
             if input.mode > 2.5 {
+                out.color = Float4(0.0, 0.0, 0.0, 0.0)
+                return out
+            }
+            if false {
                 let distancePx = sdRound(input.local, input.hsize, input.radius)
 
                 // The document's three enabled shadows (see the constants above).
@@ -579,7 +590,18 @@ shader UiBatch {
                 }
                 let split = clamp(input.lens.w, 0.01, 0.99)
                 let rgb = Float3(0.0, 0.0, 0.0)
-                if dial < split {
+                // At the dial's exact endpoints the cross-fade weight is 0 or 1
+                // and the other arm's tap contributes nothing — skip it. Clear
+                // glass (dial 0) and full frost (dial 1) are the two states
+                // surfaces actually rest in, so most glass pixels take one tap;
+                // the edge fade and mid-dial pixels keep the exact two-tap mix.
+                if dial <= 0.0 {
+                    let sharpTap = sample(external, externalSmp, coord)
+                    rgb = Float3(sharpTap.x, sharpTap.y, sharpTap.z)
+                } else if dial >= 1.0 {
+                    let softTap = sample(backdrop, backdropSmp, coord)
+                    rgb = Float3(softTap.x, softTap.y, softTap.z)
+                } else if dial < split {
                     let sharpTap = sample(external, externalSmp, coord)
                     let nearTap = sample(nearBlur, nearSmp, coord)
                     rgb = mix(
