@@ -112,6 +112,12 @@ class KiraGraphicsFoundationBackend {
     // capture underneath does not contain.
     var glassWash: Float = 0.0
     var glassWashLuma: Float = 1.0
+    // The enclosing surfaces' washes, so glass inside glass restores what it was
+    // sitting on when it closes rather than dropping the whole subtree back to bare
+    // capture. Pushed by every beginBackdrop and popped by every endBackdrop, glass
+    // or not, so the two stay balanced whatever the material.
+    var glassWashStack: [Float] = []
+    var glassWashLumaStack: [Float] = []
 
     function beginFrame(width: Int, height: Int) {
         self.hitRegions = []
@@ -120,6 +126,10 @@ class KiraGraphicsFoundationBackend {
         self.offscreenDepth = 0
         self.drewVisibleUi = false
         self.clipStack = []
+        self.glassWash = 0.0
+        self.glassWashLuma = 1.0
+        self.glassWashStack = []
+        self.glassWashLumaStack = []
         self.clipMinX = 0.0
         self.clipMinY = 0.0
         self.clipMaxX = intAsFloat(value: width)
@@ -174,6 +184,10 @@ class KiraGraphicsFoundationBackend {
         self.clipStack = []
         self.clipRadiusStack = []
         self.clipRadius = 0.0
+        self.glassWash = 0.0
+        self.glassWashLuma = 1.0
+        self.glassWashStack = []
+        self.glassWashLumaStack = []
         self.clipMinX = 0.0
         self.clipMinY = 0.0
         self.clipMaxX = intAsFloat(value: width)
@@ -373,6 +387,8 @@ class KiraGraphicsFoundationBackend {
 
     function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, edgeRefraction: Float, fill: borrow Color, glassMaterial: borrow FoundationGlassMaterial) {
         self.backdropDepth = self.backdropDepth + 1
+        self.glassWashStack.append(self.glassWash)
+        self.glassWashLumaStack.append(self.glassWashLuma)
         // REAL liquid glass on the batched Metal path: cut the quad stream so
         // everything below this surface becomes the captured-and-blurred backdrop,
         // and emit the refracting mode-3 quad in the surface's rounded shape. The
@@ -382,8 +398,38 @@ class KiraGraphicsFoundationBackend {
         if material == FoundationMaterial.LiquidGlass && self.metalActive {
             self.drewVisibleUi = true
             uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
-            self.glassWash = fill.a
-            self.glassWashLuma = fill.r * 0.299 + fill.g * 0.587 + fill.b * 0.114
+            // What adaptive text has to measure is the WHOLE wash, both fills and
+            // their blend modes — not the lower fill's opacity, which is what this
+            // used to hand over. The platform's light materials put nearly all of
+            // their brightness in the upper colour-dodge fill: Thick is 34% linear
+            // dodge under 84% colour dodge, so the surface never falls below 0.89
+            // luma, while its lower alpha alone claims 0.34. Text over a dark photo
+            // then measured 0.54, landed in the middle of the ink ramp, and came out
+            // grey — or white, on a surface that is very nearly white.
+            //
+            // The equivalent normal-blend layer is exactly that measurement, and it
+            // is the same one the scheme crossfade already travels along. For a white
+            // or black wash — every entry in both tables — the fit is not an
+            // approximation at all: those blends are affine in the backdrop.
+            let inkWash = foundationTintStackEquivalent(FoundationTintStack {
+                lower: FoundationTintLayer {
+                    color: fill
+                    alpha: fill.a
+                    blend: foundationBlendModeFromId(glassMaterial.washBlend)
+                }
+                upper: FoundationTintLayer {
+                    color: Color {
+                        r: glassMaterial.washUpperR
+                        g: glassMaterial.washUpperG
+                        b: glassMaterial.washUpperB
+                        a: 1.0
+                    }
+                    alpha: glassMaterial.washUpperAlpha
+                    blend: foundationBlendModeFromId(glassMaterial.washUpperBlend)
+                }
+            })
+            self.glassWash = inkWash.alpha
+            self.glassWashLuma = inkWash.color.r * 0.299 + inkWash.color.g * 0.587 + inkWash.color.b * 0.114
             // The surface's fill IS the glass wash: the shader applies it
             // adaptively (stronger over dark backdrop, near invisible over light),
             // so the separate fill quad is suppressed for this surface.
@@ -443,8 +489,18 @@ class KiraGraphicsFoundationBackend {
         if self.backdropDepth > 0 {
             self.backdropDepth = self.backdropDepth - 1
         }
-        if self.backdropDepth == 0 {
+        let n = self.glassWashStack.count
+        if n >= 1 {
+            self.glassWash = self.glassWashStack[n - 1]
+            self.glassWashStack = foundationPopOneFloat(self.glassWashStack)
+        } else {
             self.glassWash = 0.0
+        }
+        let ln = self.glassWashLumaStack.count
+        if ln >= 1 {
+            self.glassWashLuma = self.glassWashLumaStack[ln - 1]
+            self.glassWashLumaStack = foundationPopOneFloat(self.glassWashLumaStack)
+        } else {
             self.glassWashLuma = 1.0
         }
         let ignored = bounds

@@ -2818,6 +2818,14 @@ function uiBatchPushIcon(
             let stride = uiBatchFloatsPerQuad()
             if state.quadCount < uiBatchCapacityQuads() && !uiPtrIsNull(state.contentsPtr) {
                 let base = state.frameBase + state.quadCount * stride
+                // Mode 1, recorded for the draw path — see the same note in the
+                // glyph emitter. An icon that inherits a stale glass code is drawn
+                // through a glass pipeline and disappears.
+                if state.quadCount < state.streams[state.streamIndex].quadModes.count {
+                    state.streams[state.streamIndex].quadModes[state.quadCount] = 10
+                } else {
+                    state.streams[state.streamIndex].quadModes.append(10)
+                }
                 uiWriteQuadRecord(
                     state.contentsPtr, base,
                     gx, gy, gx + iconW, gy + iconH,
@@ -3114,6 +3122,20 @@ function uiBatchPushText(
                         let v1 = (Float(atlasY + ghpx) + (y1 - bottomDev) * overs) / atlasW
                         if state.quadCount < uiBatchCapacityQuads() && !uiPtrIsNull(state.contentsPtr) {
                             let base = state.frameBase + state.quadCount * stride
+                            // The mode this quad is, recorded where the draw path
+                            // looks it up. uiWriteQuad does this for every quad that
+                            // goes through it; the glyph path writes the record
+                            // itself and has to do the same, or the slot keeps
+                            // whatever the last frame to use this index put there —
+                            // and a glyph inheriting a glass region code is drawn
+                            // through a glass pipeline, which is where the black
+                            // boxes and vanished letters came from.
+                            let glyphModeCode = Int(glyphMode * 10.0)
+                            if state.quadCount < state.streams[state.streamIndex].quadModes.count {
+                                state.streams[state.streamIndex].quadModes[state.quadCount] = glyphModeCode
+                            } else {
+                                state.streams[state.streamIndex].quadModes.append(glyphModeCode)
+                            }
                             // Mode 4 reuses the fields it has no other use for:
                             // borderWidth is the wash strength, edgeRefraction its
                             // colour's luminance, border.rg the run's sample point
@@ -3264,7 +3286,11 @@ function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, 
             // A copy quad presents cached interior pixels — but only when the
             // cache provably holds them; otherwise it renders live through
             // the band pipeline, which is exact for every interior region.
-            let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTextureId == 0 || !state.glassCacheCleared || state.glassCacheRenderedKey != state.glassCacheKeyNow
+            // A cache sized for a different drawable is not this frame's cache,
+            // whatever its key says: the key describes the blur inputs, and the
+            // dimensions are the other half of the proof.
+            let copySized = state.glassCacheW == Int(state.viewportW * state.scale) && state.glassCacheH == Int(state.viewportH * state.scale)
+            let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTextureId == 0 || !state.glassCacheCleared || !copySized || state.glassCacheRenderedKey != state.glassCacheKeyNow
             if glassSplit {
                 if modeCode == 30 { runPipelineId = state.glassFullPipelineId }
                 if modeCode == 31 {
@@ -3950,8 +3976,18 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
         if state.glassCacheCleared { print(1) } else { print(0) }
         if state.glassCacheRenderedKey == state.glassCacheKeyNow { print(1) } else { print(0) }
     }
-    if state.glassBackdropStatic && state.glassCacheRangeCount > 0 {
+    // Sized BEFORE anything asks whether the cache may be copied, and whether or
+    // not this frame has dirty interiors to render into it. The drawable changes
+    // size without any glass quad being re-pushed — a resize while the retained
+    // stream replays leaves nothing dirty — and a cache still holding the old
+    // dimensions is sampled by the new geometry's uv, which clamps to the edge and
+    // presents black slabs. Re-creating it here drops `glassCacheCleared`, so every
+    // copy routes to the live band pipeline until a rebuild refills the cache at
+    // the size the drawable is now.
+    if state.glassBackdropStatic {
         uiGlassEnsureInteriorCache(state, graphics)
+    }
+    if state.glassBackdropStatic && state.glassCacheRangeCount > 0 {
         if state.glassCacheTextureId != 0 {
             var cacheEncoder = frame.beginRenderPass(uiGlassInteriorCachePass(state))
             uiGlassDrawCacheRanges(state, cacheEncoder)

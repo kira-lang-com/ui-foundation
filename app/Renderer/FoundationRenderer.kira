@@ -27,14 +27,20 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
     match view.kind {
         Surface -> {
             let frame = layoutFrame(tree, nodeIndex)
-            if view.material != FoundationMaterial.Flat || view.effects.count > 0 {
+            // The backdrop is OPEN for the whole subtree, not just for its own
+            // effects. What a surface washes over is state its content has to read —
+            // adaptive text measures the material it is sitting on — and closing the
+            // backdrop before descending handed every child the state of a surface
+            // that was no longer there. The close moves below the children instead,
+            // which is where the surface actually stops.
+            let hasBackdrop = view.material != FoundationMaterial.Flat || view.effects.count > 0
+            if hasBackdrop {
                 current.beginBackdrop(frame, view.material, view.radius, view.blur, view.edgeRefraction, view.fill, view.glassMaterial)
                 var effectIndex = 0
                 while effectIndex < view.effects.count {
                     current.applyBackdropEffect(frame, view.effects[effectIndex])
                     effectIndex = effectIndex + 1
                 }
-                current.endBackdrop(frame)
             }
 
             if view.shape == FoundationShape.Squircle {
@@ -43,14 +49,20 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
                 current.drawSurfaceFields(frame, view.fill, view.border, view.borderWidth, view.radius)
             }
 
+            var childRendered = 0
             if view.radius > 0.0 || view.clipContent {
                 current.pushClip(frame, view.radius)
-                let childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
+                childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
                 current.popClip()
-                return childRendered + 1
+            } else {
+                childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
             }
 
-            return foundationRenderChildren(view, tree, nodeIndex, current) + 1
+            if hasBackdrop {
+                current.endBackdrop(frame)
+            }
+
+            return childRendered + 1
         }
         Text -> {
             let frame = layoutFrame(tree, nodeIndex)
