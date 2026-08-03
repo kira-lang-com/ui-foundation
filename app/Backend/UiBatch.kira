@@ -143,7 +143,10 @@ function uiBatchVertsPerQuad() -> Int { return 4 }
 // 4x that measured load for editor/text-heavy screens without making every
 // stream reserve a 48 MiB four-frame Metal ring. At 1,024 quads the ring is
 // 3 MiB per stream instead of 48 MiB.
-function uiBatchCapacityQuads() -> Int { return 1024 }
+// Sized for a full screen of glyph quads plus glass surfaces at up to nine
+// region patches each (see uiBatchPushGlass); 1024 overflowed — and quads past
+// the cap drop silently — once surfaces split.
+function uiBatchCapacityQuads() -> Int { return 4096 }
 function uiBatchAtlasSize() -> Int { return 1024 }
 
 // Transparent texels left between packed entries.
@@ -336,6 +339,57 @@ struct UiBatchState {
     var pipelineId: U32 = 0
     var rectPipelineId: U32 = 0
     var glyphPipelineId: U32 = 0
+    // Liquid-glass region pipelines. The full glass branch's static register
+    // allocation throttles GPU occupancy for every fragment its pipeline
+    // shades, so glass interiors route to shaders holding only the math their
+    // region provably executes: the band (inside the shadow's reach) and the
+    // deep core (past every edge effect). Both are exact subsets — see
+    // Shaders/UiGlassBand.ksl and Shaders/UiGlassCore.ksl.
+    var glassFullPipelineId: U32 = 0
+    var glassBandPipelineId: U32 = 0
+    var glassLensPipelineId: U32 = 0
+    var glassCorePipelineId: U32 = 0
+    // Interior cache: a glass interior's pixels depend only on the surface's
+    // geometry, dial, material and the (static) backdrop textures, so a frame
+    // where none of those changed re-presents the previous shading as an
+    // opaque texel copy instead of re-running it. The cache texture is
+    // drawable-sized; dirty surfaces re-render their interior patches into it
+    // in a load-preserving pass before the composite, and the composite draws
+    // mode-3.15 copy quads through UiGlassCopy.ksl. When the backdrop is not
+    // provably static this frame, copy quads route to the band pipeline and
+    // render live — the fallback is exact, never stale.
+    var glassCopyPipelineId: U32 = 0
+    var glassCacheTextureId: U32 = 0
+    var glassCacheBindGroupId: U32 = 0
+    var glassCacheSamplerId: U32 = 0
+    var glassCacheW: Int = 0
+    var glassCacheH: Int = 0
+    var glassCacheCleared: Bool = false
+    var glassBackdropStatic: Bool = false
+    // Exact per-surface cache keys, uiGlassCacheKeyFloats() values per
+    // push-order slot; a mismatch marks the surface dirty for this frame.
+    // Preallocated and written by index — the one array shape proven to
+    // persist across frames in native state (the quadModes pattern).
+    var glassCacheKeys: [Float] = []
+    var glassCacheKeySet: [Int] = []
+    var glassCacheEpochValue: Int = 0
+    // Backdrop key at the last cache render vs. this frame: a mismatch means
+    // the cached interiors were shaded against a different backdrop, and every
+    // copy quad routes live until an emission re-renders the cache.
+    var glassCacheRenderedKey: Float = -1.0
+    var glassCacheKeyNow: Float = -2.0
+    var glassSurfaceCursor: Int = 0
+    // Dirty-surface interior ranges to re-render into the cache this frame:
+    // per entry, the stream index, the first band quad, and the band/lens/core
+    // quad counts (contiguous by construction of uiBatchPushGlass).
+    var glassCacheRangeStream: [Int] = []
+    var glassCacheRangeStart: [Int] = []
+    var glassCacheRangeBand: [Int] = []
+    var glassCacheRangeLens: [Int] = []
+    var glassCacheRangeCore: [Int] = []
+    var glassCacheRangeCount: Int = 0
+    // KIRA_GLASS_CACHE_OFF: route every copy quad live (band pipeline).
+    var glassCacheDisabled: Bool = false
     var adaptiveGlyphPipelineId: U32 = 0
     // Metal-only fast path for an opaque fullscreen TextureView. Non-fullscreen
     // and translucent textures remain in the portable generic batch.
@@ -366,6 +420,13 @@ struct UiBatchState {
     // transition endpoint; every other frame uses the normal capture.
     var directBackdropLayer0: Bool = false
     var directBackdropSharpGroupId: U32 = 0
+    // Blur-chain cache for the direct-backdrop path: the blur of a static photo
+    // is itself static, so the compute pair re-runs only when the source texture
+    // or the blur extent changes. Zero means no cached result. The capture path
+    // never caches — its input is scene content that can change every frame.
+    var blurCacheSourceId: U32 = 0
+    var blurCacheW: Int = 0
+    var blurCacheH: Int = 0
 
     var atlasW: Int = 0
     var atlasH: Int = 0
@@ -419,6 +480,7 @@ struct UiBatchState {
     var probeGlassLayerOpen: Bool = false
     var benchFinalOnly: Bool = false
     var benchBackgroundOnly: Bool = false
+    var benchNoBackground: Bool = false
     var referenceBlur: Bool = false
     // Which cells of the viewport the CURRENT layer has drawn into, stamped with
     // `gridStamp` so starting a layer clears the grid by bumping a counter. Only
@@ -654,6 +716,252 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     })
     state.pipelineId = pipeline.id
 
+    // Glass region pipelines, from the same KSL toolchain as the generic one —
+    // every backend gets them. Their draw path falls back to the generic
+    // pipeline (whose glass branch renders any glass mode correctly) if either
+    // is missing, so a backend that fails to build one degrades to today's
+    // behavior rather than to missing glass.
+    let glassArtifact = ksl!("Shaders/UiGlassFull.ksl")
+    let glassShader = graphics.createShaderFromKslArtifact(
+        "kira-ui-glass-full",
+        glassArtifact.combinedMsl,
+        glassArtifact.vertexWgsl,
+        glassArtifact.fragmentWgsl,
+        glassArtifact.vertexGlsl,
+        glassArtifact.fragmentGlsl,
+        glassArtifact.vertexEntry,
+        glassArtifact.fragmentEntry,
+        glassArtifact.uniformReflection
+    )
+    let glassPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-glass-full-pipeline"
+        shader: glassShader
+        vertexEntry: glassArtifact.vertexEntry
+        fragmentEntry: glassArtifact.fragmentEntry
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    enabled: true
+                    preset: blendPresetPremultipliedAlpha()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.glassFullPipelineId = glassPipeline.id
+    let bandArtifact = ksl!("Shaders/UiGlassBand.ksl")
+    let bandShader = graphics.createShaderFromKslArtifact(
+        "kira-ui-glass-band",
+        bandArtifact.combinedMsl,
+        bandArtifact.vertexWgsl,
+        bandArtifact.fragmentWgsl,
+        bandArtifact.vertexGlsl,
+        bandArtifact.fragmentGlsl,
+        bandArtifact.vertexEntry,
+        bandArtifact.fragmentEntry,
+        bandArtifact.uniformReflection
+    )
+    let bandPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-glass-band-pipeline"
+        shader: bandShader
+        vertexEntry: bandArtifact.vertexEntry
+        fragmentEntry: bandArtifact.fragmentEntry
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    // The interior is opaque (alpha exactly 1), and an
+                    // opaque replace lets the tiler eliminate every
+                    // fragment beneath it instead of shading and
+                    // blending over them. Same output as premultiplied
+                    // over at alpha 1, measured cheaper.
+                    enabled: false
+                    preset: blendPresetReplace()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.glassBandPipelineId = bandPipeline.id
+    let coreArtifact = ksl!("Shaders/UiGlassCore.ksl")
+    let coreShader = graphics.createShaderFromKslArtifact(
+        "kira-ui-glass-core",
+        coreArtifact.combinedMsl,
+        coreArtifact.vertexWgsl,
+        coreArtifact.fragmentWgsl,
+        coreArtifact.vertexGlsl,
+        coreArtifact.fragmentGlsl,
+        coreArtifact.vertexEntry,
+        coreArtifact.fragmentEntry,
+        coreArtifact.uniformReflection
+    )
+    let corePipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-glass-core-pipeline"
+        shader: coreShader
+        vertexEntry: coreArtifact.vertexEntry
+        fragmentEntry: coreArtifact.fragmentEntry
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    // The interior is opaque (alpha exactly 1), and an
+                    // opaque replace lets the tiler eliminate every
+                    // fragment beneath it instead of shading and
+                    // blending over them. Same output as premultiplied
+                    // over at alpha 1, measured cheaper.
+                    enabled: false
+                    preset: blendPresetReplace()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.glassCorePipelineId = corePipeline.id
+    let lensArtifact = ksl!("Shaders/UiGlassLens.ksl")
+    let lensShader = graphics.createShaderFromKslArtifact(
+        "kira-ui-glass-lens",
+        lensArtifact.combinedMsl,
+        lensArtifact.vertexWgsl,
+        lensArtifact.fragmentWgsl,
+        lensArtifact.vertexGlsl,
+        lensArtifact.fragmentGlsl,
+        lensArtifact.vertexEntry,
+        lensArtifact.fragmentEntry,
+        lensArtifact.uniformReflection
+    )
+    let lensPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-glass-lens-pipeline"
+        shader: lensShader
+        vertexEntry: lensArtifact.vertexEntry
+        fragmentEntry: lensArtifact.fragmentEntry
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    // The interior is opaque (alpha exactly 1), and an
+                    // opaque replace lets the tiler eliminate every
+                    // fragment beneath it instead of shading and
+                    // blending over them. Same output as premultiplied
+                    // over at alpha 1, measured cheaper.
+                    enabled: false
+                    preset: blendPresetReplace()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.glassLensPipelineId = lensPipeline.id
+    let copyArtifact = ksl!("Shaders/UiGlassCopy.ksl")
+    let copyShader = graphics.createShaderFromKslArtifact(
+        "kira-ui-glass-copy",
+        copyArtifact.combinedMsl,
+        copyArtifact.vertexWgsl,
+        copyArtifact.fragmentWgsl,
+        copyArtifact.vertexGlsl,
+        copyArtifact.fragmentGlsl,
+        copyArtifact.vertexEntry,
+        copyArtifact.fragmentEntry,
+        copyArtifact.uniformReflection
+    )
+    let copyPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+        label: "kira-ui-glass-copy-pipeline"
+        shader: copyShader
+        vertexEntry: copyArtifact.vertexEntry
+        fragmentEntry: copyArtifact.fragmentEntry
+        vertexLayout: VertexLayout {
+            stride: 0
+            attributes: []
+        }
+        colorTargets: [
+            ColorTargetDescriptor {
+                format: textureFormatSwapchain()
+                blend: BlendState {
+                    enabled: false
+                    preset: blendPresetReplace()
+                }
+            }
+        ]
+        depthStencil: DepthStencilDescriptor {
+            depthEnabled: false
+            depthWriteEnabled: false
+            depthCompare: compareFunctionAlways()
+            format: textureFormatDepth24Stencil8()
+        }
+        rasterization: RasterizationDescriptor {
+            cullMode: cullModeNone()
+            frontFace: frontFaceCounterClockwise()
+        }
+        primitive: PrimitiveDescriptor {
+            topology: primitiveTopologyTriangleList()
+        }
+    })
+    state.glassCopyPipelineId = copyPipeline.id
+
     if graphics.backend == GraphicsBackend.Metal && !uiPtrIsNull(metalGetEnv("KIRA_UI_SPECIALIZED_RUNS")) {
         state.rectPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-rect-fast", uiRectMslSource())
         state.glyphPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-glyph-fast", uiGlyphMslSource())
@@ -785,6 +1093,12 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     graphics.bindGroupAddSampler(fallbackSoftNear, uiSlotNearSampler(), sampler)
     state.fallbackBackdropBindGroupId = fallbackSoftNear.id
 
+    var cacheKeySeed: [Float] = []
+    while cacheKeySeed.count < uiGlassCacheMaxSurfaces() * uiGlassCacheKeyFloats() {
+        cacheKeySeed.append(0.0)
+    }
+    state.glassCacheKeys = cacheKeySeed
+    state.glassCacheKeySet = uiBatchIntZeros(uiGlassCacheMaxSurfaces())
     state.glyphHashKeys = uiBatchIntZeros(uiBatchGlyphHashCap())
     state.glyphHashVals = uiBatchIntZeros(uiBatchGlyphHashCap())
 
@@ -796,6 +1110,8 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     state.probeGlassLayerOpen = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_LAYER_PROBE"))
     state.benchFinalOnly = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_FINAL_ONLY"))
     state.benchBackgroundOnly = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_BACKGROUND_ONLY"))
+    state.benchNoBackground = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_NO_BACKGROUND"))
+    state.glassCacheDisabled = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_CACHE_OFF"))
     state.referenceBlur = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_REFERENCE"))
 
     uiBatchStateLoadFont(state)
@@ -871,6 +1187,10 @@ function uiBatchBegin(batchPtr: RawPtr, viewportW: Float, viewportH: Float, scal
     if scale <= 0.0 {
         state.scale = 1.0
     }
+    // Interior cache: keys are matched by push order, so the cursor restarts
+    // with the frame; ranges list this frame's dirty interiors only.
+    state.glassSurfaceCursor = 0
+    state.glassCacheRangeCount = 0
     return
 }
 
@@ -988,8 +1308,10 @@ function uiBatchEmitQuad(
         return
     }
     // Mode 3 — liquid glass — is the only mode whose shader reads the material
-    // block. Mode 4 is above it numerically and reads none of it.
-    let writesMaterial = modeCode == 30
+    // block; its region patches (3.0 full, 3.25 band, 3.45 core — see
+    // uiBatchPushGlass) all carry it. Mode 4 is above them numerically and
+    // reads none of it.
+    let writesMaterial = modeCode == 30 || modeCode == 31 || modeCode == 32 || modeCode == 33 || modeCode == 34
     let vw = state.viewportW
     let vh = state.viewportH
     // Base float index of this quad's record, inside this frame's ring slot.
@@ -1301,6 +1623,16 @@ function uiGlassDestroyTargets(state: borrow mut UiBatchState, graphics: borrow 
     state.blurTextureBId = 0
     state.glassBlurW = 0
     state.glassBlurH = 0
+    state.blurCacheSourceId = 0
+    state.blurCacheW = 0
+    state.blurCacheH = 0
+    // The interior cache is drawable-sized and its keys describe the old
+    // viewport; both die with the glass targets. (The texture itself is
+    // re-created lazily by uiGlassEnsureInteriorCache at the new size.)
+    state.glassCacheW = 0
+    state.glassCacheH = 0
+    state.glassCacheCleared = false
+    state.glassCacheEpochValue = state.glassCacheEpochValue + 1
     state.glassLayers = []
     state.glassReady = false
     return
@@ -1759,11 +2091,292 @@ function uiBatchPushGlass(
     if clampedRadius > halfH {
         clampedRadius = halfH
     }
+    // A rim thinner than a device pixel is a fainter rim, not a thinner one, so
+    // its width is snapped the same way the side line's reach is.
+    let rimWidth = uiGlassBorderSpread(material.innerRimWidth, state.scale)
+    // Region split: the shape is drawn as up to nine non-overlapping patches so
+    // each region's pixels run the cheapest shader that is still exact there.
+    // Inset distances are in the quad's local units (authored points), measured
+    // from the shape's rectangular edge; the corner radius is added because the
+    // rounded boundary curves inward — at a rectangular inset t the SDF's
+    // interior distance is at least t - radius, tight on the corner diagonal.
+    //
+    // The outer ring (everything within `bandInset` of the edge) keeps the full
+    // glass shader: coverage, the border-shadow stack and the skirt live there.
+    // The band ring is at least 0.5pt inside, where the shadow stack is exactly
+    // zero. The core is past every effect's reach — the lens's own 72pt limit,
+    // the 22pt blur edge fade, the 5pt sheen, the edge stroke and the inner rim
+    // — where the shader provably reduces to taps plus washes. The shader-side
+    // thresholds are named constants in Shaders/UiBatch.ksl (blurEdgeEnd,
+    // sheenEnd); the two literals here must match them.
+    let bandInset = clampedRadius + 1.5
+    // The edge effects' reach: the blur-edge fade (22, matching blurEdgeEnd in
+    // Shaders/UiBatch.ksl), the edge stroke, the 5pt sheen and the inner rim.
+    // Past it only the lens is still live; past the lens's own 72pt limit
+    // nothing is. The two bounds delimit the lens ring and the core.
+    var effectReach = 22.0
+    if material.edgeStrokeFade > effectReach {
+        effectReach = material.edgeStrokeFade
+    }
+    if material.edgeStrokePeak + 0.01 > effectReach {
+        effectReach = material.edgeStrokePeak + 0.01
+    }
+    if rimWidth > effectReach {
+        effectReach = rimWidth
+    }
+    let lensInset = clampedRadius + effectReach + 1.0
+    var coreReach = 72.0
+    if effectReach > coreReach {
+        coreReach = effectReach
+    }
+    let coreInset = clampedRadius + coreReach + 1.0
+    // Inner edges of each concentric ring, in local units.
+    let bx = halfW - bandInset
+    let by = halfH - bandInset
+    let lx = halfW - lensInset
+    let ly = halfH - lensInset
+    let kx = halfW - coreInset
+    let ky = halfH - coreInset
+    // Corner-aware full ring: the full shader is only NEEDED within 1.5pt of
+    // the boundary (coverage, shadow skirt) — but a rect ring must add the
+    // corner radius everywhere to stay corner-safe, which put the radius-wide
+    // straight edges of every large surface on the heaviest pipeline. Corner
+    // SQUARES take the radius; the straight strips stay 1.5pt (+ the 4pt
+    // skirt pad). The freed area drains to the band pipeline, whose only
+    // precondition — at least 0.5pt inside — every piece below satisfies:
+    // away from the corner squares one axis' rectangular inset bounds the SDF
+    // exactly, radius or not.
+    let sxE = halfW - 1.5
+    let syE = halfH - 1.5
+    if kx > 4.0 && ky > 4.0 {
+        // Nineteen patches: corner-aware full ring (4 corner squares + 4 thin
+        // strips), band (6), lens ring (4), core.
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, 0.0 - bx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, 0.0 - bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, 0.0 - lhy, bx, 0.0 - syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, syE, bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, sxE, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        // The interior. When every input its pixels depend on matches what the
+        // cache pass last rendered (stream 1's static direct backdrop only),
+        // present the cached bytes as texel copies; a dirty surface renders
+        // live and records its interior range for this frame's cache pass.
+        var cacheEligible = false
+        if state.streamIndex == 1 && state.glassCopyPipelineId != 0 {
+            cacheEligible = true
+        }
+        var cachedInterior = false
+        if cacheEligible {
+            cachedInterior = uiGlassCacheKeyMatch(
+                state,
+                cx, cy, halfW, halfH, clampedRadius,
+                tint.r, tint.g, tint.b, tint.a,
+                glowIntensity, edgeRefraction,
+                clipMinX, clipMinY, clipMaxX, clipMaxY,
+                rimWidth,
+                material.washBlend,
+                material.washUpperR, material.washUpperG, material.washUpperB,
+                material.washUpperAlpha, material.washUpperBlend,
+                material.blurNearSplit, material.lensMaxBend, material.refractionReach,
+                vw, vh,
+                Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5,
+            )
+        }
+        // Streams are retained: what is emitted here is replayed every frame
+        // until the next rebuild. Eligible interiors therefore always emit as
+        // copy quads — the draw routes them to the live band pipeline until
+        // the cache pass has rendered them (and whenever the backdrop stops
+        // being provably static), so a copy quad is never wrong, only slower.
+        var interiorMode = 3.25
+        var interiorLensMode = 3.35
+        var interiorCoreMode = 3.45
+        var interiorSpare0 = 0.0
+        var interiorSpare1 = 0.0
+        if cacheEligible {
+            interiorMode = 3.15
+            interiorLensMode = 3.15
+            interiorCoreMode = 3.15
+            interiorSpare0 = 1.0 / (vw * state.scale)
+            interiorSpare1 = 1.0 / (vh * state.scale)
+        }
+        let interiorStart = state.quadCount
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - syE, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, ly, bx, syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - sxE, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, bx, 0.0 - by, sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        let interiorBandEnd = state.quadCount
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ly, lx, 0.0 - ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, ky, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ky, 0.0 - kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, kx, 0.0 - ky, lx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        let interiorLensEnd = state.quadCount
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorCoreMode, 0.0 - kx, 0.0 - ky, kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
+        if cacheEligible && !cachedInterior {
+            uiGlassCacheRecordRange(
+                state,
+                state.streamIndex,
+                interiorStart,
+                interiorBandEnd - interiorStart,
+                interiorLensEnd - interiorBandEnd,
+                state.quadCount - interiorLensEnd,
+            )
+        }
+        return
+    }
+    if lx > 4.0 && ly > 4.0 {
+        // Nine patches: full ring, band ring, lens-shaded center (the lens
+        // shader is exact for everything past the effect bands, however deep).
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, ly, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.35, 0.0 - lx, 0.0 - ly, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        return
+    }
+    if bx > 4.0 && by > 4.0 {
+        // Five patches: outer ring plus a band-shaded center (too small for a core).
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+        return
+    }
+    uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
+    return
+}
+
+// Floats per interior-cache key: the full tuple of inputs a glass interior's
+// pixels depend on. An exact elementwise compare — never a hash — so a stale
+// interior can only follow from a value missing here, not from a collision.
+function uiGlassCacheKeyFloats() -> Int { return 28 }
+
+// Cached-interior surface slots; surfaces past the cap render live.
+function uiGlassCacheMaxSurfaces() -> Int { return 32 }
+
+// Compare (and store) this surface's cache key at the current push-order
+// slot. True means every input matches the interior already in the cache;
+// false marks the surface dirty and leaves the new key in place.
+function uiGlassCacheKeyMatch(
+    state: borrow mut UiBatchState,
+    k0: Float, k1: Float, k2: Float, k3: Float, k4: Float, k5: Float,
+    k6: Float, k7: Float, k8: Float, k9: Float, k10: Float, k11: Float,
+    k12: Float, k13: Float, k14: Float, k15: Float, k16: Float, k17: Float,
+    k18: Float, k19: Float, k20: Float, k21: Float, k22: Float, k23: Float,
+    k24: Float, k25: Float, k26: Float, k27: Float,
+) -> Bool {
+    let slot = state.glassSurfaceCursor
+    state.glassSurfaceCursor = state.glassSurfaceCursor + 1
+    if slot >= uiGlassCacheMaxSurfaces() {
+        return false
+    }
+    let base = slot * uiGlassCacheKeyFloats()
+    var fresh: [Float] = [
+        k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, k10, k11, k12, k13,
+        k14, k15, k16, k17, k18, k19, k20, k21, k22, k23, k24, k25, k26,
+        k27 + Float(state.glassCacheEpochValue) * 16384.0,
+    ]
+    var same = state.glassCacheKeySet[slot] != 0
+    var firstDiff = -1
+    var i = 0
+    while i < uiGlassCacheKeyFloats() {
+        if state.glassCacheKeys[base + i] != fresh[i] {
+            if same {
+                same = false
+                firstDiff = i
+            }
+            state.glassCacheKeys[base + i] = fresh[i]
+        }
+        i = i + 1
+    }
+    state.glassCacheKeySet[slot] = 1
+    if state.probeGlassLayers {
+        print(686868)
+        print(slot)
+        if same { print(1) } else { print(0) }
+        print(firstDiff)
+    }
+    if same {
+        return true
+    }
+    return false
+}
+
+// Remember a dirty surface's interior quads so the cache pass re-renders them.
+function uiGlassCacheRecordRange(state: borrow mut UiBatchState, stream: Int, start: Int, bandCount: Int, lensCount: Int, coreCount: Int) {
+    if bandCount + lensCount + coreCount <= 0 {
+        return
+    }
+    if state.glassCacheRangeCount < state.glassCacheRangeStream.count {
+        state.glassCacheRangeStream[state.glassCacheRangeCount] = stream
+        state.glassCacheRangeStart[state.glassCacheRangeCount] = start
+        state.glassCacheRangeBand[state.glassCacheRangeCount] = bandCount
+        state.glassCacheRangeLens[state.glassCacheRangeCount] = lensCount
+        state.glassCacheRangeCore[state.glassCacheRangeCount] = coreCount
+    } else {
+        state.glassCacheRangeStream.append(stream)
+        state.glassCacheRangeStart.append(start)
+        state.glassCacheRangeBand.append(bandCount)
+        state.glassCacheRangeLens.append(lensCount)
+        state.glassCacheRangeCore.append(coreCount)
+    }
+    state.glassCacheRangeCount = state.glassCacheRangeCount + 1
+    return
+}
+
+// Emit one region patch of a liquid-glass surface: the sub-rectangle
+// (lx0,ly0)-(lx1,ly1) of the surface's local space, as one quad carrying the
+// surface's full shape and material — every patch shades against the whole
+// shape's SDF, only its raster extent differs. `mode` selects the pipeline the
+// draw routes the patch to: 3.0 full glass, 3.25 band, 3.35 lens, 3.45 core
+// (the codes stay below 3.5 so a fallback draw through the generic pipeline
+// renders every patch with the full glass branch, which is exact for all of
+// them).
+@Native
+function uiGlassEmitPatch(
+    batchPtr: RawPtr,
+    cx: Float, cy: Float, vw: Float, vh: Float,
+    halfW: Float, halfH: Float, radius: Float, mode: Float,
+    lx0: Float, ly0: Float, lx1: Float, ly1: Float,
+    tint: borrow Color,
+    glowIntensity: Float,
+    edgeRefraction: Float,
+    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+    material: borrow FoundationGlassMaterial,
+    rimWidth: Float,
+    spare0: Float = 0.0,
+    spare1: Float = 0.0,
+) {
+    // Clip the patch geometrically. The interior pipelines write with blending
+    // off (an opaque interior replaces its pixel), so a fragment cannot opt
+    // out by returning transparent the way the blended path could — a patch
+    // must simply never rasterize outside its clip. The rectangles are both
+    // axis-aligned, so the intersection is exact; `local` follows because it
+    // is the pixel position minus the centre.
+    var px0 = cx + lx0
+    var py0 = cy + ly0
+    var px1 = cx + lx1
+    var py1 = cy + ly1
+    if px0 < clipMinX { px0 = clipMinX }
+    if py0 < clipMinY { py0 = clipMinY }
+    if px1 > clipMaxX { px1 = clipMaxX }
+    if py1 > clipMaxY { py1 = clipMaxY }
+    if px1 <= px0 || py1 <= py0 {
+        return
+    }
     uiBatchEmitQuad(
         batchPtr,
-        cx - lhx, cy - lhy, cx + lhx, cy + lhy,
-        0.0 - lhx, 0.0 - lhy, lhx, lhy,
-        halfW, halfH, clampedRadius, tint.a, 3.0, edgeRefraction,
+        px0, py0, px1, py1,
+        px0 - cx, py0 - cy, px1 - cx, py1 - cy,
+        halfW, halfH, radius, tint.a, mode, edgeRefraction,
         tint.r, tint.g, tint.b, glowIntensity,
         cx / vw, cy / vh, halfW / vw, halfH / vh,
         clipMinX, clipMinY, clipMaxX, clipMaxY,
@@ -1782,13 +2395,14 @@ function uiBatchPushGlass(
         material.borderSideSpread, material.borderGrey,
         material.borderSideGrey,
         material.innerRimStrength,
-        // A rim thinner than a device pixel is a fainter rim, not a thinner one, so
-        // its width is snapped the same way the side line's reach is.
-        uiGlassBorderSpread(material.innerRimWidth, state.scale),
+        rimWidth,
         // The wash: how `fill` blends (the lower layer), then the upper layer whole.
         material.washBlend,
         material.washUpperR, material.washUpperG, material.washUpperB,
-        material.washUpperAlpha, material.washUpperBlend
+        material.washUpperAlpha, material.washUpperBlend,
+        // Spares: the copy patches carry 1/drawable-size here (UiGlassCopy
+        // turns its device position into the cache texel through them).
+        spare0, spare1
     )
     return
 }
@@ -2620,7 +3234,11 @@ function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, 
     if modeStream < state.streams.count {
         completeModes = state.streams[modeStream].quadModes.count >= quadCount
     }
-    let specialized = state.rectPipelineId != 0 && state.glyphPipelineId != 0 && completeModes
+    // Run-splitting is on whenever any per-region pipeline exists; the rect and
+    // glyph fast paths additionally require their own (env-gated) pipelines.
+    let glassSplit = state.glassFullPipelineId != 0 && state.glassBandPipelineId != 0 && state.glassLensPipelineId != 0 && state.glassCorePipelineId != 0
+    let fastRuns = state.rectPipelineId != 0 && state.glyphPipelineId != 0
+    let specialized = (glassSplit || fastRuns) && completeModes
     if state.probeModes {
         print(676766)
         print(modeStream)
@@ -2639,15 +3257,43 @@ function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, 
         while firstQuad < quadCount {
             let modeCode = state.streams[modeStream].quadModes[firstQuad]
             var runPipelineId = state.pipelineId
-            if modeCode == 0 { runPipelineId = state.rectPipelineId }
-            if modeCode == 10 { runPipelineId = state.glyphPipelineId }
+            if fastRuns {
+                if modeCode == 0 { runPipelineId = state.rectPipelineId }
+                if modeCode == 10 { runPipelineId = state.glyphPipelineId }
+            }
+            // A copy quad presents cached interior pixels — but only when the
+            // cache provably holds them; otherwise it renders live through
+            // the band pipeline, which is exact for every interior region.
+            let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTextureId == 0 || !state.glassCacheCleared || state.glassCacheRenderedKey != state.glassCacheKeyNow
+            if glassSplit {
+                if modeCode == 30 { runPipelineId = state.glassFullPipelineId }
+                if modeCode == 31 {
+                    runPipelineId = state.glassCopyPipelineId
+                    if copyLive { runPipelineId = state.glassBandPipelineId }
+                }
+                if modeCode == 32 { runPipelineId = state.glassBandPipelineId }
+                if modeCode == 33 { runPipelineId = state.glassLensPipelineId }
+                if modeCode == 34 { runPipelineId = state.glassCorePipelineId }
+            }
             var endQuad = firstQuad + 1
             var samePipeline = true
             while endQuad < quadCount && samePipeline {
                 let nextMode = state.streams[modeStream].quadModes[endQuad]
                 var nextPipelineId = state.pipelineId
-                if nextMode == 0 { nextPipelineId = state.rectPipelineId }
-                if nextMode == 10 { nextPipelineId = state.glyphPipelineId }
+                if fastRuns {
+                    if nextMode == 0 { nextPipelineId = state.rectPipelineId }
+                    if nextMode == 10 { nextPipelineId = state.glyphPipelineId }
+                }
+                if glassSplit {
+                    if nextMode == 30 { nextPipelineId = state.glassFullPipelineId }
+                    if nextMode == 31 {
+                        nextPipelineId = state.glassCopyPipelineId
+                        if copyLive { nextPipelineId = state.glassBandPipelineId }
+                    }
+                    if nextMode == 32 { nextPipelineId = state.glassBandPipelineId }
+                    if nextMode == 33 { nextPipelineId = state.glassLensPipelineId }
+                    if nextMode == 34 { nextPipelineId = state.glassCorePipelineId }
+                }
                 if nextPipelineId == runPipelineId {
                     endQuad = endQuad + 1
                 } else {
@@ -2658,7 +3304,19 @@ function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, 
                 handle: BackendPipelineHandle { id: runPipelineId }
                 id: runPipelineId
             })
+            // Copy runs read the cache through the atlas slot; swap the group
+            // in for the run and restore the stream's atlas after it.
+            let copyRun = runPipelineId == state.glassCopyPipelineId && state.glassCacheBindGroupId != 0
+            if copyRun {
+                encoder.setBindGroup(uiGroupAtlas(), BindGroup {
+                    handle: BackendBindGroupHandle { id: state.glassCacheBindGroupId }
+                    id: state.glassCacheBindGroupId
+                })
+            }
             encoder.drawIndexedRange((endQuad - firstQuad) * 6, firstQuad * 6)
+            if copyRun {
+                encoder.setBindGroup(uiGroupAtlas(), bindGroup)
+            }
             firstQuad = endQuad
             runCount = runCount + 1
         }
@@ -2706,6 +3364,12 @@ function uiBackgroundPrepare(state: borrow mut UiBatchState, graphics: borrow Gr
 @Native
 function uiBackgroundDraw(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
     if !state.backgroundActive || state.backgroundPipelineId == 0 || !state.externalBindReady {
+        return
+    }
+    // Diagnostic bisection: skip the opaque fullscreen photo while leaving every
+    // pass, clear and present in place. That is what separates the cost of
+    // sampling one fullscreen texture from the cost of having the pass at all.
+    if state.benchNoBackground {
         return
     }
     let pipeline = RenderPipeline {
@@ -2923,12 +3587,163 @@ function uiBatchDrawHud(batchPtr: RawPtr, state: borrow mut UiBatchState, encode
 // resolution, each glass layer refracting its own blurred capture. Stacked glass
 // therefore refracts the glass beneath it, and the streams below each layer are the
 // only content its capture holds — no layer ever refracts itself.
+// Create (or re-create after a resize) the interior-cache texture, its
+// nearest-texel sampler and the bind group that rides the atlas slot around
+// copy runs. A fresh texture invalidates every key: nothing cached yet.
+function uiGlassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borrow Graphics) {
+    // Drawable pixels, not logical points: the cache must hold one texel per
+    // device pixel or the copies re-present an upscale.
+    let cacheW = Int(state.viewportW * state.scale)
+    let cacheH = Int(state.viewportH * state.scale)
+    if state.glassCacheTextureId != 0 && state.glassCacheW == cacheW && state.glassCacheH == cacheH {
+        return
+    }
+    if state.glassCacheBindGroupId != 0 {
+        uiGlassDestroyBindGroup(graphics, state.glassCacheBindGroupId)
+        state.glassCacheBindGroupId = 0
+    }
+    if state.glassCacheTextureId != 0 {
+        uiGlassDestroyTexture(graphics, state.glassCacheTextureId)
+        state.glassCacheTextureId = 0
+    }
+    if cacheW <= 0 || cacheH <= 0 {
+        return
+    }
+    let cacheTex = graphics.createTexture(TextureDescriptor {
+        label: "kira-ui-glass-interior-cache"
+        width: cacheW
+        height: cacheH
+        format: textureFormatSwapchain()
+        usage: textureUsageRenderTargetSampled()
+        sampleCount: 1
+        storageMode: 2
+    })
+    if state.glassCacheSamplerId == 0 {
+        // Nearest: a copy fragment lands exactly on its texel centre, and
+        // nearest guarantees the fetch returns that texel's bytes unchanged.
+        state.glassCacheSamplerId = graphics.createSampler(SamplerDescriptor {
+            label: "kira-ui-glass-cache-nearest"
+            minFilter: textureFilterNearest()
+            magFilter: textureFilterNearest()
+            addressModeU: textureAddressModeClampToEdge()
+            addressModeV: textureAddressModeClampToEdge()
+        }).id
+    }
+    let sampler = GraphicsSampler {
+        handle: BackendSamplerHandle { id: state.glassCacheSamplerId }
+        id: state.glassCacheSamplerId
+    }
+    let group = graphics.beginBindGroup("kira-ui-glass-cache")
+    graphics.bindGroupAddTexture(group, uiSlotAtlasTexture(), cacheTex)
+    graphics.bindGroupAddSampler(group, uiSlotAtlasSampler(), sampler)
+    state.glassCacheTextureId = cacheTex.id
+    state.glassCacheBindGroupId = group.id
+    state.glassCacheW = cacheW
+    state.glassCacheH = cacheH
+    state.glassCacheCleared = false
+    // A fresh texture holds nothing: bump the epoch (folded into every key)
+    // so each surface misses once and re-renders into it.
+    state.glassCacheEpochValue = state.glassCacheEpochValue + 1
+    return
+}
+
+// The cache pass: clear on first use, preserve previously cached interiors on
+// every later one.
+function uiGlassInteriorCachePass(state: borrow mut UiBatchState) -> RenderPassDescriptor {
+    var load = loadActionLoad()
+    if !state.glassCacheCleared {
+        load = loadActionClear()
+    }
+    let attachment = ColorAttachment {
+        target: RenderTarget {
+            kind: renderTargetKindTexture()
+            texture: GraphicsTexture {
+                handle: BackendTextureHandle { id: state.glassCacheTextureId }
+                id: state.glassCacheTextureId
+            }
+            mipLevel: 0
+            arrayLayer: 0
+        }
+        loadAction: load
+        storeAction: storeActionStore()
+        clearColor: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+        resolveTarget: emptyRenderTarget()
+        hasResolveTarget: false
+    }
+    return RenderPassDescriptor {
+        label: "kira-ui-glass-interior-cache-pass"
+        colorAttachments: [attachment]
+        primaryColorAttachment: attachment
+        hasPrimaryColorAttachment: true
+        depthAttachment: emptyDepthAttachment()
+        hasDepthAttachment: false
+        stencilAttachment: emptyStencilAttachment()
+        hasStencilAttachment: false
+    }
+}
+
+// Re-render each dirty surface's interior quads into the cache with the same
+// pipelines, bind groups and index ranges the live path would use — the cache
+// holds exactly the bytes the composite would have produced.
+function uiGlassDrawCacheRanges(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
+    let ibuf = GraphicsBuffer {
+        handle: BackendBufferHandle { id: state.indexBufferId }
+        id: state.indexBufferId
+    }
+    encoder.setIndexBuffer(ibuf, indexFormatUint32())
+    encoder.setBindGroup(uiGroupAtlas(), BindGroup {
+        handle: BackendBindGroupHandle { id: state.bindGroupId }
+        id: state.bindGroupId
+    })
+    var r = 0
+    while r < state.glassCacheRangeCount {
+        let stream = state.glassCacheRangeStream[r]
+        if state.probeGlassLayers {
+            print(717272)
+            print(r)
+            print(stream)
+            print(state.glassCacheRangeStart[r])
+            print(state.glassCacheRangeBand[r])
+            print(state.glassCacheRangeLens[r])
+            print(state.glassCacheRangeCore[r])
+        }
+        encoder.setBindGroup(uiGroupVerts(), BindGroup {
+            handle: BackendBindGroupHandle { id: state.streams[stream].vertsGroupId }
+            id: state.streams[stream].vertsGroupId
+        })
+        let sharpId = uiGlassStreamSharpGroup(state, stream)
+        encoder.setBindGroup(uiGroupExternal(), BindGroup {
+            handle: BackendBindGroupHandle { id: sharpId }
+            id: sharpId
+        })
+        let softNearId = uiGlassStreamSoftNearGroup(state, stream)
+        encoder.setBindGroup(uiGroupSoftNear(), BindGroup {
+            handle: BackendBindGroupHandle { id: softNearId }
+            id: softNearId
+        })
+        // One pipeline for the whole interior: the band shader is byte-equal
+        // to the full glass branch everywhere at least 0.5pt inside (verified
+        // by whole-frame compare), so the cache holds exactly the bytes the
+        // composite would produce. The lens/core split only matters for
+        // per-frame cost, and a cache render is a rare, one-off frame.
+        let total = state.glassCacheRangeBand[r] + state.glassCacheRangeLens[r] + state.glassCacheRangeCore[r]
+        encoder.setPipeline(RenderPipeline {
+            handle: BackendPipelineHandle { id: state.glassBandPipelineId }
+            id: state.glassBandPipelineId
+        })
+        encoder.drawIndexedRange(total * 6, state.glassCacheRangeStart[r] * 6)
+        r = r + 1
+    }
+    return
+}
+
 @Native
 function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graphics: borrow Graphics, bgR: Float, bgG: Float, bgB: Float, bgA: Float) {
     var state = nativeRecover<UiBatchState>(batchPtr)
     // Never let the endpoint-only direct source escape the present that proved
     // its preconditions. Crossfades and later frames must re-evaluate it.
     state.directBackdropLayer0 = false
+    state.glassBackdropStatic = false
     state.directBackdropSharpGroupId = 0
     // The active stream's count only reaches its entry here: emitting keeps it in
     // the mirrored hot field.
@@ -2941,8 +3756,15 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
         a: bgA
     }
     uiBackgroundPrepare(state, graphics)
+    // The swapchain pass CLEARS rather than discarding, even though an opaque
+    // fullscreen photo covers every pixel it clears. Discarding instead was
+    // measured at 2.80/2.88/2.85 ms against 2.97/2.83/2.72 — no change, because a
+    // tile-based GPU initializes the tile rather than writing the clear to
+    // memory. So the clear is free and the discard only risks showing the last
+    // frame wherever the cover turns out to be less than total.
+    let swapchainPass = clearSwapchainRenderPass(bg)
     if layers == 0 || !state.glassReady {
-        var encoder = frame.beginPass(bg)
+        var encoder = frame.beginRenderPass(swapchainPass)
         uiBackgroundDraw(state, encoder)
         uiBatchFlush(batchPtr, graphics, encoder)
         uiBatchDrawHud(batchPtr, state, encoder)
@@ -3007,6 +3829,13 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
         if directSourceId != 0 && directSharpGroupId != 0 {
             state.directBackdropLayer0 = true
             state.directBackdropSharpGroupId = directSharpGroupId
+            // The direct photo is the one backdrop the interior cache may
+            // trust: its blur inputs are static between transitions. Any
+            // capture-path layer leaves this false and every interior copy
+            // routes to the live band pipeline instead.
+            if layer == 0 {
+                state.glassBackdropStatic = true
+            }
         }
         // Capture: every stream below layer+1, drawn into this layer's own target.
         // Redrawn per layer rather than accumulated into one texture because the
@@ -3064,26 +3893,77 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
             if directSourceId != 0 {
                 computeSourceId = directSourceId
             }
-            frame.dispatchTextureComputePair(
-                state.blurComputeHPipelineId,
-                state.blurComputeVPipelineId,
-                Int(computeSourceId),
-                Int(blurAId),
-                Int(state.blurTextureBId),
-                Int(state.glassLayers[layer].nearTextureId),
-                Int(state.glassLayers[layer].blurTextureId),
-                state.glassBlurW,
-                state.glassBlurH,
-            )
+            // The direct path blurs a static photo, and a static input has a
+            // static blur: skip the dispatch while the source and extent match
+            // the frame that produced the cached textures. Any capture-path
+            // dispatch (redrawn scene content) drops the cache, so a layer
+            // stack that mixes both never reads a stale result.
+            let blurCached = directSourceId != 0 &&
+                layer == 0 &&
+                state.blurCacheSourceId == computeSourceId &&
+                state.blurCacheW == state.glassBlurW &&
+                state.blurCacheH == state.glassBlurH
+            if !blurCached {
+                frame.dispatchTextureComputePair(
+                    state.blurComputeHPipelineId,
+                    state.blurComputeVPipelineId,
+                    Int(computeSourceId),
+                    Int(blurAId),
+                    Int(state.blurTextureBId),
+                    Int(state.glassLayers[layer].nearTextureId),
+                    Int(state.glassLayers[layer].blurTextureId),
+                    state.glassBlurW,
+                    state.glassBlurH,
+                )
+                // The compute writes leave both outputs in the uncompressed
+                // shader-write layout, and every glass tap of every later
+                // frame samples them. Re-tile once per (rare, cached)
+                // recompute so the taps read the fast layout.
+                frame.optimizeTexture(Int(state.glassLayers[layer].nearTextureId))
+                frame.optimizeTexture(Int(state.glassLayers[layer].blurTextureId))
+                if directSourceId != 0 && layer == 0 {
+                    state.blurCacheSourceId = computeSourceId
+                    state.blurCacheW = state.glassBlurW
+                    state.blurCacheH = state.glassBlurH
+                } else {
+                    state.blurCacheSourceId = 0
+                }
+            }
         } else {
             uiGlassIterativeBlur(frame, state, layer, blurPipelineId, paramsH, paramsV)
+            state.blurCacheSourceId = 0
         }
         layer = layer + 1
     }
 
     // Final pass: the swapchain composite — every stream in emission order at full
     // resolution, each glass layer refracting the blur of what was under it.
-    var mainEncoder = frame.beginPass(bg)
+    // Interior cache: re-render this frame's dirty glass interiors into the
+    // cache texture before the composite reads them back as copies. The pass
+    // preserves previously cached surfaces (load) once the texture has been
+    // cleared a first time.
+    state.glassCacheKeyNow = Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5
+    if state.probeGlassLayers {
+        print(696969)
+        print(state.glassCacheRangeCount)
+        if state.glassBackdropStatic { print(1) } else { print(0) }
+        if state.glassCacheCleared { print(1) } else { print(0) }
+        if state.glassCacheRenderedKey == state.glassCacheKeyNow { print(1) } else { print(0) }
+    }
+    if state.glassBackdropStatic && state.glassCacheRangeCount > 0 {
+        uiGlassEnsureInteriorCache(state, graphics)
+        if state.glassCacheTextureId != 0 {
+            var cacheEncoder = frame.beginRenderPass(uiGlassInteriorCachePass(state))
+            uiGlassDrawCacheRanges(state, cacheEncoder)
+            frame.endPass()
+            state.glassCacheCleared = true
+            // Consumed: the retained stream replays every frame, but these
+            // interiors are in the cache now.
+            state.glassCacheRangeCount = 0
+            state.glassCacheRenderedKey = state.glassCacheKeyNow
+        }
+    }
+    var mainEncoder = frame.beginRenderPass(swapchainPass)
     uiBackgroundDraw(state, mainEncoder)
     var stream = 0
     var finalStreamCount = layers

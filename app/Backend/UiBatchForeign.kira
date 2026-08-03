@@ -288,6 +288,10 @@ function uiLoadRgbaTextureFile(graphics: borrow Graphics, path: borrow String, w
     metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
     uiMemFree(region)
     uiMemFree(buf)
+    // A backdrop loads once and is then sampled every frame — by the fullscreen
+    // TextureView, the glass sharp taps, and the blur chain's source read — so
+    // trade one blit now for the GPU-optimal layout all of them sample.
+    metalOptimizeTextureForGpu(ctx, textureId)
     return textureId
 }
 
@@ -339,6 +343,10 @@ function uiLoadRgbaTextureFromEnv(graphics: borrow Graphics, envName: borrow Str
     metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
     uiMemFree(region)
     uiMemFree(buf)
+    // A backdrop loads once and is then sampled every frame — by the fullscreen
+    // TextureView, the glass sharp taps, and the blur chain's source read — so
+    // trade one blit now for the GPU-optimal layout all of them sample.
+    metalOptimizeTextureForGpu(ctx, textureId)
     return textureId
 }
 
