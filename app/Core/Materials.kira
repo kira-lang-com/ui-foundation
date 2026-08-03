@@ -77,6 +77,24 @@ function foundationBlendId(mode: borrow FoundationBlendMode) -> Float {
     }
 }
 
+// The mode an id names, for a stack that has already been flattened to vertex
+// fields and has to be read back — the compositor hands the wash to the batch as
+// numbers, and anything downstream that needs to REASON about the material (rather
+// than shade it) has only those numbers to go on. Exact inverse of foundationBlendId
+// on everything it can be: Luminosity resolves to Normal here because that is what
+// it resolves to on the way out, so a round trip lands where the shader lands.
+function foundationBlendModeFromId(id: Float) -> FoundationBlendMode {
+    if id < 0.5 { return FoundationBlendMode.Normal }
+    if id < 1.5 { return FoundationBlendMode.LinearDodge }
+    if id < 2.5 { return FoundationBlendMode.ColorDodge }
+    if id < 3.5 { return FoundationBlendMode.HardLight }
+    if id < 4.5 { return FoundationBlendMode.Overlay }
+    if id < 5.5 { return FoundationBlendMode.Lighten }
+    if id < 6.5 { return FoundationBlendMode.Darken }
+    if id < 7.5 { return FoundationBlendMode.Multiply }
+    return FoundationBlendMode.Normal
+}
+
 // One fill in a material's stack: what colour, how opaque, blended how.
 struct FoundationTintLayer {
     let color: Color = Color {
