@@ -86,7 +86,7 @@ class KiraGraphicsFoundationBackend {
     var encoder: RenderEncoder
     var graphics: Graphics
     var uiBatchPtr: RawPtr
-    var metalActive: Bool = false
+    var gpuTelemetry: Bool = false
     var hitRegions: [FoundationHitRegionRecord] = []
     var clipDepth: Int = 0
     var backdropDepth: Int = 0
@@ -147,7 +147,7 @@ class KiraGraphicsFoundationBackend {
             b: 0.0
             a: 0.0
         }
-        if self.metalActive {
+        if self.gpuTelemetry {
             uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
             // Claim this frame's slot in each vertex stream before anything emits into
             // one; the frames still on the GPU keep theirs.
@@ -202,7 +202,7 @@ class KiraGraphicsFoundationBackend {
     }
 
     function endFrame() {
-        if self.metalActive {
+        if self.gpuTelemetry {
             // The batch is presented by uiBatchPresent AFTER the walk (the run
             // loops own the pass structure — a liquid-glass frame needs the
             // capture/blur passes to run before the swapchain pass begins).
@@ -245,7 +245,7 @@ class KiraGraphicsFoundationBackend {
         self.clipMinY = ny0
         self.clipMaxX = nx1
         self.clipMaxY = ny1
-        if !self.metalActive {
+        if !self.gpuTelemetry {
             self.encoder.pushClip(graphicsRect(frame), radius)
         }
         self.clipDepth = self.clipDepth + 1
@@ -254,7 +254,7 @@ class KiraGraphicsFoundationBackend {
 
     function popClip() {
         if self.clipDepth > 0 {
-            if !self.metalActive {
+            if !self.gpuTelemetry {
                 self.encoder.popClip()
             }
             let n = self.clipStack.count
@@ -290,7 +290,7 @@ class KiraGraphicsFoundationBackend {
                 b: 0.0
                 a: 0.0
             }
-            if self.metalActive {
+            if self.gpuTelemetry {
                 uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             }
             return
@@ -308,7 +308,7 @@ class KiraGraphicsFoundationBackend {
                 effectiveRadius = self.clipRadius
             }
         }
-        if self.metalActive {
+        if self.gpuTelemetry {
             uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, effectiveRadius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
@@ -325,7 +325,7 @@ class KiraGraphicsFoundationBackend {
         if texture <= 0 {
             return
         }
-        if self.metalActive {
+        if self.gpuTelemetry {
             // NOTE: the Metal UiBatch external-texture path (mode 2) does not yet
             // apply a rounded-rect coverage mask, so `radius` is a no-op here; the
             // viewport composites square-cornered on Metal. The Sokol path below
@@ -350,7 +350,7 @@ class KiraGraphicsFoundationBackend {
 
     function drawSquircleSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
-        if self.metalActive {
+        if self.gpuTelemetry {
             uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
@@ -365,7 +365,7 @@ class KiraGraphicsFoundationBackend {
 
     function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, adaptiveInk: Bool) {
         self.drewVisibleUi = true
-        if self.metalActive {
+        if self.gpuTelemetry {
             uiBatchPushText(self.uiBatchPtr, self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma)
             return
         }
@@ -377,7 +377,7 @@ class KiraGraphicsFoundationBackend {
 
     function drawIconFields(bounds: borrow Rect, svg: borrow String, color: borrow Color) {
         self.drewVisibleUi = true
-        if self.metalActive {
+        if self.gpuTelemetry {
             uiBatchPushIcon(self.uiBatchPtr, self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
@@ -395,7 +395,7 @@ class KiraGraphicsFoundationBackend {
         // surface's own fill/border/children draw over it through the normal path.
         // The bounds decide whether this surface can share the layer already open or
         // is stacked on it and needs a capture of its own.
-        if material == .LiquidGlass && self.metalActive {
+        if material == .LiquidGlass && self.gpuTelemetry {
             self.drewVisibleUi = true
             uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
             // What adaptive text has to measure is the WHOLE wash, both fills and
@@ -462,7 +462,7 @@ class KiraGraphicsFoundationBackend {
     }
 
     function drawGlowFields(bounds: borrow Rect, color: borrow Color, radius: Float, intensity: Float) {
-        if self.metalActive {
+        if self.gpuTelemetry {
             // Glow is rendered as a soft translucent rounded surface behind the layer
             // (a single batched quad). A separable-blur effect pass can refine this
             // later; the approximation keeps the abstraction backend-agnostic.

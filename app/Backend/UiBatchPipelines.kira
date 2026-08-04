@@ -327,7 +327,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     })
     state.glassCopyPipelineId = copyPipeline.id
 
-    if graphics.backend == GraphicsBackend.Metal && !uiPtrIsNull(metalGetEnv("KIRA_UI_SPECIALIZED_RUNS")) {
+    if graphics.backend == GraphicsBackend.Metal && environmentIsSet("KIRA_UI_SPECIALIZED_RUNS") {
         state.rectPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-rect-fast", ksl!("Shaders/UiRect.ksl"))
         state.glyphPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-glyph-fast", ksl!("Shaders/UiGlyph.ksl"))
         // Adaptive glyphs sit immediately after their glass surface. Keeping both
@@ -478,17 +478,17 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     state.glyphHashKeys = uiBatchIntZeros(uiBatchGlyphHashCap())
     state.glyphHashVals = uiBatchIntZeros(uiBatchGlyphHashCap())
 
-    state.probeQuads = !uiPtrIsNull(metalGetEnv("KIRA_UI_QUAD_PROBE"))
-    state.probeCost = !uiPtrIsNull(metalGetEnv("KIRA_UI_COST_PROBE"))
-    state.probeModes = !uiPtrIsNull(metalGetEnv("KIRA_UI_MODE_PROBE"))
-    state.probeBatch = !uiPtrIsNull(metalGetEnv("KIRA_UI_BATCH_PROBE"))
-    state.probeGlassLayers = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_LAYERS"))
-    state.probeGlassLayerOpen = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_LAYER_PROBE"))
-    state.benchFinalOnly = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_FINAL_ONLY"))
-    state.benchBackgroundOnly = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_BACKGROUND_ONLY"))
-    state.benchNoBackground = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_BENCH_NO_BACKGROUND"))
-    state.glassCacheDisabled = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_CACHE_OFF"))
-    state.referenceBlur = !uiPtrIsNull(metalGetEnv("KIRA_GLASS_REFERENCE"))
+    state.probeQuads = environmentIsSet("KIRA_UI_QUAD_PROBE")
+    state.probeCost = environmentIsSet("KIRA_UI_COST_PROBE")
+    state.probeModes = environmentIsSet("KIRA_UI_MODE_PROBE")
+    state.probeBatch = environmentIsSet("KIRA_UI_BATCH_PROBE")
+    state.probeGlassLayers = environmentIsSet("KIRA_GLASS_LAYERS")
+    state.probeGlassLayerOpen = environmentIsSet("KIRA_GLASS_LAYER_PROBE")
+    state.benchFinalOnly = environmentIsSet("KIRA_GLASS_BENCH_FINAL_ONLY")
+    state.benchBackgroundOnly = environmentIsSet("KIRA_GLASS_BENCH_BACKGROUND_ONLY")
+    state.benchNoBackground = environmentIsSet("KIRA_GLASS_BENCH_NO_BACKGROUND")
+    state.glassCacheDisabled = environmentIsSet("KIRA_GLASS_CACHE_OFF")
+    state.referenceBlur = environmentIsSet("KIRA_GLASS_REFERENCE")
 
     uiBatchStateLoadFont(state)
 

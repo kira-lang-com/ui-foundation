@@ -48,7 +48,7 @@ function RunFoundationInteractiveApp(
         // Platform-aware default: Metal on Apple hosts, Sokol everywhere else
         // (including Web/WASM, where the host-platform probe honestly reports
         // Unknown and Sokol/WebGPU is the only backend). The per-frame path
-        // already branches dynamically via foundationFrameUsesMetal(frame).
+        // already branches dynamically via foundationFrameHasGpuTelemetry(frame).
         backend: graphicsDefaultBackend()
     }
 
@@ -65,8 +65,8 @@ function RunFoundationInteractiveApp(
         let hostNeedsRebuild: borrow () -> Bool = needsRebuild
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
-        let metalActive = foundationFrameUsesMetal(frame)
-        if metalActive {
+        let gpuTelemetry = foundationFrameHasGpuTelemetry(frame)
+        if gpuTelemetry {
             var mvW = foundationMetalViewportWidth(frame)
             var mvH = foundationMetalViewportHeight(frame)
             if mvW <= 0 {
@@ -92,7 +92,7 @@ function RunFoundationInteractiveApp(
         foundationWriteViewportSnapshot(state.ui.viewport.width, state.ui.viewport.height)
         let graphics = foundationFrameGraphics(frame)
         var batchPtr = uiBatchNullPtr()
-        if metalActive {
+        if gpuTelemetry {
             if !state.uiBatchReady {
                 state.uiBatchPtr = uiBatchCreate(graphics)
                 state.uiBatchReady = true
@@ -112,12 +112,12 @@ function RunFoundationInteractiveApp(
         let vpHNow = Int(state.ui.viewport.height)
         let overlayEnabled = showFpsOverlay || showGraphicsHud
         if overlayEnabled {
-            state.hudRefreshElapsed = state.hudRefreshElapsed + foundationFrameDuration(frame, metalActive)
+            state.hudRefreshElapsed = state.hudRefreshElapsed + foundationFrameDuration(frame, gpuTelemetry)
         }
         let hudNeedsRefresh = overlayEnabled && state.hudRefreshElapsed >= foundationHudRefreshSeconds()
         if state.hasPresentedFrame &&
             !hostNeedsRebuild() &&
-            metalActive &&
+            gpuTelemetry &&
             state.uiBatchReady &&
             state.ui.eventCount == state.lastPresentedEventCount &&
             vpWNow == state.lastPresentedViewportW &&
@@ -128,7 +128,7 @@ function RunFoundationInteractiveApp(
             // build, the retained reconcile, the layout and every application quad
             // are all still skipped on this frame.
             if hudNeedsRefresh {
-                let hudStats = foundationFrameGraphicsStats(frame, metalActive)
+                let hudStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
                 let hudOverlay = foundationGraphicsOverlay(hudStats, showGraphicsHud)
                 let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: state.ui.viewport)
                 foundationEmitHud(graphics, state.uiBatchPtr, hudOverlay, hudLayout, vpWNow, vpHNow)
@@ -155,7 +155,7 @@ function RunFoundationInteractiveApp(
         // every frame. It has its own stream now, so the cached tree is reusable
         // whether or not an overlay is on screen.)
         let resizeOnly = !rebuildOnResize &&
-            (metalActive || !overlayEnabled) &&
+            (gpuTelemetry || !overlayEnabled) &&
             state.hasCachedRoot &&
             state.ui.eventCount == state.lastPresentedEventCount
 
@@ -167,11 +167,11 @@ function RunFoundationInteractiveApp(
         } else {
             let buildRoot: borrow (borrow FoundationUiContext) -> FoundationView = rootBuilder
             let appRoot = buildRoot(state.ui)
-            if overlayEnabled && !metalActive {
+            if overlayEnabled && !gpuTelemetry {
                 // The immediate Sokol path has no retained batch and no HUD stream
                 // to leave alone — it redraws the whole frame every time — so the
                 // overlay rides in the composed tree there, as it always has.
-                let stats = foundationFrameGraphicsStats(frame, metalActive)
+                let stats = foundationFrameGraphicsStats(frame, gpuTelemetry)
                 root = foundationComposeWithGraphics(move appRoot, stats, showGraphicsHud)
             } else {
                 root = move appRoot
@@ -183,7 +183,7 @@ function RunFoundationInteractiveApp(
         // liquid-glass frame runs its capture/blur passes first. The legacy Sokol
         // path draws immediately during the walk and keeps its pass open here.
         var encoder = makeRenderEncoder()
-        if !metalActive {
+        if !gpuTelemetry {
             // The standalone placeholder is replaced immediately on this path;
             // release it before the pass encoder overwrites it.
             nativeStateFree(encoder.storage)
@@ -198,7 +198,7 @@ function RunFoundationInteractiveApp(
             encoder: encoder
             graphics: graphics
             uiBatchPtr: batchPtr
-            metalActive: metalActive
+            gpuTelemetry: gpuTelemetry
         }
         let viewport = state.ui.viewport
         // A resize-only frame reuses the cached tree, so the retained structure
@@ -268,12 +268,12 @@ function RunFoundationInteractiveApp(
 
         state.frameCount = state.frameCount + 1
         backend.endFrame()
-        if metalActive {
+        if gpuTelemetry {
             // The overlay is written into its own stream on a full frame too, so a
             // rebuild and a refresh produce the same vertices by the same path —
             // there is one HUD, not a composed one and a retained one.
             if overlayEnabled {
-                let hudStats = foundationFrameGraphicsStats(frame, metalActive)
+                let hudStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
                 let hudOverlay = foundationGraphicsOverlay(hudStats, showGraphicsHud)
                 let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: viewport)
                 foundationEmitHud(graphics, state.uiBatchPtr, hudOverlay, hudLayout, Int(viewport.width), Int(viewport.height))

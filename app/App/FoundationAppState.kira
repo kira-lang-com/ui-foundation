@@ -138,7 +138,7 @@ struct FoundationAppState {
 // all of these constant at a steady frame rate, so the common case re-presents.
 function foundationShouldRepresent(
     hasPresented: Bool,
-    metalActive: Bool,
+    gpuTelemetry: Bool,
     batchReady: Bool,
     fps: Int,
     lastFps: Int,
@@ -148,7 +148,7 @@ function foundationShouldRepresent(
     lastViewportH: Int,
 ) -> Bool {
     return hasPresented &&
-        metalActive &&
+        gpuTelemetry &&
         batchReady &&
         fps == lastFps &&
         viewportW == lastViewportW &&
@@ -165,30 +165,36 @@ function foundationFrameGraphics(frame: borrow GraphicsFrame) -> Graphics {
     }
 }
 
-// The retained Metal compositor is active whenever the frame carries a Metal context.
+// Whether this frame carries backend GPU telemetry — a CPU/GPU timing pair, a
+// drawable size, resource and draw counts.
+//
+// Tested by asking the frame for its native context rather than by naming a
+// backend: the readout wants to know whether the numbers are there, and a
+// backend that grows the same telemetry answers yes without this changing.
+// A frame without it still reports a frame rate, from the run loop's own clock.
 @Native
-function foundationFrameUsesMetal(frame: borrow GraphicsFrame) -> Bool {
+function foundationFrameHasGpuTelemetry(frame: borrow GraphicsFrame) -> Bool {
     return !uiBatchPtrIsNull(frame.metalContext)
 }
 
 // Per-frame duration (seconds) for the live FPS readout. On Metal the run loop samples
 // CACurrentMediaTime onto the context; on Sokol the duration comes from sapp.
 @Native
-function foundationFrameDuration(frame: borrow GraphicsFrame, metalActive: Bool) -> Float {
-    if metalActive {
+function foundationFrameDuration(frame: borrow GraphicsFrame, gpuTelemetry: Bool) -> Float {
+    if gpuTelemetry {
         return metalContextFrameDuration(frame.metalContext)
     }
     return rootFrameDuration()
 }
 
 @Native
-function foundationFrameGraphicsStats(frame: borrow GraphicsFrame, metalActive: Bool) -> FoundationGraphicsStats {
-    let duration = foundationFrameDuration(frame, metalActive)
+function foundationFrameGraphicsStats(frame: borrow GraphicsFrame, gpuTelemetry: Bool) -> FoundationGraphicsStats {
+    let duration = foundationFrameDuration(frame, gpuTelemetry)
     var stats = FoundationGraphicsStats {
         fps: foundationFpsFromDuration(duration)
         frameMs: duration * 1000.0
     }
-    if metalActive {
+    if gpuTelemetry {
         stats.cpuMs = metalContextCpuDuration(frame.metalContext) * 1000.0
         stats.gpuMs = metalContextGpuDuration(frame.metalContext) * 1000.0
         stats.drawableWidth = metalContextPhysicalWidth(frame.metalContext)
@@ -198,7 +204,7 @@ function foundationFrameGraphicsStats(frame: borrow GraphicsFrame, metalActive: 
         stats.passCount = metalContextPassCount(frame.metalContext)
         stats.drawCount = metalContextDrawCount(frame.metalContext)
         stats.triangleCount = metalContextTriangleCount(frame.metalContext)
-        stats.framesInFlight = metalFramesInFlight()
+        stats.framesInFlight = frame.framesInFlight()
         stats.frameSerial = metalContextFrameSerial(frame.metalContext)
         stats.windowState = metalContextWindowState(frame.metalContext)
     }
@@ -331,14 +337,17 @@ function foundationEmitHud(
     viewportW: Int,
     viewportH: Int,
 ) {
-    // The batched Metal path never hands this encoder to a pass — the compositor
-    // owns the pass structure — so it is a placeholder released on the way out.
+    // The batched path never hands this encoder to a pass — the compositor owns
+    // the pass structure — so it is a placeholder released on the way out.
     let encoder = makeRenderEncoder()
     var hudBackend = KiraGraphicsFoundationBackend {
         encoder: encoder
         graphics: graphics
         uiBatchPtr: batchPtr
-        metalActive: true
+        // Asked of the graphics handle rather than asserted. This was `true`,
+        // which was right only because the only backend that reached here was
+        // the one it was describing.
+        gpuTelemetry: !uiBatchPtrIsNull(graphics.metalContext)
     }
     hudBackend.beginHudFrame(viewportW, viewportH)
     foundationRender(overlay, layout, hudBackend)

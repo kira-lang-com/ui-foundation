@@ -182,39 +182,6 @@ struct UiGlassLayer {
     var softNearGroupId: U32 = 0
 }
 
-// Where the shader's resources live. A KSL group numbers its resources in
-// declaration order, and MSL takes those numbers straight for textures and
-// samplers while a vertex-stage storage buffer lands one above its slot (vertex
-// buffer 0 holds the attribute stream). `Shaders/UiBatch.ksl` declares
-// verts, atlas, atlasSmp, external, externalSmp, backdrop, backdropSmp,
-// nearBlur, nearSmp — so these are the numbers the host has to bind against.
-function uiSlotVerts() -> Int { return 0 }
-function uiSlotAtlasTexture() -> Int { return 1 }
-function uiSlotAtlasSampler() -> Int { return 2 }
-function uiSlotExternalTexture() -> Int { return 3 }
-function uiSlotExternalSampler() -> Int { return 4 }
-function uiSlotBackdropTexture() -> Int { return 5 }
-function uiSlotBackdropSampler() -> Int { return 6 }
-function uiSlotNearTexture() -> Int { return 7 }
-function uiSlotNearSampler() -> Int { return 8 }
-
-// The blur chain is its own pipeline with its own group, so it numbers from
-// zero again: `Shaders/UiBlur.ksl` declares params, source, linear.
-function uiSlotBlurParams() -> Int { return 0 }
-function uiSlotBlurTexture() -> Int { return 1 }
-function uiSlotBlurSampler() -> Int { return 2 }
-
-// The opaque background reads the photo through the compositor's own external
-// and backdrop groups, so `Shaders/UiBackground.ksl` writes those slots with
-// `@binding` and only its params slot is its own.
-function uiSlotBackgroundParams() -> Int { return 0 }
-
-// Which encoder group slot each of those is bound through (the encoder has four).
-function uiGroupVerts() -> Int { return 0 }
-function uiGroupAtlas() -> Int { return 1 }
-function uiGroupExternal() -> Int { return 2 }
-function uiGroupSoftNear() -> Int { return 3 }
-
 // The border band, never thinner than one device pixel.
 function uiGlassBorderSpread(spread: Float, scale: Float) -> Float {
     var devicePixel = 1.0

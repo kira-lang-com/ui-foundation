@@ -1,3 +1,4 @@
+import Foundation
 import KiraGraphics
 // Foreign surface for the batched UI compositor.
 //
@@ -299,13 +300,8 @@ function uiLoadRgbaTextureFile(graphics: borrow Graphics, path: borrow String, w
 // this: a missing variable and a variable set to "" both fail to open a file and
 // both return 0. The difference is intent — an empty value is a run saying "no
 // image here", which callers use to skip their fallback paths entirely.
-@Native
 function uiEnvValueIsEmpty(name: borrow String) -> Bool {
-    let value = metalGetEnv(name)
-    if uiPtrIsNull(value) {
-        return false
-    }
-    return uiMemReadU32(value, 0) % 256 == 0
+    return environmentIsSet(name) && environmentValue(name).count == 0
 }
 
 // As above, but the path is the VALUE of environment variable `envName` (the
