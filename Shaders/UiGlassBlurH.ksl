@@ -1,0 +1,61 @@
+// Liquid glass blur, the horizontal half.
+//
+// Both levels are produced in one pass: near and far read the same source and
+// write their own target, so the pyramid costs one dispatch per axis rather
+// than one per level.
+//
+// The target extent arrives in a uniform rather than from a texture query,
+// which KSL cannot express — and the host knows the size it allocated anyway.
+
+import UiGlassBlurCommon
+
+type BlurExtent {
+    let width: UInt
+    let height: UInt
+}
+
+type Q {
+    @builtin(thread_id)
+    let gid: UInt3
+}
+
+shader UiGlassBlurH {
+    // Declared uniform, sampler, reads, writes — the same order as the vertical
+    // half, so one slot layout serves both and the dispatch seam can bind by
+    // position rather than knowing which of the two it is encoding.
+    group Blur {
+        uniform extent: BlurExtent
+        sampler glassSmp: Sampler
+        texture source: Texture2d
+        texture write nearOut: Texture2d
+        texture write farOut: Texture2d
+    }
+
+    compute {
+        input Q
+        // Matches the threadgroup the seam dispatches with. A shader that
+        // declared a different one would be wrong on any backend that takes the
+        // size from the shader rather than from the encoder.
+        threads(16, 16, 1)
+
+        function entry(q: Q) {
+            // A dispatch is rounded up to whole threadgroups, so the tail
+            // threads address texels that do not exist.
+            if q.gid.x >= extent.width {
+                return
+            }
+            if q.gid.y >= extent.height {
+                return
+            }
+            let size = Float2(Float(extent.width), Float(extent.height))
+            let uv = Float2(
+                (Float(q.gid.x) + 0.5) / size.x,
+                (Float(q.gid.y) + 0.5) / size.y
+            )
+            let step = Float2(1.0 / size.x, 0.0)
+            store(nearOut, q.gid.xy, UiGlassBlurCommon.nearFilter(source, glassSmp, uv, step))
+            store(farOut, q.gid.xy, UiGlassBlurCommon.farFilter(source, glassSmp, uv, step))
+            return
+        }
+    }
+}

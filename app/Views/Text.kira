@@ -102,7 +102,7 @@ class FoundationTextMeasurer {
 
 function Text(content: String, color: Color, size: Float, weight: Float) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Text
+        kind: .Text
         content: content
         color: color
         size: size
@@ -115,7 +115,7 @@ function Text(content: String, color: Color, size: Float, weight: Float) -> Foun
 // layer, nothing has been captured, so the authored colour still decides.
 function AdaptiveText(content: String, fallback: Color, size: Float, weight: Float) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Text
+        kind: .Text
         content: content
         color: fallback
         size: size
@@ -128,7 +128,7 @@ function AdaptiveText(content: String, fallback: Color, size: Float, weight: Flo
 // subset), drawn as a `size`-by-`size` box tinted `color`.
 function Icon(svg: String, color: Color, size: Float) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Icon
+        kind: .Icon
         content: svg
         color: color
         size: size

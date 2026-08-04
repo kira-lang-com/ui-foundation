@@ -12,8 +12,11 @@
 // The host guarantees the region: core quads are emitted inset from the shape
 // edge by the per-surface maximum of every band above, plus the corner radius
 // (the SDF's interior distance at a rectangular inset t is at least t - radius)
-// plus margin. KSL has no include mechanism yet, so the shared declarations are
-// duplicated from `UiBatch.ksl`.
+// plus margin. The shared arithmetic is imported from `GlassCommon.ksl`; the
+// quad record and the vertex stage are still duplicated from `UiBatch.ksl`,
+// which an import does not yet carry.
+
+import GlassCommon
 
 type UiQuad {
     let posX0: Float
@@ -101,79 +104,6 @@ type FragmentOut {
     let color: Float4
 }
 
-function washCeiling() -> Float { return 0.9 }
-
-function minimum(left: Float, right: Float) -> Float {
-    if left < right { return left }
-    return right
-}
-
-function maximum(left: Float, right: Float) -> Float {
-    if left > right { return left }
-    return right
-}
-
-function blendChannel(base: Float, layer: Float, mode: Float) -> Float {
-    if mode < 0.5 { return layer }
-    if mode < 1.5 { return clamp(base + layer, 0.0, 1.0) }
-    if mode < 2.5 {
-        if layer >= 1.0 {
-            if base > 0.0 { return 1.0 }
-            return 0.0
-        }
-        return minimum(1.0, base / (1.0 - layer))
-    }
-    if mode < 3.5 {
-        if layer <= 0.5 { return 2.0 * base * layer }
-        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
-    }
-    if mode < 4.5 {
-        if base <= 0.5 { return 2.0 * base * layer }
-        return 1.0 - 2.0 * (1.0 - base) * (1.0 - layer)
-    }
-    if mode < 5.5 { return maximum(base, layer) }
-    if mode < 6.5 { return minimum(base, layer) }
-    return base * layer
-}
-
-function blendLayer(base: Float3, layer: Float3, alpha: Float, mode: Float) -> Float3 {
-    if alpha <= 0.0 { return base }
-    if mode < 0.5 { return mix(base, layer, alpha) }
-    if mode < 1.5 {
-        let added = Float3(
-            clamp(base.x + layer.x, 0.0, 1.0),
-            clamp(base.y + layer.y, 0.0, 1.0),
-            clamp(base.z + layer.z, 0.0, 1.0)
-        )
-        return mix(base, added, alpha)
-    }
-    if mode >= 4.5 {
-        if mode < 5.5 {
-            let lightened = Float3(
-                maximum(base.x, layer.x),
-                maximum(base.y, layer.y),
-                maximum(base.z, layer.z)
-            )
-            return mix(base, lightened, alpha)
-        }
-        if mode < 6.5 {
-            let darkened = Float3(
-                minimum(base.x, layer.x),
-                minimum(base.y, layer.y),
-                minimum(base.z, layer.z)
-            )
-            return mix(base, darkened, alpha)
-        }
-        return mix(base, base * layer, alpha)
-    }
-    let blended = Float3(
-        blendChannel(base.x, layer.x, mode),
-        blendChannel(base.y, layer.y, mode),
-        blendChannel(base.z, layer.z, mode)
-    )
-    return mix(base, blended, alpha)
-}
-
 shader UiGlassCore {
     group Batch {
         storage read verts: [UiQuad]
@@ -217,7 +147,7 @@ shader UiGlassCore {
             out.dials = Float4(
                 clamp(v.fillA, 0.0, 1.0),
                 clamp(v.blurNearSplit, 0.01, 0.99),
-                clamp(v.borderWidth, 0.0, washCeiling()),
+                clamp(v.borderWidth, 0.0, GlassCommon.washCeiling),
                 clamp(v.washUpperAlpha, 0.0, 1.0),
             )
             out.fillWash = Float4(v.fillR, v.fillG, v.fillB, v.washBlend)
@@ -283,8 +213,8 @@ shader UiGlassCore {
                 )
             }
 
-            rgb = blendLayer(rgb, Float3(input.fillWash.x, input.fillWash.y, input.fillWash.z), input.dials.z, input.fillWash.w)
-            rgb = blendLayer(rgb, Float3(input.upperWash.x, input.upperWash.y, input.upperWash.z), input.dials.w, input.upperWash.w)
+            rgb = GlassCommon.blendLayer(rgb, Float3(input.fillWash.x, input.fillWash.y, input.fillWash.z), input.dials.z, input.fillWash.w)
+            rgb = GlassCommon.blendLayer(rgb, Float3(input.upperWash.x, input.upperWash.y, input.upperWash.z), input.dials.w, input.upperWash.w)
 
             let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
             out.color = Float4(glassRgb.x, glassRgb.y, glassRgb.z, 1.0)

@@ -34,12 +34,7 @@ Seven distinct materials give your interfaces depth and character:
 | Material | Description |
 |----------|-------------|
 | `Flat` | Clean solid surfaces |
-| `Translucent` | Semi-transparent overlays |
 | `Frosted` | Beautiful blur-behind glass |
-| `LayeredGlass` | Multi-layer glass effect |
-| `Luminous` | Soft inner glow |
-| `Metallic` | Brushed metal appearance |
-| `Crystal` | Prismatic, light-catching surfaces |
 
 **Layered Visual Effects**
 Add glow effects that react to your interface:

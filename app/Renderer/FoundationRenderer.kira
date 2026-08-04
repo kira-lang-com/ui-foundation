@@ -10,11 +10,9 @@ function foundationRenderChildren(view: borrow FoundationView, tree: borrow Layo
     let firstChild = tree.nodes[nodeIndex].firstChild
     var current = backend
     var rendered = 0
-    var childOffset = 0
-    while childOffset < view.children.count {
+        for childOffset in 0..view.children.count {
         rendered = rendered + foundationRenderView(view.children[childOffset], tree, firstChild + childOffset, current)
-        childOffset = childOffset + 1
-    }
+            }
     return rendered
 }
 
@@ -33,7 +31,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             // backdrop before descending handed every child the state of a surface
             // that was no longer there. The close moves below the children instead,
             // which is where the surface actually stops.
-            let hasBackdrop = view.material != FoundationMaterial.Flat || view.effects.count > 0
+            let hasBackdrop = view.material != .Flat || view.effects.count > 0
             if hasBackdrop {
                 current.beginBackdrop(frame, view.material, view.radius, view.blur, view.edgeRefraction, view.fill, view.glassMaterial)
                 var effectIndex = 0
@@ -43,7 +41,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
                 }
             }
 
-            if view.shape == FoundationShape.Squircle {
+            if view.shape == .Squircle {
                 current.drawSquircleSurfaceFields(frame, view.fill, view.border, view.borderWidth, view.radius)
             } else {
                 current.drawSurfaceFields(frame, view.fill, view.border, view.borderWidth, view.radius)

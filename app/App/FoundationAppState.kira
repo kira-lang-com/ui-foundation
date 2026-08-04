@@ -1,0 +1,348 @@
+import KiraGraphics
+import KiraLayout
+import Foundation
+
+// The state a running Foundation app carries, and the small questions asked of
+// it every frame: viewport size, frame timing, whether a rebuild is warranted,
+// and the HUD line.
+//
+// Apart from the run loops because none of it runs anything — it is what the
+// loops read and write.
+struct FoundationUiContext {
+    var frameCount: Int = 0
+    var viewport: Size = Size {}
+    var pointerX: Float = 0.0
+    var pointerY: Float = 0.0
+    var hoveredKey: Int = 0
+    var pressedKey: Int = 0
+    var clickedKey: Int = 0
+    var focusedKey: Int = 0
+    var scrollX: Float = 0.0
+    var scrollY: Float = 0.0
+    var lastTextCodepoint: Int = 0
+    var lastKeyCode: Int = 0
+    // Total events dispatched since app start. The interactive runner's
+    // re-present fast path compares this against the last presented frame's
+    // count: no new events + same viewport → the rebuilt tree could not differ,
+    // so the retained batch is re-flushed instead of rebuilding.
+    var eventCount: Int = 0
+    // Drag tracking: the press origin, whether a drag is in progress, and which
+    // region owns it (so move/end keep targeting the press region even if the
+    // pointer leaves it).
+    var pressX: Float = 0.0
+    var pressY: Float = 0.0
+    var dragging: Bool = false
+    var dragKey: Int = 0
+    // Active input-method composition (pinyin buffer + Hanzi candidates). Read by
+    // the view builder to render the preedit/candidate bar; mutated by dispatch.
+    var ime: ImeComposition = ImeComposition {}
+    // Live input snapshot for camera/tool code: which pointer button is held
+    // (0 none, 1 left, 2 right, 3 middle), a held-key bitmask (see
+    // foundationKeyBit), and modifier keys. Only left presses drive widget
+    // onPress; right/middle still deliver drags to gesture regions.
+    var pressButton: Int = 0
+    var keysMask: Int = 0
+    var modShift: Bool = false
+    var modAlt: Bool = false
+}
+
+// Bit for a held key in keysMask — macOS virtual keycodes for the fly keys:
+// A=0, S=1, D=2, F=3, W=13, Q=12, E=14. Zero for keys we do not track.
+function foundationKeyBit(keyCode: Int) -> Int {
+    if keyCode == 13 { return 1 }   // W
+    if keyCode == 0 { return 2 }    // A
+    if keyCode == 1 { return 4 }    // S
+    if keyCode == 2 { return 8 }    // D
+    if keyCode == 12 { return 16 }  // Q
+    if keyCode == 14 { return 32 }  // E
+    if keyCode == 3 { return 64 }   // F
+    return 0
+}
+
+struct FoundationAppState {
+    var frameCount: Int = 0
+    var announcedTree: Bool = false
+    var announcedRetainedTree: Bool = false
+    var announcedLayout: Bool = false
+    var announcedRenderCommands: Bool = false
+    // A placeholder until the first build replaces it. `kind` carries no
+    // default, so the neutral one is named here: an empty Surface, the same
+    // shape `foundationEmptyRootView` returns.
+    var root: FoundationView = FoundationView { kind: .Surface }
+    var retainedTree: FoundationRetainedTree = FoundationRetainedTree {}
+    var cachedLayoutTree: LayoutTree = LayoutTree { nodes: [] }
+    var hitRegions: [FoundationHitRegionRecord] = []
+    var ui: FoundationUiContext = FoundationUiContext {}
+    // Persistent batched-UI compositor (Metal path): created on the first frame and
+    // reached through this handle each frame so the glyph atlas + GPU resources live
+    // across frames. (RawPtr fields carry no default — set at construction.)
+    var uiBatchPtr: RawPtr
+    var uiBatchReady: Bool = false
+    // Damage-skip cache (Metal path). The dashboard view is static and the
+    // composed tree changes between frames only through the FPS badge (an integer
+    // that is stable while the frame rate is steady) and the viewport (changes on
+    // resize). When the displayed FPS and the viewport both match the last
+    // presented frame, no draw work can differ, so the previously built UiBatch
+    // (its vertex/index buffers persist on the GPU) is re-flushed to this frame's
+    // encoder instead of cloning the tree, laying it out, and regenerating every
+    // quad. This is real retained-mode presentation, not a smoke marker: the
+    // pixels are the exact draw work the last full frame produced.
+    var lastPresentedFps: Int = -1
+    var lastPresentedViewportW: Int = -1
+    var lastPresentedViewportH: Int = -1
+    var hasPresentedFrame: Bool = false
+    // Interactive re-present gate: the event count at the last full rebuild.
+    // With no new events and an unchanged viewport, the interactive runner
+    // re-flushes the retained batch instead of rebuilding the widget tree.
+    var lastPresentedEventCount: Int = -1
+    // Cached composed root for resize-only frames (rebuildOnResize = false
+    // hosts): the widget build and retained reconcile are skipped and the
+    // cached tree is re-laid-out for the new viewport.
+    var cachedRoot: FoundationView = FoundationView {
+        kind: .Spacer
+    }
+    var hasCachedRoot: Bool = false
+    // Displayed FPS, derived ONLY from re-presented (skipped) frames. A re-present
+    // is GPU/vsync-paced, so its frame duration reflects the true steady cadence; a
+    // rebuild frame is much slower (it does the full tree/layout/render work) and its
+    // duration would read as a low FPS. Feeding the badge from rebuild frames created
+    // a feedback loop: a rebuild -> long duration -> low FPS -> badge changes -> the
+    // next frame must rebuild again, pinning the dashboard at the rebuild rate (the
+    // ~8 FPS flicker observed on screen). Updating the badge only from clean
+    // re-present frames keeps it stable, so a static dashboard keeps re-presenting and
+    // a genuine rate change costs a single rebuild to refresh the number.
+    var displayedFps: Int = 60
+    // Whether `cachedLayoutTree` holds a built layout for `root`. The application
+    // tree is static, so after the first full layout every later frame re-measures
+    // the cached tree in place against the current viewport (a resize) instead of
+    // collecting a fresh node list. The FPS badge is laid out and drawn as a separate
+    // overlay, so `root` is never recomposed or cloned — it is rendered by borrow.
+    var hasAppLayout: Bool = false
+    // Cached FPS-overlay layout. The badge is bottom-leading aligned, so its
+    // geometry depends only on the displayed FPS (its text width) and the viewport
+    // HEIGHT, never the width — a horizontal resize reuses it every frame.
+    var overlayLayout: LayoutTree = LayoutTree { nodes: [] }
+    var overlayFps: Int = -1
+    var overlayVpH: Int = -1
+    // HUD text is human telemetry, not animation. Accumulate real frame time and
+    // rebuild its glyphs at 10 Hz; retained presentation handles intervening frames.
+    var hudRefreshElapsed: Float = 1.0
+}
+
+// Decide whether the current frame can re-present the retained UiBatch instead of
+// rebuilding. Safe ONLY when a full frame has already been presented (there is a
+// retained batch), the Metal compositor is active and ready, and every input that
+// can change the produced pixels — the displayed FPS integer and the viewport — is
+// identical to the last presented frame. Any difference forces a full rebuild, so a
+// real change can never be skipped into a stale frame. The static dashboard keeps
+// all of these constant at a steady frame rate, so the common case re-presents.
+function foundationShouldRepresent(
+    hasPresented: Bool,
+    metalActive: Bool,
+    batchReady: Bool,
+    fps: Int,
+    lastFps: Int,
+    viewportW: Int,
+    lastViewportW: Int,
+    viewportH: Int,
+    lastViewportH: Int,
+) -> Bool {
+    return hasPresented &&
+        metalActive &&
+        batchReady &&
+        fps == lastFps &&
+        viewportW == lastViewportW &&
+        viewportH == lastViewportH
+}
+
+// Build a Graphics handle from the active frame so the backend can create resources
+// and submit batched draws on whichever backend the runtime selected.
+function foundationFrameGraphics(frame: borrow GraphicsFrame) -> Graphics {
+    return Graphics {
+        userData: frame.userData
+        backend: frame.backend
+        metalContext: frame.metalContext
+    }
+}
+
+// The retained Metal compositor is active whenever the frame carries a Metal context.
+@Native
+function foundationFrameUsesMetal(frame: borrow GraphicsFrame) -> Bool {
+    return !uiBatchPtrIsNull(frame.metalContext)
+}
+
+// Per-frame duration (seconds) for the live FPS readout. On Metal the run loop samples
+// CACurrentMediaTime onto the context; on Sokol the duration comes from sapp.
+@Native
+function foundationFrameDuration(frame: borrow GraphicsFrame, metalActive: Bool) -> Float {
+    if metalActive {
+        return metalContextFrameDuration(frame.metalContext)
+    }
+    return rootFrameDuration()
+}
+
+@Native
+function foundationFrameGraphicsStats(frame: borrow GraphicsFrame, metalActive: Bool) -> FoundationGraphicsStats {
+    let duration = foundationFrameDuration(frame, metalActive)
+    var stats = FoundationGraphicsStats {
+        fps: foundationFpsFromDuration(duration)
+        frameMs: duration * 1000.0
+    }
+    if metalActive {
+        stats.cpuMs = metalContextCpuDuration(frame.metalContext) * 1000.0
+        stats.gpuMs = metalContextGpuDuration(frame.metalContext) * 1000.0
+        stats.drawableWidth = metalContextPhysicalWidth(frame.metalContext)
+        stats.drawableHeight = metalContextPhysicalHeight(frame.metalContext)
+        stats.allocatedMiBTenths = Int(metalContextAllocatedBytes(frame.metalContext) * U64(10) / U64(1048576))
+        stats.resourceCount = metalContextResourceCount(frame.metalContext)
+        stats.passCount = metalContextPassCount(frame.metalContext)
+        stats.drawCount = metalContextDrawCount(frame.metalContext)
+        stats.triangleCount = metalContextTriangleCount(frame.metalContext)
+        stats.framesInFlight = metalFramesInFlight()
+        stats.frameSerial = metalContextFrameSerial(frame.metalContext)
+        stats.windowState = metalContextWindowState(frame.metalContext)
+    }
+    return move stats
+}
+
+// Live viewport (points) on the Metal path: the run loop keeps the context's
+// width/height tracking the host view's bounds, so reading them here reflows the UI
+// to the current window size during an interactive resize.
+@Native
+function foundationMetalViewportWidth(frame: borrow GraphicsFrame) -> Int {
+    return metalContextWidth(frame.metalContext)
+}
+
+@Native
+function foundationMetalViewportHeight(frame: borrow GraphicsFrame) -> Int {
+    return metalContextHeight(frame.metalContext)
+}
+
+
+struct FoundationSurfaceTextAppState {
+    var frameCount: Int = 0
+    var surfaceBounds: Rect = Rect {}
+    var surfacePaint: FoundationSurfacePaint = FoundationSurfacePaint {}
+    var textBounds: Rect = Rect {}
+    // `content` carries no default, so the empty string is named here.
+    var textPaint: FoundationTextPaint = FoundationTextPaint { content: "" }
+}
+
+function foundationEmptyRootView() -> FoundationView {
+    return Surface(
+        children: [],
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: .RegularRoundedRect,
+        material: .Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true
+    )
+}
+
+// UI layout works in logical POINTS, not framebuffer pixels. On a Retina
+// framebuffer (high_dpi) sapp_width/height return pixel sizes; dividing by the
+// backing scale (sokolLogical*) keeps the interface at its intended physical
+// size while the framebuffer renders at native resolution for crisp output.
+// Off Retina the backing scale is 1.0, so these are identical to sapp_width/height.
+@Native
+function rootViewportSize() -> Size {
+    return Size(width: sokolLogicalWidthF(), height: sokolLogicalHeightF())
+}
+
+@Native
+function rootViewportWidth() -> Int {
+    return sokolLogicalWidth()
+}
+
+@Native
+function rootViewportHeight() -> Int {
+    return sokolLogicalHeight()
+}
+
+function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
+    var total = 0
+    match view.kind {
+        Surface -> total = total + 1;
+        Text -> total = total + 1;
+        TextureView -> total = total + 1;
+        Icon -> total = total + 1;
+        Row -> {}
+        Column -> {}
+        Expanded -> {}
+        Frame -> {}
+        Spacer -> {}
+        HitArea -> {}
+        LayoutPriority -> {}
+    }
+
+        for childOffset in 0..view.children.count {
+        total = total + foundationRenderableViewCount(view.children[childOffset])
+            }
+    return total
+}
+
+function foundationRootFrame(tree: borrow LayoutTree) -> Rect {
+    return layoutFrame(tree, 0)
+}
+
+function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
+        for index in 0..tree.nodes.count {
+        let frame = layoutFrame(tree, index)
+        if frame.width > 0.0 && frame.height > 0.0 {
+            return true
+        }
+            }
+    return false
+}
+
+
+// No-op default for `engineFrame` below.
+function foundationNoopEngineFrame(frame: borrow mut GraphicsFrame) {
+    let ignored = frame.backend
+    return
+}
+
+function foundationNoContinuousRebuild() -> Bool { return false }
+
+// How often the graphics overlay re-reads its counters. Its content is human
+// telemetry, not animation: ten times a second is faster than anyone reads and slow
+// enough that the numbers hold still long enough to be read at all.
+function foundationHudRefreshSeconds() -> Float { return 0.1 }
+
+// Write the graphics overlay into the batch's own HUD stream (uiBatchHudStream).
+// Nothing here touches the application's view tree, its retained tree, its layout or
+// its quads: the overlay is laid out against the viewport on its own and emitted
+// into a stream the UI never writes. A refresh therefore costs one small tree, one
+// small layout and its own vertices, and the UI keeps every vertex the last full
+// frame produced — which is what stops a ten-times-a-second counter update from
+// rebuilding the entire interface.
+function foundationEmitHud(
+    graphics: borrow Graphics,
+    batchPtr: RawPtr,
+    overlay: borrow FoundationView,
+    layout: borrow LayoutTree,
+    viewportW: Int,
+    viewportH: Int,
+) {
+    // The batched Metal path never hands this encoder to a pass — the compositor
+    // owns the pass structure — so it is a placeholder released on the way out.
+    let encoder = makeRenderEncoder()
+    var hudBackend = KiraGraphicsFoundationBackend {
+        encoder: encoder
+        graphics: graphics
+        uiBatchPtr: batchPtr
+        metalActive: true
+    }
+    hudBackend.beginHudFrame(viewportW, viewportH)
+    foundationRender(overlay, layout, hudBackend)
+    hudBackend.endHudFrame()
+    nativeStateFree(encoder.storage)
+    return
+}

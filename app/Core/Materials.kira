@@ -255,7 +255,7 @@ function foundationTintStackEquivalent(stack: borrow FoundationTintStack) -> Fou
         alpha = 1.0
     }
     if alpha <= 0.0001 {
-        return FoundationTintLayer { color: foundationWhite() alpha: 0.0 blend: FoundationBlendMode.Normal }
+        return FoundationTintLayer { color: foundationWhite() alpha: 0.0 blend: .Normal }
     }
     return FoundationTintLayer {
         color: Color {
@@ -265,7 +265,7 @@ function foundationTintStackEquivalent(stack: borrow FoundationTintStack) -> Fou
             a: 1.0
         }
         alpha: alpha
-        blend: FoundationBlendMode.Normal
+        blend: .Normal
     }
 }
 
@@ -313,7 +313,7 @@ function foundationTintStackCrossfade(
                 a: 1.0
             }
             alpha: a.alpha + (b.alpha - a.alpha) * t
-            blend: FoundationBlendMode.Normal
+            blend: .Normal
         }
         upper: FoundationTintLayer {}
         backgroundBlurRadius: from.backgroundBlurRadius + (to.backgroundBlurRadius - from.backgroundBlurRadius) * t
@@ -381,32 +381,32 @@ function foundationMaterialTintLight(style: borrow FoundationMaterialStyle) -> F
     match style {
         // #FFFFFF 7% normal, then #FFFFFF 3% colour dodge.
         Ultrathin -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.07 blend: FoundationBlendMode.Normal }
-            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.03 blend: FoundationBlendMode.ColorDodge }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.07 blend: .Normal }
+            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.03 blend: .ColorDodge }
             backgroundBlurRadius: 100.0
         };
         // #FFFFFF 5% normal, then #FFFFFF 40% colour dodge.
         Thin -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.05 blend: FoundationBlendMode.Normal }
-            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.40 blend: FoundationBlendMode.ColorDodge }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.05 blend: .Normal }
+            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.40 blend: .ColorDodge }
             backgroundBlurRadius: 100.0
         };
         // #FFFFFF 25% linear dodge, then #FFFFFF 60% colour dodge.
         Regular -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.25 blend: FoundationBlendMode.LinearDodge }
-            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.60 blend: FoundationBlendMode.ColorDodge }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.25 blend: .LinearDodge }
+            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.60 blend: .ColorDodge }
             backgroundBlurRadius: 100.0
         };
         // #FFFFFF 34% linear dodge, then #FFFFFF 84% colour dodge.
         Thick -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.34 blend: FoundationBlendMode.LinearDodge }
-            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.84 blend: FoundationBlendMode.ColorDodge }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.34 blend: .LinearDodge }
+            upper: FoundationTintLayer { color: foundationWhite() alpha: 0.84 blend: .ColorDodge }
             backgroundBlurRadius: 100.0
         };
         // #FFFFFF 75% hard light — one layer, and the only material whose blur
         // radius is not 100.
         Chrome -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.75 blend: FoundationBlendMode.HardLight }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.75 blend: .HardLight }
             upper: FoundationTintLayer {}
             backgroundBlurRadius: 50.0
         };
@@ -419,32 +419,32 @@ function foundationMaterialTintDark(style: borrow FoundationMaterialStyle) -> Fo
     match style {
         // #000000 2% normal.
         Ultrathin -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.02 blend: FoundationBlendMode.Normal }
+            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.02 blend: .Normal }
             upper: FoundationTintLayer {}
             backgroundBlurRadius: 100.0
         };
         // #000000 26% normal.
         Thin -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.26 blend: FoundationBlendMode.Normal }
+            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.26 blend: .Normal }
             upper: FoundationTintLayer {}
             backgroundBlurRadius: 100.0
         };
         // #000000 41% normal.
         Regular -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.41 blend: FoundationBlendMode.Normal }
+            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.41 blend: .Normal }
             upper: FoundationTintLayer {}
             backgroundBlurRadius: 100.0
         };
         // #000000 60% normal.
         Thick -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.60 blend: FoundationBlendMode.Normal }
+            lower: FoundationTintLayer { color: foundationBlack() alpha: 0.60 blend: .Normal }
             upper: FoundationTintLayer {}
             backgroundBlurRadius: 100.0
         };
         // #1C1C1C 90% normal, then #7C7C7C 100% overlay.
         Chrome -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationGrey(28.0) alpha: 0.90 blend: FoundationBlendMode.Normal }
-            upper: FoundationTintLayer { color: foundationGrey(124.0) alpha: 1.0 blend: FoundationBlendMode.Overlay }
+            lower: FoundationTintLayer { color: foundationGrey(28.0) alpha: 0.90 blend: .Normal }
+            upper: FoundationTintLayer { color: foundationGrey(124.0) alpha: 1.0 blend: .Overlay }
             backgroundBlurRadius: 100.0
         };
     }
@@ -476,8 +476,8 @@ function foundationLiquidGlassTint(scheme: borrow FoundationScheme) -> Foundatio
     match scheme {
         // #FFFFFF 70% lighten, then #BFBFBF 10% darken.
         Light -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.70 blend: FoundationBlendMode.Lighten }
-            upper: FoundationTintLayer { color: foundationGrey(191.0) alpha: 0.10 blend: FoundationBlendMode.Darken }
+            lower: FoundationTintLayer { color: foundationWhite() alpha: 0.70 blend: .Lighten }
+            upper: FoundationTintLayer { color: foundationGrey(191.0) alpha: 0.10 blend: .Darken }
             backgroundBlurRadius: 16.0
         };
         // #1A1A1A at 70% and 90% luminosity, then #1A1A1A lighten. Three layers,
@@ -485,8 +485,8 @@ function foundationLiquidGlassTint(scheme: borrow FoundationScheme) -> Foundatio
         // the pair collapses to a single near-opaque #1A1A1A, which is what they
         // resolve to over anything but a strongly coloured backdrop.
         Dark -> return FoundationTintStack {
-            lower: FoundationTintLayer { color: foundationGrey(26.0) alpha: 0.90 blend: FoundationBlendMode.Normal }
-            upper: FoundationTintLayer { color: foundationGrey(26.0) alpha: 1.0 blend: FoundationBlendMode.Lighten }
+            lower: FoundationTintLayer { color: foundationGrey(26.0) alpha: 0.90 blend: .Normal }
+            upper: FoundationTintLayer { color: foundationGrey(26.0) alpha: 1.0 blend: .Lighten }
             backgroundBlurRadius: 16.0
         };
     }

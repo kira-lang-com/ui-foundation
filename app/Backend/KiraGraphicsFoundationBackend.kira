@@ -395,7 +395,7 @@ class KiraGraphicsFoundationBackend {
         // surface's own fill/border/children draw over it through the normal path.
         // The bounds decide whether this surface can share the layer already open or
         // is stacked on it and needs a capture of its own.
-        if material == FoundationMaterial.LiquidGlass && self.metalActive {
+        if material == .LiquidGlass && self.metalActive {
             self.drewVisibleUi = true
             uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
             // What adaptive text has to measure is the WHOLE wash, both fills and
@@ -571,12 +571,7 @@ class KiraGraphicsFoundationBackend {
     function materialTint(material: borrow FoundationMaterial) -> Color {
         match material {
             Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
-            Translucent -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.06 };
             Frosted -> return Color { r: 0.88 g: 0.94 b: 1.0 a: 0.10 };
-            LayeredGlass -> return Color { r: 0.75 g: 0.90 b: 1.0 a: 0.12 };
-            Luminous -> return Color { r: 0.60 g: 0.80 b: 1.0 a: 0.16 };
-            Metallic -> return Color { r: 0.72 g: 0.75 b: 0.82 a: 0.14 };
-            Crystal -> return Color { r: 0.92 g: 0.98 b: 1.0 a: 0.12 };
             // Metal path: a subtle wash mixed over the refracted backdrop sample
             // (mode-3 tint) — near-zero, matching the platform "clear" appearance.
             // Sokol fallback: drawn as a translucent tint quad.

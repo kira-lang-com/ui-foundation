@@ -1,0 +1,95 @@
+// Isotropic 3x3 gaussian blur for the liquid-glass backdrop pyramid.
+//
+// Two passes produce both useful levels: scene -> near, then near -> far. That
+// preserves the progressive sharp -> near -> far material without four full
+// render encoders.
+//
+// The vertex stage draws one oversized triangle rather than a quad: three
+// vertices cover the screen with no diagonal seam, and the positions are
+// derived from the vertex index rather than pulled from a buffer.
+
+type VertexIn {
+    @builtin(vertex_index)
+    let vid: UInt
+}
+
+type VertexOut {
+    @builtin(position)
+    let clip_position: Float4
+    let uv: Float2
+    let texel: Float2
+}
+
+type FragmentOut {
+    let color: Float4
+}
+
+type BlurParams {
+    // Source resolution, then the radius in texels.
+    let width: Float
+    let height: Float
+    let radius: Float
+    let padding: Float
+}
+
+// The calibrated 3x3 kernel: centre, the four edge taps, then the four corners.
+// They sum to 1, which is what keeps a repeated pass from darkening the image.
+const weightCentre: Float = 0.2270270270
+const weightEdge: Float = 0.1195945946
+const weightCorner: Float = 0.0736486486
+
+shader UiBlur {
+    group Pass {
+        uniform params: BlurParams
+        texture source: Texture2d
+        sampler linear: Sampler
+    }
+
+    vertex {
+        input VertexIn
+        output VertexOut
+
+        function entry(input: VertexIn) -> VertexOut {
+            let far = 3.0
+            let near = 0.0 - 1.0
+            let x = near
+            if input.vid == UInt(1) {
+                x = far
+            }
+            let y = near
+            if input.vid == UInt(2) {
+                y = far
+            }
+            let out: VertexOut
+            out.clip_position = Float4(x, y, 0.0, 1.0)
+            out.uv = Float2((x + 1.0) * 0.5, (1.0 - y) * 0.5)
+            out.texel = Float2(
+                params.radius / max(params.width, 1.0),
+                params.radius / max(params.height, 1.0)
+            )
+            return out
+        }
+    }
+
+    fragment {
+        input VertexOut
+        output FragmentOut
+
+        function entry(input: VertexOut) -> FragmentOut {
+            let dx = Float2(input.texel.x, 0.0)
+            let dy = Float2(0.0, input.texel.y)
+            let c = sample(source, linear, input.uv) * weightCentre
+            c = c + sample(source, linear, input.uv + dx) * weightEdge
+            c = c + sample(source, linear, input.uv - dx) * weightEdge
+            c = c + sample(source, linear, input.uv + dy) * weightEdge
+            c = c + sample(source, linear, input.uv - dy) * weightEdge
+            c = c + sample(source, linear, input.uv + dx + dy) * weightCorner
+            c = c + sample(source, linear, input.uv + dx - dy) * weightCorner
+            c = c + sample(source, linear, input.uv - dx + dy) * weightCorner
+            c = c + sample(source, linear, input.uv - dx - dy) * weightCorner
+            let result: FragmentOut
+            result.color = c
+            return result
+        }
+    }
+}

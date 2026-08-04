@@ -193,8 +193,8 @@ function foundationGraphicsHud(stats: borrow FoundationGraphicsStats) -> Foundat
         border: foundationFpsBadgeBorder(),
         borderWidth: 1.0,
         radius: 10.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets { top: 9.0 trailing: 12.0 bottom: 9.0 leading: 12.0 },
         clipContent: false,
@@ -213,8 +213,8 @@ function foundationFpsBadge(fps: Int) -> FoundationView {
         border: foundationFpsBadgeBorder(),
         borderWidth: 1.0,
         radius: 8.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets {
             top: 4.0
@@ -236,8 +236,8 @@ function foundationGraphicsStatsBadge(stats: borrow FoundationGraphicsStats) -> 
         border: foundationFpsBadgeBorder(),
         borderWidth: 1.0,
         radius: 8.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets { top: 4.0 trailing: 9.0 bottom: 4.0 leading: 9.0 },
         clipContent: false,
@@ -256,8 +256,8 @@ function foundationFpsSmokeView() -> FoundationView {
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets {},
         clipContent: false
@@ -372,7 +372,7 @@ function foundationGraphicsOverlay(stats: borrow FoundationGraphicsStats, expand
 
 function foundationComposeWithGraphics(root: FoundationView, stats: borrow FoundationGraphicsStats, expanded: Bool) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Frame
+        kind: .Frame
         width: SizeMode.Fill
         height: SizeMode.Fill
         alignment: Alignment.TopLeading
@@ -398,7 +398,7 @@ function foundationComposeWithFps(root: FoundationView, fps: Int) -> FoundationV
         }
     )
     return FoundationView {
-        kind: FoundationViewKind.Frame
+        kind: .Frame
         width: SizeMode.Fill
         height: SizeMode.Fill
         alignment: Alignment.TopLeading

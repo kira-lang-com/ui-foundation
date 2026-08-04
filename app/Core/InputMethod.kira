@@ -74,12 +74,10 @@ function imeLowerIndex(codepoint: Int) -> Int {
 // and distinct syllables never collide.
 function imeKeyFromLetters(letters: borrow [Int]) -> Int {
     var key = 0
-    var index = 0
-    while index < letters.count {
+        for index in 0..letters.count {
         let slot = imeLowerIndex(letters[index])
         key = key * 27 + slot
-        index = index + 1
-    }
+            }
     return key
 }
 

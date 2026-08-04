@@ -8,7 +8,7 @@ function Row(
     crossAxisAlignment: CrossAlignment,
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Row
+        kind: .Row
         width: width
         height: height
         gap: spacing
@@ -27,7 +27,7 @@ function Column(
     crossAxisAlignment: CrossAlignment,
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Column
+        kind: .Column
         width: width
         height: height
         gap: spacing
@@ -39,7 +39,7 @@ function Column(
 
 function Expanded(child: FoundationView, flex: Int) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Expanded
+        kind: .Expanded
         flex: flex
         children: [child]
     }
@@ -54,7 +54,7 @@ function Frame(
     padding: EdgeInsets,
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Frame
+        kind: .Frame
         width: width
         height: height
         flex: flex
@@ -66,7 +66,7 @@ function Frame(
 
 function Spacer(minLength: Float, flex: Int) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Spacer
+        kind: .Spacer
         width: SizeMode.Fill
         height: SizeMode.Fill
         flex: flex
@@ -76,7 +76,7 @@ function Spacer(minLength: Float, flex: Int) -> FoundationView {
 
 function LayoutPriority(child: FoundationView, value: Int) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.LayoutPriority
+        kind: .LayoutPriority
         flex: value
         children: [child]
     }

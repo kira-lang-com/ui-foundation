@@ -1,0 +1,273 @@
+import Foundation
+import KiraGraphics
+// Glyph and icon rasterization for the batched UI compositor: the atlas cache, the
+// subpixel phase grid, and the float/metric reads that recover FreeType's numbers
+// from raw memory.
+//
+// A glyph is cached by (codepoint, size key, phase). The size key quantizes the
+// point size so a slider does not thrash the atlas, and the phase splits a pixel
+// four ways horizontally so a run positioned at a fractional pen stays evenly
+// spaced instead of snapping. Both are what let one atlas serve every run.
+
+// 2^n for any integer n (the only non-trivial part of IEEE-754 float reconstruction;
+// exponents for glyph advances / metrics are small).
+function uiPow2(n: Int) -> Float {
+    var r = 1.0
+    var k = n
+    while k > 0 {
+        r = r * 2.0
+        k = k - 1
+    }
+    while k < 0 {
+        r = r / 2.0
+        k = k + 1
+    }
+    return r
+}
+
+// Decode an IEEE-754 single-precision bit pattern (read as u32) into a Kira Float.
+// Used because F32-return FFI does not lower; the engine's 32-bit float fields are
+// read as u32 and reconstructed here with integer arithmetic only.
+function uiF32FromBits(bits: U32) -> Float {
+    let b = Int(bits)
+    let sign = b / 2147483648
+    let rem = b % 2147483648
+    let exp = rem / 8388608
+    let mant = rem % 8388608
+    if exp == 0 {
+        return 0.0
+    }
+    if exp == 255 {
+        return 0.0
+    }
+    let frac = 1.0 + Float(mant) / 8388608.0
+    var value = frac * uiPow2(exp - 127)
+    if sign == 1 {
+        value = 0.0 - value
+    }
+    return value
+}
+
+@Native
+function uiMemReadFloat(ptr: RawPtr, offset: U64) -> Float {
+    return uiF32FromBits(uiMemReadU32(ptr, offset))
+}
+
+// Read a signed 32-bit int field as u32 and sign-correct (I32-return FFI does not
+// lower).
+@Native
+function uiMemReadInt(ptr: RawPtr, offset: U64) -> Int {
+    let raw = Int(uiMemReadU32(ptr, offset))
+    if raw >= 2147483648 {
+        return raw - 4294967296
+    }
+    return raw
+}
+
+// Read a single coverage byte. The 1-byte field is read through a u32 load (U8-return
+// FFI is not known to lower) and masked to its low 8 bits.
+@Native
+function uiMemReadByte(ptr: RawPtr, offset: U64) -> Int {
+    return Int(uiMemReadU32(ptr, offset)) % 256
+}
+
+function uiBatchSizeKey(sizePx: Float) -> Int {
+    var s = Int(sizePx)
+    if s < 1 {
+        s = 1
+    }
+    return s
+}
+
+// Text is rasterized at TWICE the device resolution and drawn down through a linear
+// sampler — supersampling, and the reason it is here is worth writing down.
+//
+// A glyph rasterized at exactly device resolution gets one coverage sample per
+// pixel: the best a scan converter can do, and still visibly coarser than macOS on
+// the same display. The system's own text does not look better because Core Text
+// out-rasterizes FreeType; it looks better because on a Retina backing it is drawn
+// at 2x and everything downstream — Core Animation, screen capture, a remote
+// desktop stream — resolves it down with the extra samples still in hand.
+//
+// A window at 1x gets none of that, and the difference is not subtle when the two
+// sit side by side in one screenshot. So the glyphs bring their own: rasterize at
+// 2x, hand the sampler a bitmap with four samples per final pixel, and let it
+// average them. That is supersampled text at any backing scale, and it costs
+// nothing but atlas space.
+//
+// TEXT ONLY. Surfaces, borders and glass are analytic — their edges come from an
+// SDF evaluated per pixel, which is already exact and has nothing to gain.
+function uiTextOversample() -> Float { return 2.0 }
+
+// How many horizontal positions within a pixel a glyph may be rasterized at.
+//
+// Four — the quarter pixel Core Graphics quantizes to.
+//
+// Two was a false economy, and the way it failed is instructive: at half-pixel
+// granularity a stem lands ON a device pixel boundary far too often, and a stem on
+// a boundary renders with no partial coverage at either edge. The result is text
+// that is technically crisper than the platform's and reads as WORSE — hard,
+// stair-stepped letterforms next to Apple's smooth ones. The softness in system
+// text is not blur; it is stems sitting off the grid at quarter-pixel offsets, each
+// edge carrying real coverage.
+//
+// So the atlas pays for it: four phases of a 2x bitmap. That is more than the
+// original scheme held, and it is what the look is made of.
+function uiGlyphSubpixelPhases() -> Int { return 4 }
+
+// The phase a pen position falls in, and the 26.6 outline shift that phase means.
+function uiGlyphPhaseOf(devicePen: Float) -> Int {
+    let whole = Float(Int(devicePen))
+    var frac = devicePen - whole
+    if frac < 0.0 {
+        frac = frac + 1.0
+    }
+    var phase = Int(frac * Float(uiGlyphSubpixelPhases()))
+    if phase < 0 {
+        phase = 0
+    }
+    if phase >= uiGlyphSubpixelPhases() {
+        phase = uiGlyphSubpixelPhases() - 1
+    }
+    return phase
+}
+
+// The outline shift a phase means, in 26.6 fixed point. The shift is applied in the
+// RASTER grid, which oversampling has made finer than the device grid, so the
+// oversample factor is part of the conversion: a half-device-pixel phase is a whole
+// raster pixel at 2x.
+function uiGlyphPhaseOffset(phase: Int) -> Int {
+    return phase * 64 * Int(uiTextOversample()) / uiGlyphSubpixelPhases()
+}
+
+// A cached glyph is a (character, size, subpixel phase) — the phase is part of the
+// identity because the coverage differs, which is the whole point.
+function uiBatchGlyphCacheKey(codepoint: Int, sizeKey: Int, phase: Int) -> Int {
+    return (codepoint * 1024 + sizeKey) * uiGlyphSubpixelPhases() + phase
+}
+
+// Ensure the face's working size matches sizeKey (caching the size's vertical
+// metrics). Returns false if no font is available.
+@Native
+function uiBatchSetSize(batchPtr: RawPtr, sizeKey: Int) -> Bool {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if !state.fontReady {
+        return false
+    }
+    if state.fontSizeSet == sizeKey {
+        return true
+    }
+    let pixelSize = Float(sizeKey)
+    let applied = uiTextFaceSetPixelSize(state.face, pixelSize)
+    if applied == 0 {
+        return false
+    }
+    let m = uiMemAlloc(uiVMetricsSize())
+    uiTextFaceVMetrics(state.face, m)
+    state.ascender = uiMemReadFloat(m, 0)
+    state.descender = uiMemReadFloat(m, 4)
+    uiMemFree(m)
+    state.fontSizeSet = sizeKey
+    return true
+}
+
+@Native
+function uiBatchAscender(batchPtr: RawPtr) -> Float {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.ascender
+}
+
+@Native
+function uiBatchDescender(batchPtr: RawPtr) -> Float {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    return state.descender
+}
+
+// Rasterize a glyph (if not already cached), pack its coverage into the atlas, and
+// return the cache slot index (-1 if it could not be produced).
+@Native
+function uiBatchEnsureGlyph(batchPtr: RawPtr, graphics: borrow Graphics, codepoint: Int, sizeKey: Int, phase: Int = 0) -> Int {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    let key = uiBatchGlyphCacheKey(codepoint, sizeKey, phase)
+        for existing in 0..state.glyphs.count {
+        if state.glyphs[existing].key == key {
+            return existing
+        }
+            }
+
+    let glyphIndex = uiTextFaceGlyphIndex(state.face, codepoint)
+    let bm = uiMemAlloc(uiGlyphBitmapSize())
+    let rendered = uiTextFaceRenderGlyphOffset(state.face, glyphIndex, I32(uiGlyphPhaseOffset(phase)), bm)
+    if rendered == 0 {
+        uiMemFree(bm)
+        return -1
+    }
+    let gw = uiMemReadInt(bm, uiGlyphOffWidth())
+    let gh = uiMemReadInt(bm, uiGlyphOffRows())
+    let bearingX = uiMemReadInt(bm, uiGlyphOffBearingX())
+    let bearingY = uiMemReadInt(bm, uiGlyphOffBearingY())
+    let advance = uiMemReadFloat(bm, uiGlyphOffAdvance())
+    let pitch = uiMemReadInt(bm, uiGlyphOffPitch())
+    let buffer = uiMemReadPtr(bm, uiGlyphOffBuffer())
+
+    var slot = UiGlyphSlot {
+        key: key
+        advance: advance
+        bearingX: bearingX
+        bearingY: bearingY
+        w: gw
+        h: gh
+        valid: true
+    }
+
+    if gw > 0 && gh > 0 && !uiPtrIsNull(buffer) {
+        if state.cursorX + gw + uiAtlasGutter() > state.atlasW {
+            state.cursorX = uiAtlasGutter()
+            state.cursorY = state.cursorY + state.rowHeight + uiAtlasGutter()
+            state.rowHeight = 0
+        }
+        if state.cursorY + gh + uiAtlasGutter() <= state.atlasH {
+            slot.atlasX = state.cursorX
+            slot.atlasY = state.cursorY
+            var pixels: [Int] = []
+            var row = 0
+            while row < gh {
+                var col = 0
+                while col < gw {
+                    let cov = uiMemReadByte(buffer, row * pitch + col)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    pixels.append(cov)
+                    col = col + 1
+                }
+                row = row + 1
+            }
+            graphics.updateTextureRegion(GraphicsTexture {
+                handle: BackendTextureHandle {
+                    id: state.atlasTextureId
+                }
+                id: state.atlasTextureId
+            }, slot.atlasX, slot.atlasY, gw, gh, pixels)
+            state.cursorX = state.cursorX + gw + uiAtlasGutter()
+            if gh > state.rowHeight {
+                state.rowHeight = gh
+            }
+        } else {
+            slot.valid = false
+        }
+    }
+
+    uiMemFree(bm)
+    state.glyphs.append(move slot)
+    return state.glyphs.count - 1
+}
+
+@Native
+function uiBatchGlyphSlot(batchPtr: RawPtr, index: Int) -> UiGlyphSlot {
+    var state = nativeRecover<UiBatchState>(batchPtr)
+    if index < 0 || index >= state.glyphs.count {
+        return UiGlyphSlot {}
+    }
+    return state.glyphs[index]
+}
