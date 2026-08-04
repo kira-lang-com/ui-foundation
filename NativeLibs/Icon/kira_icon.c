@@ -31,6 +31,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* `M_PI` is not ISO C. glibc and Apple's libc define it in <math.h> as an
+ * extension, so this compiled everywhere it had been built; the UCRT defines it
+ * only when <math.h> is included with `_USE_MATH_DEFINES` already set, so the
+ * first Windows build failed on every use of it here. Naming it once, guarded,
+ * is portable to both and to a libc that offers neither — and it cannot
+ * conflict with a definition that is already there. */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 /* ---------------------------------------------------------------- geometry */
 
 typedef struct {
