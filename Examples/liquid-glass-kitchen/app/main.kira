@@ -1288,6 +1288,7 @@ function main() {
             }
             return
         },
+        needsRebuild: foundationNoContinuousRebuild,
         showFpsOverlay: false
     )
     return
