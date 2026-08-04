@@ -433,7 +433,7 @@ function main() {
                 demo.schemeAt = target
             } else {
                 if demo.schemeProgress < 1.0 {
-                    let seconds = foundationFrameDuration(frame, foundationFrameUsesMetal(frame))
+                    let seconds = foundationFrameDuration(frame, foundationFrameHasGpuTelemetry(frame))
                     demo.schemeProgress = demo.schemeProgress + schemeStep(seconds) / span
                     if demo.schemeProgress > 1.0 {
                         demo.schemeProgress = 1.0

@@ -1,0 +1,42 @@
+import Foundation
+import KiraGraphics
+// Where the compositor binds each shader resource, and through which encoder
+// group.
+//
+// Split out of UiBatch.kira because these numbers are a contract with the
+// `.ksl` files rather than part of the batch state: every one of them is read
+// by a bind-group call on one side and a group declaration on the other, and
+// they are the first thing to check when a shader reads the wrong resource.
+
+// Where the shader's resources live. A KSL group numbers its resources in
+// declaration order, and MSL takes those numbers straight for textures and
+// samplers while a vertex-stage storage buffer lands one above its slot (vertex
+// buffer 0 holds the attribute stream). `Shaders/UiBatch.ksl` declares
+// verts, atlas, atlasSmp, external, externalSmp, backdrop, backdropSmp,
+// nearBlur, nearSmp — so these are the numbers the host has to bind against.
+function uiSlotVerts() -> Int { return 0 }
+function uiSlotAtlasTexture() -> Int { return 1 }
+function uiSlotAtlasSampler() -> Int { return 2 }
+function uiSlotExternalTexture() -> Int { return 3 }
+function uiSlotExternalSampler() -> Int { return 4 }
+function uiSlotBackdropTexture() -> Int { return 5 }
+function uiSlotBackdropSampler() -> Int { return 6 }
+function uiSlotNearTexture() -> Int { return 7 }
+function uiSlotNearSampler() -> Int { return 8 }
+
+// The blur chain is its own pipeline with its own group, so it numbers from
+// zero again: `Shaders/UiBlur.ksl` declares params, source, linear.
+function uiSlotBlurParams() -> Int { return 0 }
+function uiSlotBlurTexture() -> Int { return 1 }
+function uiSlotBlurSampler() -> Int { return 2 }
+
+// The opaque background reads the photo through the compositor's own external
+// and backdrop groups, so `Shaders/UiBackground.ksl` writes those slots with
+// `@binding` and only its params slot is its own.
+function uiSlotBackgroundParams() -> Int { return 0 }
+
+// Which encoder group slot each of those is bound through (the encoder has four).
+function uiGroupVerts() -> Int { return 0 }
+function uiGroupAtlas() -> Int { return 1 }
+function uiGroupExternal() -> Int { return 2 }
+function uiGroupSoftNear() -> Int { return 3 }

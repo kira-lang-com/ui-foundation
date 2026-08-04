@@ -22,10 +22,10 @@ function RunFoundationApp(root: FoundationView) {
     app.onFrame { frame in
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
-        let metalActive = foundationFrameUsesMetal(frame)
+        let gpuTelemetry = foundationFrameHasGpuTelemetry(frame)
         var vpW = 1280
         var vpH = 720
-        if metalActive {
+        if gpuTelemetry {
             vpW = foundationMetalViewportWidth(frame)
             vpH = foundationMetalViewportHeight(frame)
         } else {
@@ -45,7 +45,7 @@ function RunFoundationApp(root: FoundationView) {
 
         let graphics = foundationFrameGraphics(frame)
         var batchPtr = uiBatchNullPtr()
-        if metalActive {
+        if gpuTelemetry {
             if !state.uiBatchReady {
                 state.uiBatchPtr = uiBatchCreate(graphics)
                 state.uiBatchReady = true
@@ -53,7 +53,7 @@ function RunFoundationApp(root: FoundationView) {
             batchPtr = state.uiBatchPtr
         }
 
-        let rawStats = foundationFrameGraphicsStats(frame, metalActive)
+        let rawStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
         let rawFps = rawStats.fps
 
         // Re-present fast path: the displayed FPS (`state.displayedFps`, the value
@@ -64,7 +64,7 @@ function RunFoundationApp(root: FoundationView) {
         // persist in state, so input keeps working across re-presented frames.
         if state.frameCount >= 4 && foundationShouldRepresent(
             state.hasPresentedFrame,
-            metalActive,
+            gpuTelemetry,
             state.uiBatchReady,
             state.displayedFps,
             state.lastPresentedFps,
@@ -95,7 +95,7 @@ function RunFoundationApp(root: FoundationView) {
         // (including liquid-glass capture/blur passes) is owned by uiBatchPresent
         // after the walk. Sokol draws immediately and keeps its pass open here.
         var encoder = makeRenderEncoder()
-        if !metalActive {
+        if !gpuTelemetry {
             // The standalone placeholder is replaced immediately on this path;
             // release it before the pass encoder overwrites it.
             nativeStateFree(encoder.storage)
@@ -110,7 +110,7 @@ function RunFoundationApp(root: FoundationView) {
             encoder: encoder
             graphics: graphics
             uiBatchPtr: batchPtr
-            metalActive: metalActive
+            gpuTelemetry: gpuTelemetry
         }
         let viewport = state.ui.viewport
         if !state.announcedTree && foundationRenderableViewCount(state.root) > 0 {
@@ -173,7 +173,7 @@ function RunFoundationApp(root: FoundationView) {
 
         state.frameCount = state.frameCount + 1
         backend.endFrame()
-        if metalActive {
+        if gpuTelemetry {
             uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
             // The metal path never handed the placeholder to a pass; release it
             // now that the batch has presented. (On the Sokol path the pass
@@ -183,7 +183,7 @@ function RunFoundationApp(root: FoundationView) {
             frame.endPass()
         }
         backend.submit()
-        if metalActive {
+        if gpuTelemetry {
             state.lastPresentedFps = state.displayedFps
             state.lastPresentedViewportW = vpW
             state.lastPresentedViewportH = vpH
@@ -264,7 +264,7 @@ function RunFoundationSurfaceTextApp(
             encoder: encoder
             graphics: foundationFrameGraphics(frame)
             uiBatchPtr: uiBatchNullPtr()
-            metalActive: false
+            gpuTelemetry: false
         }
         backend.beginFrame(1280, 720)
         backend.drawSurface(state.surfaceBounds, state.surfacePaint)
