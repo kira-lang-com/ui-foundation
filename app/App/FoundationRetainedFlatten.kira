@@ -1,0 +1,424 @@
+import KiraGraphics
+import Foundation
+import KiraLayout
+
+// The flat collection pass: walking the retained tree into the parallel arrays
+// the renderer reads.
+//
+// Separate from reconciliation because it answers a different question.
+// Reconciliation decides which nodes survive a frame; this decides what the
+// renderer is handed, and it is written to avoid the VM's deep clone of an
+// aggregate at a function boundary — which is why the accumulator is threaded
+// rather than returned by value.
+// ---------------------------------------------------------------------------
+// Flat collection pass. The VM deep-clones aggregate values at function
+// boundaries, so recursing with the whole FoundationRetainedTree in hand cost
+// O(tree) per node — ~11s to mount the 878-node editor chrome. The recursion
+// below carries only flat Int arrays (cheap to clone); mount/update then
+// assemble the node array in a single non-recursive pass.
+// ---------------------------------------------------------------------------
+
+function foundationViewKindFromCode(code: Int) -> FoundationViewKind {
+    var kind = FoundationViewKind.Column
+    if code == 1 { kind = FoundationViewKind.Row }
+    if code == 3 { kind = FoundationViewKind.Expanded }
+    if code == 4 { kind = FoundationViewKind.Frame }
+    if code == 5 { kind = FoundationViewKind.Spacer }
+    if code == 6 { kind = FoundationViewKind.Surface }
+    if code == 7 { kind = FoundationViewKind.Text }
+    if code == 8 { kind = FoundationViewKind.HitArea }
+    if code == 9 { kind = FoundationViewKind.LayoutPriority }
+    if code == 10 { kind = FoundationViewKind.TextureView }
+    if code == 11 { kind = FoundationViewKind.Icon }
+    return kind
+}
+
+// The flat accumulator lives behind ONE persistent nativeState box (ambient
+// state slot), because a `borrow mut` parameter cannot be re-passed onward:
+// the recursion passes the Copy RawPtr handle instead and each level recovers
+// the box and hands its `acc` FIELD to a borrow-mut emit helper — zero clones
+// per node (the earlier value-threaded accumulator cloned its arrays at every
+// call/return, O(n^2) ints).
+struct FoundationRetainedScratch {
+    var acc: FoundationRetainedFlatAcc = FoundationRetainedFlatAcc {}
+}
+
+function foundationRetainedScratchHandle() -> RawPtr {
+    if uiStateSlotHas("kira.foundation.retained.scratch") == false {
+        uiStateSlotPut("kira.foundation.retained.scratch", nativeUserData(nativeState(FoundationRetainedScratch {})))
+    }
+    return uiStateSlotGet("kira.foundation.retained.scratch")
+}
+
+struct FoundationRetainedFlatAcc {
+    var nextId: Int = 1
+    var ids: [Int] = []
+    var parentIds: [Int] = []
+    var ordinals: [Int] = []
+    var keys: [Int] = []
+    var kindCodes: [Int] = []
+    var childCounts: [Int] = []
+    var layoutSigs: [Int] = []
+    var renderSigs: [Int] = []
+    var reusedFlags: [Int] = []
+    var reusedBits: [Bool] = []
+}
+
+function foundationRetainedEmitFresh(
+    a: borrow mut FoundationRetainedFlatAcc,
+    view: borrow FoundationView,
+    parentId: Int,
+    ordinal: Int,
+) -> Int {
+    let nodeId = a.nextId
+    a.nextId = nodeId + 1
+    a.ids.append(nodeId)
+    a.parentIds.append(parentId)
+    a.ordinals.append(ordinal)
+    a.keys.append(view.key)
+    a.kindCodes.append(foundationViewKindCode(view.kind))
+    a.childCounts.append(view.children.count)
+    a.layoutSigs.append(foundationLayoutSignature(view))
+    a.renderSigs.append(foundationRenderSignature(view))
+    a.reusedFlags.append(0)
+    return nodeId
+}
+
+function foundationRetainedCollectFlat(
+    view: borrow FoundationView,
+    parentId: Int,
+    ordinal: Int,
+    scratchHandle: RawPtr,
+) {
+    var scratch = nativeRecover<FoundationRetainedScratch>(scratchHandle)
+    let nodeId = foundationRetainedEmitFresh(scratch.acc, view, parentId, ordinal)
+    var childOffset = 0
+    let childTotal = view.children.count
+    while childOffset < childTotal {
+        foundationRetainedCollectFlat(view.children[childOffset], nodeId, childOffset, scratchHandle)
+        childOffset = childOffset + 1
+    }
+    return
+}
+
+// Match a view against the previous frame's children of `parentId` (CSR index),
+// honoring keys, kind, and one-reuse-per-node — the flat-pass mirror of
+// foundationRetainedMatchReusableId.
+function foundationRetainedMatchFlat(
+    idx: borrow FoundationRetainedPrevIndex,
+    previous: borrow [FoundationRetainedNode],
+    bits: borrow [Bool],
+    kindCode: Int,
+    key: Int,
+    parentId: Int,
+    childOrdinal: Int,
+) -> Int {
+    if parentId < 0 || parentId >= idx.childStart.count {
+        return 0
+    }
+    let start = idx.childStart[parentId]
+    let count = idx.childCount[parentId]
+    var reusableId = 0
+    var c = 0
+    while c < count {
+        let nodeIndex = idx.childList[start + c]
+        if reusableId == 0 && foundationViewKindCode(previous[nodeIndex].kind) == kindCode {
+            let candidateId = previous[nodeIndex].id
+            var alreadyReused = false
+            if candidateId >= 0 && candidateId < bits.count {
+                alreadyReused = bits[candidateId]
+            }
+            if !alreadyReused {
+                if key != 0 {
+                    if previous[nodeIndex].key == key {
+                        reusableId = candidateId
+                    }
+                } else {
+                    if previous[nodeIndex].key == 0 && previous[nodeIndex].childOrdinal == childOrdinal {
+                        reusableId = candidateId
+                    }
+                }
+            }
+        }
+        c = c + 1
+    }
+    return reusableId
+}
+
+function foundationRetainedEmitReconcile(
+    a: borrow mut FoundationRetainedFlatAcc,
+    view: borrow FoundationView,
+    previous: borrow [FoundationRetainedNode],
+    idx: borrow FoundationRetainedPrevIndex,
+    parentId: Int,
+    ordinal: Int,
+) -> Int {
+    let kindCode = foundationViewKindCode(view.kind)
+    let reusableId = foundationRetainedMatchFlat(idx, previous, a.reusedBits, kindCode, view.key, parentId, ordinal)
+    var nodeId = reusableId
+    var reusedFlag = 1
+    if reusableId == 0 {
+        nodeId = a.nextId
+        a.nextId = nodeId + 1
+        reusedFlag = 0
+    } else {
+        while a.reusedBits.count <= reusableId {
+            a.reusedBits.append(false)
+        }
+        a.reusedBits[reusableId] = true
+    }
+    a.ids.append(nodeId)
+    a.parentIds.append(parentId)
+    a.ordinals.append(ordinal)
+    a.keys.append(view.key)
+    a.kindCodes.append(kindCode)
+    a.childCounts.append(view.children.count)
+    a.layoutSigs.append(foundationLayoutSignature(view))
+    a.renderSigs.append(foundationRenderSignature(view))
+    a.reusedFlags.append(reusedFlag)
+    return nodeId
+}
+
+function foundationRetainedCollectReconcileFlat(
+    view: borrow FoundationView,
+    parentId: Int,
+    ordinal: Int,
+    previous: borrow [FoundationRetainedNode],
+    idx: borrow FoundationRetainedPrevIndex,
+    scratchHandle: RawPtr,
+) {
+    var scratch = nativeRecover<FoundationRetainedScratch>(scratchHandle)
+    let nodeId = foundationRetainedEmitReconcile(scratch.acc, view, previous, idx, parentId, ordinal)
+    var childOffset = 0
+    let childTotal = view.children.count
+    while childOffset < childTotal {
+        foundationRetainedCollectReconcileFlat(view.children[childOffset], nodeId, childOffset, previous, idx, scratchHandle)
+        childOffset = childOffset + 1
+    }
+    return
+}
+
+// Build the per-node childIds lists from the flat parent links: CSR counting
+// over parents, then a fill pass in flat (DFS) order, which preserves each
+// parent's ordinal order.
+struct FoundationRetainedChildLists {
+    var starts: [Int] = []
+    var fill: [Int] = []
+    var list: [Int] = []
+}
+
+function foundationRetainedBuildChildLists(acc: borrow FoundationRetainedFlatAcc, indexOfId: borrow [Int]) -> FoundationRetainedChildLists {
+    let total = acc.ids.count
+    var counts: [Int] = []
+    var i = 0
+    while i < total {
+        counts.append(0)
+        i = i + 1
+    }
+    i = 1
+    while i < total {
+        let parentIndex = indexOfId[acc.parentIds[i]]
+        counts[parentIndex] = counts[parentIndex] + 1
+        i = i + 1
+    }
+    var lists = FoundationRetainedChildLists {}
+    var running = 0
+    i = 0
+    while i < total {
+        lists.starts.append(running)
+        lists.fill.append(0)
+        running = running + counts[i]
+        i = i + 1
+    }
+    i = 0
+    while i < running {
+        lists.list.append(0)
+        i = i + 1
+    }
+    i = 1
+    while i < total {
+        let parentIndex = indexOfId[acc.parentIds[i]]
+        let slot = lists.starts[parentIndex] + lists.fill[parentIndex]
+        lists.list[slot] = acc.ids[i]
+        lists.fill[parentIndex] = lists.fill[parentIndex] + 1
+        i = i + 1
+    }
+    return lists
+}
+
+function foundationRetainedChildIdsAt(lists: borrow FoundationRetainedChildLists, index: Int) -> [Int] {
+    var out: [Int] = []
+    let start = lists.starts[index]
+    let count = lists.fill[index]
+    var c = 0
+    while c < count {
+        out.append(lists.list[start + c])
+        c = c + 1
+    }
+    return out
+}
+
+function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetainedTree {
+    let scratchHandle = foundationRetainedScratchHandle()
+    var scratch = nativeRecover<FoundationRetainedScratch>(scratchHandle)
+    scratch.acc = FoundationRetainedFlatAcc {}
+    foundationRetainedCollectFlat(root, 0, 0, scratchHandle)
+    let acc = scratch.acc
+    var tree = FoundationRetainedTree {}
+    tree.nextId = acc.nextId
+    let total = acc.ids.count
+    // Mount ids are dense DFS ids (1..total), so indexOfId is id-1; keep an
+    // explicit map anyway to share the child-list builder with update.
+    var indexOfId: [Int] = []
+    var i = 0
+    while i < acc.nextId {
+        indexOfId.append(-1)
+        i = i + 1
+    }
+    i = 0
+    while i < total {
+        indexOfId[acc.ids[i]] = i
+        i = i + 1
+    }
+    let lists = foundationRetainedBuildChildLists(acc, indexOfId)
+    i = 0
+    while i < total {
+        let nodeId = acc.ids[i]
+        tree.stateSlots.append(FoundationRetainedStateSlot {
+            nodeId: nodeId
+            value: 0
+            active: true
+        })
+        let slotIndex = tree.stateSlots.count - 1
+        while tree.stateSlotIds.count <= nodeId {
+            tree.stateSlotIds.append(-1)
+        }
+        tree.stateSlotIds[nodeId] = slotIndex
+        tree.nodes.append(FoundationRetainedNode {
+            id: nodeId
+            parentId: acc.parentIds[i]
+            key: acc.keys[i]
+            childOrdinal: acc.ordinals[i]
+            kind: foundationViewKindFromCode(acc.kindCodes[i])
+            childIds: foundationRetainedChildIdsAt(lists, i)
+            childCount: acc.childCounts[i]
+            layoutSignature: acc.layoutSigs[i]
+            renderSignature: acc.renderSigs[i]
+            layoutDirty: true
+            renderDirty: true
+            mounted: true
+            stateSlot: slotIndex
+        })
+        i = i + 1
+    }
+    tree.mountCount = total
+    tree.layoutInvalidations = total
+    tree.renderInvalidations = total
+    if total > 0 {
+        tree.rootId = acc.ids[0]
+    }
+    return tree
+}
+
+function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow FoundationView) -> FoundationRetainedTree {
+    var next = move tree
+    let previous = next.nodes
+    next.nodes = []
+    next.reusedIds = []
+    next.reusedIdBits = []
+    next.removedIds = []
+    next.updateCount = next.updateCount + 1
+    let prevIndex = foundationRetainedBuildPrevIndex(previous, next.nextId)
+    let scratchHandle = foundationRetainedScratchHandle()
+    var scratch = nativeRecover<FoundationRetainedScratch>(scratchHandle)
+    var freshAcc = FoundationRetainedFlatAcc {}
+    freshAcc.nextId = next.nextId
+    scratch.acc = move freshAcc
+    foundationRetainedCollectReconcileFlat(root, 0, 0, previous, prevIndex, scratchHandle)
+    let acc = scratch.acc
+    next.nextId = acc.nextId
+    let total = acc.ids.count
+    var indexOfId: [Int] = []
+    var i = 0
+    while i < acc.nextId {
+        indexOfId.append(-1)
+        i = i + 1
+    }
+    i = 0
+    while i < total {
+        indexOfId[acc.ids[i]] = i
+        i = i + 1
+    }
+    let lists = foundationRetainedBuildChildLists(acc, indexOfId)
+    i = 0
+    while i < total {
+        let nodeId = acc.ids[i]
+        let reused = acc.reusedFlags[i] == 1
+        // State slot: reactivate the node's existing slot, or append a new one.
+        var slotIndex = -1
+        if nodeId < next.stateSlotIds.count {
+            slotIndex = next.stateSlotIds[nodeId]
+        }
+        if slotIndex != -1 {
+            next.stateSlots[slotIndex] = FoundationRetainedStateSlot {
+                nodeId: nodeId
+                value: next.stateSlots[slotIndex].value
+                active: true
+            }
+        } else {
+            next.stateSlots.append(FoundationRetainedStateSlot {
+                nodeId: nodeId
+                value: 0
+                active: true
+            })
+            slotIndex = next.stateSlots.count - 1
+            while next.stateSlotIds.count <= nodeId {
+                next.stateSlotIds.append(-1)
+            }
+            next.stateSlotIds[nodeId] = slotIndex
+        }
+        var layoutDirty = true
+        var renderDirty = true
+        let childIds = foundationRetainedChildIdsAt(lists, i)
+        if reused {
+            let prevNodeIndex = prevIndex.indexById[nodeId]
+            layoutDirty = previous[prevNodeIndex].layoutSignature != acc.layoutSigs[i]
+            renderDirty = previous[prevNodeIndex].renderSignature != acc.renderSigs[i]
+            if foundationChildIdsChanged(previous[prevNodeIndex].childIds, childIds) {
+                layoutDirty = true
+                renderDirty = true
+            }
+            next.reusedIds.append(nodeId)
+            next.reusedIdBits = foundationRetainedEnsureBitsCapacity(next.reusedIdBits, nodeId)
+            next.reusedIdBits[nodeId] = true
+        } else {
+            next.mountCount = next.mountCount + 1
+        }
+        if layoutDirty {
+            next.layoutInvalidations = next.layoutInvalidations + 1
+        }
+        if renderDirty {
+            next.renderInvalidations = next.renderInvalidations + 1
+        }
+        next.nodes.append(FoundationRetainedNode {
+            id: nodeId
+            parentId: acc.parentIds[i]
+            key: acc.keys[i]
+            childOrdinal: acc.ordinals[i]
+            kind: foundationViewKindFromCode(acc.kindCodes[i])
+            childIds: move childIds
+            childCount: acc.childCounts[i]
+            layoutSignature: acc.layoutSigs[i]
+            renderSignature: acc.renderSigs[i]
+            layoutDirty: layoutDirty
+            renderDirty: renderDirty
+            mounted: true
+            stateSlot: slotIndex
+        })
+        i = i + 1
+    }
+    if total > 0 {
+        next.rootId = acc.ids[0]
+    }
+    return foundationRetainedCollectRemoved(move next, previous)
+}

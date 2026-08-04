@@ -18,12 +18,7 @@ enum FoundationShape {
 
 enum FoundationMaterial {
     Flat
-    Translucent
     Frosted
-    LayeredGlass
-    Luminous
-    Metallic
-    Crystal
     // REAL liquid glass (Metal path): the content rendered behind the surface is
     // captured into an offscreen texture, gaussian-blurred at half resolution, and
     // composited back through the surface's rounded shape with an edge-refraction

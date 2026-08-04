@@ -20,7 +20,7 @@ function Surface(
     glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.Surface
+        kind: .Surface
         blur: blur
         edgeRefraction: edgeRefraction
         glassMaterial: glassMaterial
@@ -99,8 +99,8 @@ function LiquidGlassSurface(
         border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
         borderWidth: 1.0,
         radius: radius,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.LiquidGlass,
+        shape: .RegularRoundedRect,
+        material: .LiquidGlass,
         effects: [],
         padding: move padding,
         clipContent: clipContent,
@@ -120,8 +120,8 @@ function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> Fo
         border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.08 },
         borderWidth: 1.0,
         radius: 28.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: move padding,
         clipContent: true
@@ -148,8 +148,8 @@ function Card(children: [FoundationView]) -> FoundationView {
         },
         borderWidth: 1.0,
         radius: 16.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Frosted,
+        shape: .RegularRoundedRect,
+        material: .Frosted,
         effects: [
             FoundationEffect.LayerGlow(Glow {
                 color: Color {

@@ -16,7 +16,7 @@ function TextureView(
     transition: Float = 0.0,
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.TextureView
+        kind: .TextureView
         width: width
         height: height
         flex: flex

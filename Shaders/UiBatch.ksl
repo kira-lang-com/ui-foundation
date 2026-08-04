@@ -145,14 +145,14 @@ type FragmentOut {
 // SURFACE now (FoundationGlassMaterial, carried in the vertex) — a value a control
 // can move. What stays here is the shape of the falloff rather than its amount:
 // the sheen's band inside the stroke.
-function sheenStart() -> Float { return 2.0 }
-function sheenEnd() -> Float { return 5.0 }
+const sheenStart: Float = 2.0
+const sheenEnd: Float = 5.0
 
 // The wash ceiling — how opaque a frost step may ever make the surface. It guards
 // the LOWER layer only: that one's opacity is a number a surface (or a slider) can
 // write freely, while the upper layer's comes out of the platform table, where an
 // opacity of 1 is a real value and clamping it would be a transcription error.
-function washCeiling() -> Float { return 0.9 }
+const washCeiling: Float = 0.9
 
 // The shadow stack under a glass element, straight from the design document:
 //   drop shadow  X  1.25  Y 0  blur 0  spread -0.75  #DBDBDB 100%
@@ -174,13 +174,13 @@ function washCeiling() -> Float { return 0.9 }
 // document's values are defaults rather than something compiled in.
 
 // The band at the edge over which blur fades in (the rim stays crisp).
-function blurEdgeStart() -> Float { return 2.0 }
-function blurEdgeEnd() -> Float { return 22.0 }
+const blurEdgeStart: Float = 2.0
+const blurEdgeEnd: Float = 22.0
 
 // Adaptive text: the composite luminance either side of which a run inks itself
 // dark or light, and the dark ink (the light one is white).
-function inkDarkAbove() -> Float { return 0.62 }
-function inkLightBelow() -> Float { return 0.44 }
+const inkDarkAbove: Float = 0.62
+const inkLightBelow: Float = 0.44
 function inkDark() -> Float3 { return Float3(0.07, 0.08, 0.10) }
 
 // --- text ------------------------------------------------------------------
@@ -197,11 +197,11 @@ function inkDark() -> Float3 { return Float3(0.07, 0.08, 0.10) }
 // from the same effect and wants the opposite, or it blooms. The ink's own luminance
 // is the available signal — dark text is on a light background almost by definition
 // — so the exponent slides between the two by it.
-function inkGammaOnLight() -> Float { return 1.0 }
-function inkGammaOnDark() -> Float { return 1.0 }
+const inkGammaOnLight: Float = 1.0
+const inkGammaOnDark: Float = 1.0
 
 function inkCoverageGamma(inkLuma: Float) -> Float {
-    return mix(inkGammaOnLight(), inkGammaOnDark(), clamp(inkLuma, 0.0, 1.0))
+    return mix(inkGammaOnLight, inkGammaOnDark, clamp(inkLuma, 0.0, 1.0))
 }
 
 // Luminance weights (Rec. 601), used for the wash and for the ink decision.
@@ -441,7 +441,7 @@ shader UiBatch {
                 // The capture holds what is UNDER the glass, not the glass, so the
                 // surface's wash is mixed back in before the decision.
                 let lit = mix(behindLuma, input.edgeRefraction, clamp(input.borderWidth, 0.0, 1.0))
-                let ink = smoothstep(inkDarkAbove(), inkLightBelow(), lit)
+                let ink = smoothstep(inkDarkAbove, inkLightBelow, lit)
                 let inkRgb = mix(inkDark(), Float3(1.0, 1.0, 1.0), ink)
                 // Same correction as mode 1, with the ink this run just chose.
                 let inkA = input.fill.w * pow(cov, inkCoverageGamma(dot(inkRgb, lumaWeights())))
@@ -585,8 +585,8 @@ shader UiBatch {
                 // rest near -> far. Cross-fading sharp against fully-soft would
                 // double-image the backdrop rather than blur it.
                 let dial = clamp(input.fill.w, 0.0, 1.0)
-                if inside < blurEdgeEnd() {
-                    dial = dial * smoothstep(blurEdgeStart(), blurEdgeEnd(), inside)
+                if inside < blurEdgeEnd {
+                    dial = dial * smoothstep(blurEdgeStart, blurEdgeEnd, inside)
                 }
                 let split = clamp(input.lens.w, 0.01, 0.99)
                 let rgb = Float3(0.0, 0.0, 0.0)
@@ -623,7 +623,7 @@ shader UiBatch {
                 // modes the platform authors them in (app/Core/Materials.kira).
                 // Applied as given — adapting it to the backdrop is the tint
                 // colour's job, and a named step has to mean what it says.
-                let washA = clamp(input.borderWidth, 0.0, washCeiling())
+                let washA = clamp(input.borderWidth, 0.0, washCeiling)
                 rgb = blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washBlend.x)
                 let washUpperA = clamp(input.wash.w, 0.0, 1.0)
                 rgb = blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washBlend.y)
@@ -638,8 +638,8 @@ shader UiBatch {
                     stroke = smoothstep(0.0, peak, inside) * (1.0 - smoothstep(peak, maximum(input.edge.w, peak + 0.01), inside)) * input.edge.x * lighting
                 }
                 let sheen = 0.0
-                if inside < sheenEnd() {
-                    sheen = (1.0 - smoothstep(sheenStart(), sheenEnd(), inside)) * input.lens.x * clamp(0.0 - n.y, 0.0, 1.0) * lighting
+                if inside < sheenEnd {
+                    sheen = (1.0 - smoothstep(sheenStart, sheenEnd, inside)) * input.lens.x * clamp(0.0 - n.y, 0.0, 1.0) * lighting
                 }
                 rgb = mix(rgb, rgb * input.edge.y, stroke)
                 rgb = rgb + Float3(sheen, sheen, sheen)

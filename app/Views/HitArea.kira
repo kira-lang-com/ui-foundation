@@ -1,6 +1,6 @@
 function HitArea(onPress: () -> Void, children: [FoundationView], disabled: Bool) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.HitArea
+        kind: .HitArea
         disabled: disabled
         onPress: onPress
         children: move children
@@ -21,7 +21,7 @@ function InteractiveHitArea(
     interaction: FoundationInteraction = FoundationInteraction {},
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.HitArea
+        kind: .HitArea
         key: key
         focusable: focusable
         disabled: disabled
@@ -47,7 +47,7 @@ function GestureHitArea(
     children: [FoundationView],
 ) -> FoundationView {
     return FoundationView {
-        kind: FoundationViewKind.HitArea
+        kind: .HitArea
         key: key
         focusable: false
         disabled: disabled

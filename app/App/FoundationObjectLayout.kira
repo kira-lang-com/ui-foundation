@@ -212,15 +212,13 @@ function foundationTreesGeometryEqual(a: borrow LayoutTree, b: borrow LayoutTree
     if a.nodes.count != b.nodes.count {
         return false
     }
-    var i = 0
-    while i < a.nodes.count {
+        for i in 0..a.nodes.count {
         let fa = layoutFrame(a, i)
         let fb = layoutFrame(b, i)
         if fa.x != fb.x || fa.y != fb.y || fa.width != fb.width || fa.height != fb.height {
             return false
         }
-        i = i + 1
-    }
+            }
     return true
 }
 
@@ -437,8 +435,8 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets {
             top: 10.0
@@ -465,8 +463,8 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
             borderWidth: 0.0,
             radius: 0.0,
-            shape: FoundationShape.RegularRoundedRect,
-            material: FoundationMaterial.Flat,
+            shape: .RegularRoundedRect,
+            material: .Flat,
             effects: [],
             padding: EdgeInsets {
                 top: 10.0

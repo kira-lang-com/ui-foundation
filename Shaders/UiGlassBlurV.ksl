@@ -1,0 +1,59 @@
+// Liquid glass blur, the vertical half, reading what the horizontal pass wrote.
+//
+// Both levels are produced in one pass: near and far read the same source and
+// write their own target, so the pyramid costs one dispatch per axis rather
+// than one per level.
+//
+// The target extent arrives in a uniform rather than from a texture query,
+// which KSL cannot express — and the host knows the size it allocated anyway.
+
+import UiGlassBlurCommon
+
+type BlurExtent {
+    let width: UInt
+    let height: UInt
+}
+
+type Q {
+    @builtin(thread_id)
+    let gid: UInt3
+}
+
+shader UiGlassBlurV {
+    // Same declaration order as the horizontal half — uniform, sampler, reads,
+    // writes — so both kernels present one slot layout to the dispatch seam.
+    group Blur {
+        uniform extent: BlurExtent
+        sampler glassSmp: Sampler
+        texture nearIn: Texture2d
+        texture farIn: Texture2d
+        texture write nearOut: Texture2d
+        texture write farOut: Texture2d
+    }
+
+    compute {
+        input Q
+        // Matches the threadgroup the seam dispatches with.
+        threads(16, 16, 1)
+
+        function entry(q: Q) {
+            // A dispatch is rounded up to whole threadgroups, so the tail
+            // threads address texels that do not exist.
+            if q.gid.x >= extent.width {
+                return
+            }
+            if q.gid.y >= extent.height {
+                return
+            }
+            let size = Float2(Float(extent.width), Float(extent.height))
+            let uv = Float2(
+                (Float(q.gid.x) + 0.5) / size.x,
+                (Float(q.gid.y) + 0.5) / size.y
+            )
+            let step = Float2(0.0, 1.0 / size.y)
+            store(nearOut, q.gid.xy, UiGlassBlurCommon.nearFilter(nearIn, glassSmp, uv, step))
+            store(farOut, q.gid.xy, UiGlassBlurCommon.farFilter(farIn, glassSmp, uv, step))
+            return
+        }
+    }
+}

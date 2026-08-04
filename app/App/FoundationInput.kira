@@ -52,13 +52,11 @@ function foundationRegionIndexByKey(regions: borrow [FoundationHitRegionRecord],
     if key == 0 {
         return -1
     }
-    var index = 0
-    while index < regions.count {
+        for index in 0..regions.count {
         if regions[index].key == key {
             return index
         }
-        index = index + 1
-    }
+            }
     return -1
 }
 
@@ -310,15 +308,13 @@ function foundationReconcileFocus(ui: borrow mut FoundationUiContext, regions: b
         }
     }
     if ui.focusedKey == 0 {
-        var i = 0
-        while i < regions.count {
+        for i in 0..regions.count {
             if regions[i].autofocus {
                 ui.focusedKey = regions[i].key
                 ui.ime = imeReset()
                 graphicsShowKeyboard(true)
                 return
             }
-            i = i + 1
         }
     }
     return
