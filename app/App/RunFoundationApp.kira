@@ -2,10 +2,18 @@ import KiraGraphics
 import KiraLayout
 import Foundation
 
-function RunFoundationApp(root: FoundationView) {
+// `windowMode` is the mode the window OPENS in; a running app moves between
+// modes with `frame.setWindowMode`. Fullscreen ignores the size above and takes
+// the display's, which the layout picks up from `frame.viewportWidth`/`Height`
+// like any other size.
+function RunFoundationApp(
+    root: FoundationView,
+    windowMode: WindowMode = .Windowed,
+    showFpsOverlay: Bool = true,
+) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: root
-        uiBatchPtr: uiBatchNullPtr()
+        batch: UiBatch { storage: nullPointer() }
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -14,6 +22,7 @@ function RunFoundationApp(root: FoundationView) {
         width: 1280
         height: 720
         sampleCount: 1
+        windowMode: windowMode
         // Platform-aware default: Metal on Apple hosts, Sokol otherwise
         // (incl. Web/WASM where the platform probe reports Unknown).
         backend: graphicsDefaultBackend()
@@ -22,16 +31,12 @@ function RunFoundationApp(root: FoundationView) {
     app.onFrame { frame in
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
-        let gpuTelemetry = foundationFrameHasGpuTelemetry(frame)
-        var vpW = 1280
-        var vpH = 720
-        if gpuTelemetry {
-            vpW = foundationMetalViewportWidth(frame)
-            vpH = foundationMetalViewportHeight(frame)
-        } else {
-            vpW = rootViewportWidth()
-            vpH = rootViewportHeight()
-        }
+        // The live window, in points. Asked of the frame rather than branched on
+        // the backend: Metal keeps it on its context and sokol derives it from
+        // the drawable, and which of those it is has nothing to do with laying
+        // out an interface.
+        var vpW = Int(frame.viewportWidth())
+        var vpH = Int(frame.viewportHeight())
         if vpW <= 0 {
             vpW = 1280
         }
@@ -44,16 +49,13 @@ function RunFoundationApp(root: FoundationView) {
         }
 
         let graphics = foundationFrameGraphics(frame)
-        var batchPtr = uiBatchNullPtr()
-        if gpuTelemetry {
-            if !state.uiBatchReady {
-                state.uiBatchPtr = uiBatchCreate(graphics)
-                state.uiBatchReady = true
-            }
-            batchPtr = state.uiBatchPtr
+        if !state.batchReady {
+            state.batch = UiBatch { storage: createBatch(graphics) }
+            state.batchReady = true
         }
+        let batch = state.batch
 
-        let rawStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
+        let rawStats = foundationFrameGraphicsStats(frame)
         let rawFps = rawStats.fps
 
         // Re-present fast path: the displayed FPS (`state.displayedFps`, the value
@@ -64,8 +66,7 @@ function RunFoundationApp(root: FoundationView) {
         // persist in state, so input keeps working across re-presented frames.
         if state.frameCount >= 4 && foundationShouldRepresent(
             state.hasPresentedFrame,
-            gpuTelemetry,
-            state.uiBatchReady,
+            state.batchReady,
             state.displayedFps,
             state.lastPresentedFps,
             vpW,
@@ -75,7 +76,7 @@ function RunFoundationApp(root: FoundationView) {
         ) {
             // Re-runs the retained streams — including the liquid-glass
             // capture/blur passes on a split frame.
-            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
             // This frame was GPU/vsync-paced, so its duration reflects the true
             // cadence: refresh the desired FPS from it. `lastPresentedFps` (the value
             // currently drawn) is left untouched, so if the cadence genuinely shifted
@@ -91,26 +92,11 @@ function RunFoundationApp(root: FoundationView) {
             return
         }
 
-        // Batched Metal path: the walk only accumulates quads; the pass structure
-        // (including liquid-glass capture/blur passes) is owned by uiBatchPresent
-        // after the walk. Sokol draws immediately and keeps its pass open here.
-        var encoder = makeRenderEncoder()
-        if !gpuTelemetry {
-            // The standalone placeholder is replaced immediately on this path;
-            // release it before the pass encoder overwrites it.
-            nativeStateFree(encoder.storage)
-            encoder = frame.beginPass(Color {
-                r: 0.96
-                g: 0.95
-                b: 0.93
-                a: 1.0
-            })
-        }
+        // The walk only accumulates quads; the pass structure (including the
+        // liquid-glass capture/blur passes) is owned by presentBatch after it.
         var backend = KiraGraphicsFoundationBackend {
-            encoder: encoder
             graphics: graphics
-            uiBatchPtr: batchPtr
-            gpuTelemetry: gpuTelemetry
+            batch: batch
         }
         let viewport = state.ui.viewport
         if !state.announcedTree && foundationRenderableViewCount(state.root) > 0 {
@@ -159,11 +145,14 @@ function RunFoundationApp(root: FoundationView) {
         // starts; the badge never gets permanently cached at "GPU 0.0 ms".
         var overlayStats = rawStats
         overlayStats.fps = state.displayedFps
-        let overlay = foundationGraphicsOverlay(overlayStats, false)
-        state.overlayLayout = FoundationLayoutPass().run(root: overlay, available: viewport)
-        state.overlayFps = state.displayedFps
-        state.overlayVpH = vpH
-        let renderCount = appRendered + foundationRender(overlay, state.overlayLayout, backend)
+        var renderCount = appRendered
+        if showFpsOverlay {
+            let overlay = foundationGraphicsOverlay(overlayStats, false)
+            state.overlayLayout = FoundationLayoutPass().run(root: overlay, available: viewport)
+            state.overlayFps = state.displayedFps
+            state.overlayVpH = vpH
+            renderCount = renderCount + foundationRender(overlay, state.overlayLayout, backend)
+        }
         state.hitRegions = backend.hitRegions
         foundationReconcileFocus(state.ui, state.hitRegions)
         if renderCount > 0 && !state.announcedRenderCommands {
@@ -172,23 +161,11 @@ function RunFoundationApp(root: FoundationView) {
         }
 
         state.frameCount = state.frameCount + 1
-        backend.endFrame()
-        if gpuTelemetry {
-            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
-            // The metal path never handed the placeholder to a pass; release it
-            // now that the batch has presented. (On the Sokol path the pass
-            // encoder is released by frame.endPass.)
-            nativeStateFree(encoder.storage)
-        } else {
-            frame.endPass()
-        }
-        backend.submit()
-        if gpuTelemetry {
-            state.lastPresentedFps = state.displayedFps
-            state.lastPresentedViewportW = vpW
-            state.lastPresentedViewportH = vpH
-            state.hasPresentedFrame = true
-        }
+        state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+        state.lastPresentedFps = state.displayedFps
+        state.lastPresentedViewportW = vpW
+        state.lastPresentedViewportH = vpH
+        state.hasPresentedFrame = true
         state.ui.clickedKey = 0
         state.ui.scrollX = 0.0
         state.ui.scrollY = 0.0
@@ -225,58 +202,5 @@ function RunFoundationAppSmoke(root: FoundationView) {
         print("KIRA_UI_DRAW_COMMANDS_SUBMITTED")
         print("KIRA_APP_RENDERED_VISIBLE_CONTENT")
     }
-    return
-}
-
-function RunFoundationSurfaceTextApp(
-    surfaceBounds: Rect,
-    surfacePaint: FoundationSurfacePaint,
-    textBounds: Rect,
-    textPaint: FoundationTextPaint,
-) {
-    print("KIRA_UI_TREE_BUILT")
-    if surfaceBounds.width > 0.0 && surfaceBounds.height > 0.0 {
-        print("KIRA_UI_LAYOUT_NON_EMPTY")
-    }
-    let runtimeStorage = nativeState(FoundationSurfaceTextAppState {
-        surfaceBounds: move surfaceBounds
-        surfacePaint: move surfacePaint
-        textBounds: move textBounds
-        textPaint: move textPaint
-    })
-    let runtimeUser = nativeUserData(runtimeStorage)
-    var app = GraphicsApplication {
-        title: "Kira UI Foundation"
-        width: 1280
-        height: 720
-        sampleCount: 1
-    }
-
-    app.onFrame { frame in
-        var state = nativeRecover<FoundationSurfaceTextAppState>(frame.userData)
-        let encoder = frame.beginPass(Color {
-            r: 0.04
-            g: 0.05
-            b: 0.07
-            a: 1.0
-        })
-        var backend = KiraGraphicsFoundationBackend {
-            encoder: encoder
-            graphics: foundationFrameGraphics(frame)
-            uiBatchPtr: uiBatchNullPtr()
-            gpuTelemetry: false
-        }
-        backend.beginFrame(1280, 720)
-        backend.drawSurface(state.surfaceBounds, state.surfacePaint)
-        backend.drawText(state.textBounds, state.textPaint)
-        state.frameCount = state.frameCount + 1
-        backend.endFrame()
-        frame.endPass()
-        backend.submit()
-        return
-    }
-
-    app.run(runtimeUser)
-    nativeStateFree(runtimeStorage)
     return
 }

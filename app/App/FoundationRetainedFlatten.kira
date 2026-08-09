@@ -19,17 +19,17 @@ import KiraLayout
 // ---------------------------------------------------------------------------
 
 function foundationViewKindFromCode(code: Int) -> FoundationViewKind {
-    var kind = FoundationViewKind.Column
-    if code == 1 { kind = FoundationViewKind.Row }
-    if code == 3 { kind = FoundationViewKind.Expanded }
-    if code == 4 { kind = FoundationViewKind.Frame }
-    if code == 5 { kind = FoundationViewKind.Spacer }
-    if code == 6 { kind = FoundationViewKind.Surface }
-    if code == 7 { kind = FoundationViewKind.Text }
-    if code == 8 { kind = FoundationViewKind.HitArea }
-    if code == 9 { kind = FoundationViewKind.LayoutPriority }
-    if code == 10 { kind = FoundationViewKind.TextureView }
-    if code == 11 { kind = FoundationViewKind.Icon }
+    var kind: FoundationViewKind = .Column
+    if code == 1 { kind = .Row }
+    if code == 3 { kind = .Expanded }
+    if code == 4 { kind = .Frame }
+    if code == 5 { kind = .Spacer }
+    if code == 6 { kind = .Surface }
+    if code == 7 { kind = .Text }
+    if code == 8 { kind = .HitArea }
+    if code == 9 { kind = .LayoutPriority }
+    if code == 10 { kind = .TextureView }
+    if code == 11 { kind = .Icon }
     return kind
 }
 
@@ -44,10 +44,10 @@ struct FoundationRetainedScratch {
 }
 
 function foundationRetainedScratchHandle() -> RawPtr {
-    if uiStateSlotHas("kira.foundation.retained.scratch") == false {
-        uiStateSlotPut("kira.foundation.retained.scratch", nativeUserData(nativeState(FoundationRetainedScratch {})))
+    if stateSlotHas("kira.foundation.retained.scratch") == false {
+        stateSlotPut("kira.foundation.retained.scratch", nativeUserData(nativeState(FoundationRetainedScratch {})))
     }
-    return uiStateSlotGet("kira.foundation.retained.scratch")
+    return stateSlotGet("kira.foundation.retained.scratch")
 }
 
 struct FoundationRetainedFlatAcc {

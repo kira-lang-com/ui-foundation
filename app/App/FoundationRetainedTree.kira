@@ -6,7 +6,7 @@ struct FoundationRetainedNode {
     var parentId: Int = 0
     var key: Int = 0
     var childOrdinal: Int = 0
-    var kind: FoundationViewKind = FoundationViewKind.Column
+    var kind: FoundationViewKind = .Column
     var childIds: [Int] = []
     var childCount: Int = 0
     var layoutSignature: Int = 0

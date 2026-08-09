@@ -65,18 +65,18 @@ function foundationIncrementalSampleView(label: String) -> FoundationView {
                     Text("LEFT", smokeTextColor(), 16.0, 400.0),
                     Text(move label, smokeTextColor(), 16.0, 400.0)
                 ],
-                width: SizeMode.Hug,
-                height: SizeMode.Hug,
+                width: .Hug,
+                height: .Hug,
                 spacing: 8.0,
                 padding: EdgeInsets {},
-                crossAxisAlignment: CrossAlignment.Start
+                crossAxisAlignment: .Start
             )
         ],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: 10.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Start
+        crossAxisAlignment: .Start
     )
 }
 
@@ -153,16 +153,16 @@ function foundationIncrementalDeepView(label: String) -> FoundationView {
     let sidebar = Frame(
         child: Column(
             children: [Text("NAV", smokeTextColor(), 16.0, 600.0)],
-            width: SizeMode.Fill,
-            height: SizeMode.Hug,
+            width: .Fill,
+            height: .Hug,
             spacing: 6.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
-        width: SizeMode.Fixed(220.0),
-        height: SizeMode.Fill,
+        width: .Fixed(220.0),
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.TopLeading,
+        alignment: .TopLeading,
         padding: EdgeInsets {}
     )
     let content = Frame(
@@ -174,29 +174,29 @@ function foundationIncrementalDeepView(label: String) -> FoundationView {
                         Text("LEFT", smokeTextColor(), 16.0, 400.0),
                         Text(move label, smokeTextColor(), 16.0, 400.0)
                     ],
-                    width: SizeMode.Fill,
-                    height: SizeMode.Fixed(40.0),
+                    width: .Fill,
+                    height: .Fixed(40.0),
                     spacing: 12.0,
                     padding: EdgeInsets {},
-                    crossAxisAlignment: CrossAlignment.Stretch
+                    crossAxisAlignment: .Stretch
                 )
             ],
-            width: SizeMode.Fill,
-            height: SizeMode.Hug,
+            width: .Fill,
+            height: .Hug,
             spacing: 18.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.TopLeading,
+        alignment: .TopLeading,
         padding: EdgeInsets {}
     )
     return Row(
         children: [sidebar, content],
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         spacing: 24.0,
         padding: EdgeInsets {
             top: 16.0
@@ -204,7 +204,7 @@ function foundationIncrementalDeepView(label: String) -> FoundationView {
             bottom: 16.0
             leading: 16.0
         },
-        crossAxisAlignment: CrossAlignment.Stretch
+        crossAxisAlignment: .Stretch
     )
 }
 
@@ -287,11 +287,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             Text("TOP", smokeTextColor(), 18.0, 400.0),
             Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
         ],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: 12.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Start
+        crossAxisAlignment: .Start
     )
     let columnLayout = runFoundationLayout(move columnRoot, Size {
         width: 400.0
@@ -303,11 +303,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Text("TOP", smokeTextColor(), 18.0, 400.0),
                 Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 12.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
         columnLayout,
         [0]
@@ -318,11 +318,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Text("TOP", smokeTextColor(), 18.0, 400.0),
                 Text("BOTTOM", smokeTextColor(), 18.0, 400.0)
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 12.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
         columnLayout,
         [1]
@@ -340,11 +340,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             Text("LEFT", smokeTextColor(), 18.0, 400.0),
             Text("RIGHT", smokeTextColor(), 18.0, 400.0)
         ],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: 14.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Start
+        crossAxisAlignment: .Start
     )
     let rowLayout = runFoundationLayout(move rowRoot, Size {
         width: 400.0
@@ -356,11 +356,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Text("LEFT", smokeTextColor(), 18.0, 400.0),
                 Text("RIGHT", smokeTextColor(), 18.0, 400.0)
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 14.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
         rowLayout,
         [0]
@@ -371,11 +371,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Text("LEFT", smokeTextColor(), 18.0, 400.0),
                 Text("RIGHT", smokeTextColor(), 18.0, 400.0)
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 14.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         ),
         rowLayout,
         [1]
@@ -390,10 +390,10 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
 
     let frameRootView = Frame(
         child: Text("HELLO", smokeTextColor(), 20.0, 400.0),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.TopLeading,
+        alignment: .TopLeading,
         padding: EdgeInsets {}
     )
     let frameLayout = runFoundationLayout(move frameRootView, Size {
@@ -404,10 +404,10 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
     let frameChild = foundationFrameAtPath(
         Frame(
             child: Text("HELLO", smokeTextColor(), 20.0, 400.0),
-            width: SizeMode.Fill,
-            height: SizeMode.Fill,
+            width: .Fill,
+            height: .Fill,
             flex: 0,
-            alignment: Alignment.TopLeading,
+            alignment: .TopLeading,
             padding: EdgeInsets {}
         ),
         frameLayout,
@@ -428,8 +428,8 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         children: [
             Text("PAD", smokeTextColor(), 16.0, 400.0)
         ],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         flex: 0,
         fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
@@ -456,8 +456,8 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             children: [
                 Text("PAD", smokeTextColor(), 16.0, 400.0)
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             flex: 0,
             fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
             border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
@@ -508,11 +508,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             Spacer(0.0, 1),
             Text("RIGHT", smokeTextColor(), 16.0, 400.0)
         ],
-        width: SizeMode.Fill,
-        height: SizeMode.Fixed(28.0),
+        width: .Fill,
+        height: .Fixed(28.0),
         spacing: 0.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Stretch
+        crossAxisAlignment: .Stretch
     )
     let spacerLayout = runFoundationLayout(move spacerRootView, Size {
         width: 320.0
@@ -525,11 +525,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Spacer(0.0, 1),
                 Text("RIGHT", smokeTextColor(), 16.0, 400.0)
             ],
-            width: SizeMode.Fill,
-            height: SizeMode.Fixed(28.0),
+            width: .Fill,
+            height: .Fixed(28.0),
             spacing: 0.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Stretch
+            crossAxisAlignment: .Stretch
         ),
         spacerLayout,
         [1]
@@ -541,11 +541,11 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
                 Spacer(0.0, 1),
                 Text("RIGHT", smokeTextColor(), 16.0, 400.0)
             ],
-            width: SizeMode.Fill,
-            height: SizeMode.Fixed(28.0),
+            width: .Fill,
+            height: .Fixed(28.0),
             spacing: 0.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Stretch
+            crossAxisAlignment: .Stretch
         ),
         spacerLayout,
         [2]

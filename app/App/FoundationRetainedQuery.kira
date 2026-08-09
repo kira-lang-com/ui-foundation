@@ -92,11 +92,11 @@ function foundationRetainedKeyedRow(keys: borrow [Int]) -> FoundationView {
     }
     return Column(
         children: move children,
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: 2.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Start
+        crossAxisAlignment: .Start
     )
 }
 
@@ -186,30 +186,30 @@ function foundationRetainedTreeRoot(firstText: String, secondText: String, inclu
     if includeHitArea && hitFirst {
         return Column(
             children: [hitNode, textNode],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 4.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         )
     }
     if includeHitArea {
         return Column(
             children: [textNode, hitNode],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 4.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start
+            crossAxisAlignment: .Start
         )
     }
     return Column(
         children: [textNode],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: 4.0,
         padding: EdgeInsets {},
-        crossAxisAlignment: CrossAlignment.Start
+        crossAxisAlignment: .Start
     )
 }
 

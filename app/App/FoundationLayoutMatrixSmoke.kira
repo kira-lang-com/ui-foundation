@@ -18,10 +18,10 @@ function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, marg
         width: width
         height: height
         flex: flex
-        arrange: ArrangeMode.Fill
-        axis: Axis.Vertical
-        alignment: CrossAlignment.Stretch
-        overlayAlignment: Alignment.Center
+        arrange: .Fill
+        axis: .Vertical
+        alignment: .Stretch
+        overlayAlignment: .Center
         padding: EdgeInsets {}
         margin: margin
         x: x
@@ -86,16 +86,16 @@ function foundationMatrixRelayout(tree: LayoutTree, available: borrow Size) -> L
 
 function foundationMatrixTreeByCode(code: Int) -> LayoutTree {
     if code == 1 {
-        return foundationMatrixStackTree(CrossAlignment.Start)
+        return foundationMatrixStackTree(.Start)
     }
     if code == 2 {
-        return foundationMatrixStackTree(CrossAlignment.Center)
+        return foundationMatrixStackTree(.Center)
     }
     if code == 3 {
-        return foundationMatrixStackTree(CrossAlignment.End)
+        return foundationMatrixStackTree(.End)
     }
     if code == 4 {
-        return foundationMatrixStackTree(CrossAlignment.Stretch)
+        return foundationMatrixStackTree(.Stretch)
     }
     if code == 5 {
         return foundationMatrixAbsoluteTree()
@@ -107,13 +107,13 @@ function foundationMatrixTreeByCode(code: Int) -> LayoutTree {
         return foundationMatrixWrapTree()
     }
     if code == 8 {
-        return foundationMatrixOverlayTree(Alignment.TopLeading)
+        return foundationMatrixOverlayTree(.TopLeading)
     }
     if code == 9 {
-        return foundationMatrixOverlayTree(Alignment.Center)
+        return foundationMatrixOverlayTree(.Center)
     }
     if code == 10 {
-        return foundationMatrixOverlayTree(Alignment.BottomTrailing)
+        return foundationMatrixOverlayTree(.BottomTrailing)
     }
     return foundationMatrixFillTree()
 }
@@ -133,111 +133,111 @@ function foundationMatrixCaseMatches(code: Int, large: borrow Size, small: borro
 function foundationMatrixStackTree(alignment: CrossAlignment) -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Fill,
-            height: SizeMode.Hug,
+            width: .Fill,
+            height: .Hug,
             flex: 0,
-            arrange: ArrangeMode.Stack,
-            axis: Axis.Horizontal,
+            arrange: .Stack,
+            axis: .Horizontal,
             spacing: 6.0,
             rowSpacing: 0.0,
             alignment: move alignment,
-            overlayAlignment: Alignment.Center,
+            overlayAlignment: .Center,
             columns: 1,
             padding: foundationMatrixInsets(4.0, 6.0, 5.0, 7.0),
             margin: EdgeInsets {},
             firstChild: 1,
             childCount: 4
         ),
-        foundationMatrixLeaf(SizeMode.Fixed(80.0), SizeMode.Fixed(28.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fixed(22.0), 2, foundationMatrixInsets(0.0, 3.0, 2.0, 1.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Fraction(0.25), SizeMode.Min(26.0), 0, foundationMatrixInsets(2.0, 1.0, 1.0, 2.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Max(90.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(0.0, 2.0, 0.0, 2.0), 0.0, 0.0)
+        foundationMatrixLeaf(.Fixed(80.0), .Fixed(28.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Fill, .Fixed(22.0), 2, foundationMatrixInsets(0.0, 3.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Fraction(0.25), .Min(26.0), 0, foundationMatrixInsets(2.0, 1.0, 1.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Max(90.0), .Fixed(18.0), 0, foundationMatrixInsets(0.0, 2.0, 0.0, 2.0), 0.0, 0.0)
     ])
 }
 
 function foundationMatrixAbsoluteTree() -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             flex: 0,
-            arrange: ArrangeMode.Absolute,
-            axis: Axis.Vertical,
+            arrange: .Absolute,
+            axis: .Vertical,
             spacing: 0.0,
             rowSpacing: 0.0,
-            alignment: CrossAlignment.Start,
-            overlayAlignment: Alignment.Center,
+            alignment: .Start,
+            overlayAlignment: .Center,
             columns: 1,
             padding: foundationMatrixInsets(3.0, 4.0, 5.0, 6.0),
             margin: EdgeInsets {},
             firstChild: 1,
             childCount: 2
         ),
-        foundationMatrixLeaf(SizeMode.Fixed(44.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(1.0, 0.0, 0.0, 2.0), 10.0, 12.0),
-        foundationMatrixLeaf(SizeMode.Fixed(30.0), SizeMode.Fixed(26.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 0.0), 72.0, 24.0)
+        foundationMatrixLeaf(.Fixed(44.0), .Fixed(18.0), 0, foundationMatrixInsets(1.0, 0.0, 0.0, 2.0), 10.0, 12.0),
+        foundationMatrixLeaf(.Fixed(30.0), .Fixed(26.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 0.0), 72.0, 24.0)
     ])
 }
 
 function foundationMatrixGridTree() -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Fill,
-            height: SizeMode.Hug,
+            width: .Fill,
+            height: .Hug,
             flex: 0,
-            arrange: ArrangeMode.Grid,
-            axis: Axis.Vertical,
+            arrange: .Grid,
+            axis: .Vertical,
             spacing: 8.0,
             rowSpacing: 5.0,
-            alignment: CrossAlignment.Stretch,
-            overlayAlignment: Alignment.Center,
+            alignment: .Stretch,
+            overlayAlignment: .Center,
             columns: 2,
             padding: foundationMatrixInsets(3.0, 4.0, 3.0, 4.0),
             margin: EdgeInsets {},
             firstChild: 1,
             childCount: 3
         ),
-        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 1.0, 2.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Fixed(36.0), SizeMode.Max(34.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Fixed(28.0), SizeMode.Min(24.0), 0, foundationMatrixInsets(2.0, 0.0, 0.0, 3.0), 0.0, 0.0)
+        foundationMatrixLeaf(.Fill, .Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 1.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Fixed(36.0), .Max(34.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Fixed(28.0), .Min(24.0), 0, foundationMatrixInsets(2.0, 0.0, 0.0, 3.0), 0.0, 0.0)
     ])
 }
 
 function foundationMatrixWrapTree() -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Fill,
-            height: SizeMode.Hug,
+            width: .Fill,
+            height: .Hug,
             flex: 0,
-            arrange: ArrangeMode.Wrap,
-            axis: Axis.Horizontal,
+            arrange: .Wrap,
+            axis: .Horizontal,
             spacing: 5.0,
             rowSpacing: 7.0,
-            alignment: CrossAlignment.End,
-            overlayAlignment: Alignment.Center,
+            alignment: .End,
+            overlayAlignment: .Center,
             columns: 1,
             padding: foundationMatrixInsets(2.0, 3.0, 4.0, 5.0),
             margin: EdgeInsets {},
             firstChild: 1,
             childCount: 4
         ),
-        foundationMatrixLeaf(SizeMode.Fixed(48.0), SizeMode.Fixed(16.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Fraction(0.3), SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 0.0, 2.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Min(34.0), SizeMode.Fixed(18.0), 0, foundationMatrixInsets(0.0, 0.0, 1.0, 3.0), 0.0, 0.0),
-        foundationMatrixLeaf(SizeMode.Max(60.0), SizeMode.Fixed(22.0), 0, foundationMatrixInsets(2.0, 1.0, 0.0, 1.0), 0.0, 0.0)
+        foundationMatrixLeaf(.Fixed(48.0), .Fixed(16.0), 0, foundationMatrixInsets(0.0, 1.0, 2.0, 1.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Fraction(0.3), .Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 0.0, 2.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Min(34.0), .Fixed(18.0), 0, foundationMatrixInsets(0.0, 0.0, 1.0, 3.0), 0.0, 0.0),
+        foundationMatrixLeaf(.Max(60.0), .Fixed(22.0), 0, foundationMatrixInsets(2.0, 1.0, 0.0, 1.0), 0.0, 0.0)
     ])
 }
 
 function foundationMatrixOverlayTree(alignment: Alignment) -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Fixed(180.0),
-            height: SizeMode.Fixed(110.0),
+            width: .Fixed(180.0),
+            height: .Fixed(110.0),
             flex: 0,
-            arrange: ArrangeMode.Overlay,
-            axis: Axis.Vertical,
+            arrange: .Overlay,
+            axis: .Vertical,
             spacing: 0.0,
             rowSpacing: 0.0,
-            alignment: CrossAlignment.Stretch,
+            alignment: .Stretch,
             overlayAlignment: move alignment,
             columns: 1,
             padding: foundationMatrixInsets(6.0, 7.0, 8.0, 9.0),
@@ -245,29 +245,29 @@ function foundationMatrixOverlayTree(alignment: Alignment) -> LayoutTree {
             firstChild: 1,
             childCount: 1
         ),
-        foundationMatrixLeaf(SizeMode.Fixed(34.0), SizeMode.Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0)
+        foundationMatrixLeaf(.Fixed(34.0), .Fixed(20.0), 0, foundationMatrixInsets(1.0, 2.0, 3.0, 4.0), 0.0, 0.0)
     ])
 }
 
 function foundationMatrixFillTree() -> LayoutTree {
     return LayoutTree(nodes: [
         foundationMatrixContainer(
-            width: SizeMode.Fraction(0.75),
-            height: SizeMode.Min(80.0),
+            width: .Fraction(0.75),
+            height: .Min(80.0),
             flex: 0,
-            arrange: ArrangeMode.Fill,
-            axis: Axis.Vertical,
+            arrange: .Fill,
+            axis: .Vertical,
             spacing: 0.0,
             rowSpacing: 0.0,
-            alignment: CrossAlignment.Stretch,
-            overlayAlignment: Alignment.Center,
+            alignment: .Stretch,
+            overlayAlignment: .Center,
             columns: 1,
             padding: foundationMatrixInsets(5.0, 6.0, 7.0, 8.0),
             margin: EdgeInsets {},
             firstChild: 1,
             childCount: 1
         ),
-        foundationMatrixLeaf(SizeMode.Fill, SizeMode.Fill, 1, foundationMatrixInsets(2.0, 3.0, 4.0, 5.0), 0.0, 0.0)
+        foundationMatrixLeaf(.Fill, .Fill, 1, foundationMatrixInsets(2.0, 3.0, 4.0, 5.0), 0.0, 0.0)
     ])
 }
 
