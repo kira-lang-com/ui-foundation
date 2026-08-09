@@ -99,6 +99,47 @@ function sdRound(point: Float2, halfSize: Float2, radius: Float) -> Float {
     return min(max(q.x, q.y), 0.0) + length(outside) - radius
 }
 
+// A squircle is a superellipse in each corner, not a circular corner with a
+// larger radius. Keeping the straight portions of the rounded-rect SDF and
+// replacing only the corner distance gives a C1-continuous transition into the
+// edges while leaving the authored radius as the edge-to-corner distance.
+// Two is a circular rounded rectangle; increasing the exponent makes the
+// superellipse progressively more square.
+const squircleExponent: Float = 2.5
+
+function sdSquircle(point: Float2, halfSize: Float2, radius: Float) -> Float {
+    if radius <= 0.0 {
+        return sdRound(point, halfSize, radius)
+    }
+    let cornerOrigin = Float2(
+        max(halfSize.x - radius, 0.0),
+        max(halfSize.y - radius, 0.0)
+    )
+    let q = abs(point) - cornerOrigin
+    // One axis is still on a straight edge. This is also the entire interior
+    // when the point has not reached the corner quadrant yet.
+    if q.x <= 0.0 || q.y <= 0.0 {
+        let outside = Float2(max(q.x, 0.0), max(q.y, 0.0))
+        return min(max(q.x, q.y), 0.0) + length(outside) - radius
+    }
+
+    // Normalize the implicit superellipse by its boundary gradient. The raw
+    // superellipse equation is smooth but is not a Euclidean distance field;
+    // this normalization keeps the one-pixel coverage ramp consistent through
+    // the corner instead of making the diagonal edge look sharper or softer.
+    let safeRadius = max(radius, 0.001)
+    let nx = q.x / safeRadius
+    let ny = q.y / safeRadius
+    let nxPow = pow(nx, squircleExponent)
+    let nyPow = pow(ny, squircleExponent)
+    let sum = max(nxPow + nyPow, 0.000001)
+    let radial = pow(sum, 1.0 / squircleExponent)
+    let gx = pow(nx, squircleExponent - 1.0)
+    let gy = pow(ny, squircleExponent - 1.0)
+    let gradient = max(length(Float2(gx, gy)), 0.000001)
+    return ((radial - 1.0) * safeRadius) / gradient
+}
+
 function sdRoundNormal(point: Float2, halfSize: Float2, radius: Float) -> Float2 {
     let sx = -1.0
     if point.x >= 0.0 { sx = 1.0 }
