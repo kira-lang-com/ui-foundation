@@ -1,6 +1,7 @@
 // The UI compositor's single shader. Every primitive the UI Foundation draws goes
 // through it, selected per vertex by `mode`:
 //   0 — SDF rounded-rect / border surface (local = pixel offset from the centre)
+//   0.25 — SDF squircle / border surface (a fourth-power superellipse corner)
 //   1 — glyph or icon coverage from the atlas (local = uv)
 //   2 — an external texture (a TextureView), `local` carrying its uv
 //   3 — liquid glass: refract the captured backdrop through the rounded shape
@@ -167,6 +168,13 @@ function inkCoverageGamma(inkLuma: Float) -> Float {
 
 // Luminance weights (Rec. 601), used for the wash and for the ink decision.
 function lumaWeights() -> Float3 { return Float3(0.299, 0.587, 0.114) }
+
+function surfaceDistance(point: Float2, halfSize: Float2, radius: Float, mode: Float) -> Float {
+    if mode > 0.1 && mode < 0.5 {
+        return GlassCommon.sdSquircle(point, halfSize, radius)
+    }
+    return GlassCommon.sdRound(point, halfSize, radius)
+}
 shader UiBatch {
     group Batch {
         storage read verts: [UiQuad]
@@ -522,13 +530,13 @@ shader UiBatch {
                 return out
             }
 
-            // --- mode 0: SDF surface with an optional border ---
-            let d = GlassCommon.sdRound(input.local, input.hsize, input.radius)
+            // --- mode 0 / 0.25: SDF surface with an optional border ---
+            let d = surfaceDistance(input.local, input.hsize, input.radius, input.mode)
             let fillCov = clamp(0.5 - d, 0.0, 1.0)
             if input.borderWidth > 0.0 {
                 if input.border.w > 0.0 {
                     let innerHalf = input.hsize - Float2(input.borderWidth, input.borderWidth)
-                    let di = GlassCommon.sdRound(input.local, innerHalf, max(input.radius - input.borderWidth, 0.0))
+                    let di = surfaceDistance(input.local, innerHalf, max(input.radius - input.borderWidth, 0.0), input.mode)
                     let innerCov = clamp(0.5 - di, 0.0, 1.0)
                     let mixed = mix(Float3(input.border.x, input.border.y, input.border.z), Float3(input.fill.x, input.fill.y, input.fill.z), innerCov)
                     let mixedA = mix(input.border.w, input.fill.w, innerCov) * fillCov
