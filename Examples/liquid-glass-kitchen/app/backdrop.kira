@@ -1,0 +1,51 @@
+import Foundation
+import KiraUIFoundation
+import KiraGraphics
+
+// Where the kitchen's backdrop comes from, and what it says when there is none.
+//
+// The asset belongs to liquid-glass-app; the kitchen borrows it. Which of the
+// two directories a run starts in decides which spelling of the path opens, so
+// both are tried — but only for an unreadable asset. A device that refused the
+// upload will refuse the second path too, and retrying would turn one clear
+// reason into two identical ones.
+
+// The backdrop's view id, or 0 with the reason on the log.
+function kitchenBackdropView(graphics: borrow Graphics) -> Int {
+    attempt {
+        let view = try kitchenBackdropOutcome(graphics)
+        return view
+    } handle {
+        AssetUnreadable { return 0 }
+        DeviceRefused { return reportKitchenBackdrop(.DeviceRefused) }
+        ShaderRejected { return reportKitchenBackdrop(.ShaderRejected) }
+    }
+}
+
+// The environment override first, then the borrowed asset.
+function kitchenBackdropOutcome(graphics: borrow Graphics) -> Result<Int, ResourceFailure> {
+    attempt {
+        let overridden = try loadRgbaTextureFromEnvironment(graphics, "KIRA_GLASS_BG", 1600, 900)
+        return .Ok(overridden)
+    } handle {
+        AssetUnreadable { return kitchenLoadBackdrop(graphics) }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+function kitchenLoadBackdrop(graphics: borrow Graphics) -> Result<Int, ResourceFailure> {
+    attempt {
+        let view = try loadRgbaTexture(graphics, "../liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
+        return .Ok(view)
+    } handle {
+        AssetUnreadable { return loadRgbaTexture(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900) }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+function reportKitchenBackdrop(failure: ResourceFailure) -> Int {
+    printLine("liquid-glass-kitchen: background-cubes.rgba loaded no backdrop — " + resourceFailureReason(move failure))
+    return 0
+}

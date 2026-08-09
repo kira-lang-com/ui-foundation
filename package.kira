@@ -39,16 +39,14 @@ Package KiraUIFoundation {
                 NativeTarget { triple: "wasm32-emscripten-unknown", staticLib: "NativeLibs/../generated/native/wasm32-emscripten/libkirastatestore.a" }
             ],
         },
-        // SVG-subset icon rasterizer: coverage-only bitmaps for the batched
+        // SVG-subset icon rasterizer: coverage-only bitmaps for the retained
         // compositor's glyph atlas (tinted at draw like text). See
-        // NativeLibs/Icon/kira_icon.c for the subset. kira_icon_draw.c adds the
-        // immediate-mode fallback (kg_ui_blit_coverage) used by the legacy/Sokol
-        // render path, including wasm32-emscripten.
+        // NativeLibs/Icon/kira_icon.c for the subset.
         NativeLibrary {
             name: "kiraicon",
             linkMode: LinkMode.Static,
             headers: Headers { entrypoint: "NativeLibs/Icon/kira_icon.h", includeDirs: ["NativeLibs/Icon"] },
-            sources: ["NativeLibs/Icon/kira_icon.c", "NativeLibs/Icon/kira_icon_draw.c"],
+            sources: ["NativeLibs/Icon/kira_icon.c"],
             autobind: Autobind { module: "icon", headers: ["NativeLibs/Icon/kira_icon.h"], mode: AutobindMode.AllPublic },
             nativeTargets: [
                 NativeTarget { triple: "x86_64-windows-msvc", staticLib: "NativeLibs/../generated/native/x86_64-windows-msvc/kiraicon.lib" },

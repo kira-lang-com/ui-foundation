@@ -632,17 +632,10 @@ function main() {
             }
             if !state.attempted {
                 state.attempted = true
-                let graphics = foundationFrameGraphics(frame)
-                state.backdropOff = uiEnvValueIsEmpty("KIRA_GLASS_BG")
+                state.backdropOff = environmentValueIsEmpty("KIRA_GLASS_BG")
                 var id = 0
                 if !state.backdropOff {
-                    id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "../liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
-                    }
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
-                    }
+                    id = kitchenBackdropView(foundationFrameGraphics(frame))
                 }
                 state.textureId = id
             }

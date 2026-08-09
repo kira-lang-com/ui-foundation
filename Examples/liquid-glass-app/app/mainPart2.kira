@@ -1,6 +1,7 @@
 import Foundation
 import KiraLayout
 import KiraUIFoundation
+import KiraGraphics
 
 // Liquid glass — a REAL app composition. A photo backdrop (fullscreen
 // TextureView) with app chrome floating over it, every piece of chrome a
@@ -297,7 +298,7 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         // Backdrop blob not found: say so instead of refracting a blank wall. A run
         // that asked for no backdrop (KIRA_GLASS_BG="") skips the notice.
         layers.append(Frame(
-            child: Text("assets/background-cubes-cool.rgba not found — run from the example directory (or set KIRA_GLASS_BG)", glassForeground(at), 16.0, 600.0),
+            child: Text("assets/background-cubes-cool.rgba could not be read — run from the example package directory, or set KIRA_GLASS_BG to a 1600x900 RGBA8 blob", glassForeground(at), 16.0, 600.0),
             width: SizeMode.Fill,
             height: SizeMode.Fill,
             flex: 0,
@@ -433,7 +434,7 @@ function main() {
                 demo.schemeAt = target
             } else {
                 if demo.schemeProgress < 1.0 {
-                    let seconds = foundationFrameDuration(frame, foundationFrameHasGpuTelemetry(frame))
+                    let seconds = foundationFrameDuration(frame)
                     demo.schemeProgress = demo.schemeProgress + schemeStep(seconds) / span
                     if demo.schemeProgress > 1.0 {
                         demo.schemeProgress = 1.0
@@ -446,44 +447,22 @@ function main() {
             if !demo.attempted {
                 demo.attempted = true
                 let graphics = foundationFrameGraphics(frame)
-                // Env override first (scripted runs), then the common launch
-                // directories: the example dir itself and the repo root.
-                demo.backdropOff = uiEnvValueIsEmpty("KIRA_GLASS_BG")
+                // `KIRA_GLASS_BG` overrides for a scripted run; otherwise the
+                // asset is beside the package, which is where `kira run` starts.
+                demo.backdropOff = environmentValueIsEmpty("KIRA_GLASS_BG")
                 var id = 0
-                if !demo.backdropOff {
-                    id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 1600, 900)
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes-cool.rgba", 1600, 900)
-                    }
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes-cool.rgba", 1600, 900)
-                    }
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes-cool.rgba", 1600, 900)
-                    }
-                    // The original photograph, still here and still loadable — point
-                    // KIRA_GLASS_BG at it, or delete the cool one and this takes over.
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "assets/background-cubes.rgba", 1600, 900)
-                    }
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes.rgba", 1600, 900)
-                    }
-                    if id == 0 {
-                        id = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes.rgba", 1600, 900)
-                    }
-                }
-                demo.textureId = id
                 var darkId = 0
                 if !demo.backdropOff {
-                    darkId = uiLoadRgbaTextureFile(graphics, "assets/background-cubes-cool-dark.rgba", 1600, 900)
-                    if darkId == 0 {
-                        darkId = uiLoadRgbaTextureFile(graphics, "app/assets/background-cubes-cool-dark.rgba", 1600, 900)
+                    id = glassBackdropView(graphics, "background-cubes-cool.rgba")
+                    // The original photograph, still here and still loadable —
+                    // point KIRA_GLASS_BG at it, or delete the cool one and this
+                    // takes over.
+                    if id == 0 {
+                        id = glassBackdropView(graphics, "background-cubes.rgba")
                     }
-                    if darkId == 0 {
-                        darkId = uiLoadRgbaTextureFile(graphics, "Examples/liquid-glass-app/assets/background-cubes-cool-dark.rgba", 1600, 900)
-                    }
+                    darkId = glassBackdropView(graphics, "background-cubes-cool-dark.rgba")
                 }
+                demo.textureId = id
                 // If a checkout predates the dark asset, keep the primary texture
                 // valid at both ends instead of sampling the atlas fallback.
                 if darkId == 0 {
@@ -501,4 +480,57 @@ function main() {
         showGraphicsHud: true
     )
     return
+}
+
+// One backdrop asset, tried at the two directories a run actually starts in:
+// the example package itself, and the ui-foundation checkout above it. Named
+// once here rather than spelled at every call site, so adding an asset does not
+// add a ladder.
+function glassLoadBackdrop(graphics: borrow Graphics, name: borrow String) -> Result<Int, ResourceFailure> {
+    attempt {
+        let view = try loadRgbaTexture(graphics, "assets/" + name, 1600, 900)
+        return .Ok(view)
+    } handle {
+        // Not beside the package — try the checkout above it. This is the only
+        // failure a second path can fix, which is why it is the only one that
+        // retries: a device that refused the upload will refuse it again, and
+        // retrying would turn one clear reason into two identical ones.
+        AssetUnreadable { return loadRgbaTexture(graphics, "Examples/liquid-glass-app/assets/" + name, 1600, 900) }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+// The backdrop's view id, or 0 with the reason on the log.
+//
+// `KIRA_GLASS_BG` overrides for a scripted run; otherwise the asset is beside
+// the package. The widget layer downstream already draws its notice when the id
+// is 0 — what this adds is that a run which *did* find the file and still got
+// nothing says so, instead of leaving a reader to conclude the path was wrong.
+function glassBackdropView(graphics: borrow Graphics, name: borrow String) -> Int {
+    attempt {
+        let view = try glassBackdropOutcome(graphics, name)
+        return view
+    } handle {
+        AssetUnreadable { return 0 }
+        DeviceRefused { return reportBackdrop(name, .DeviceRefused) }
+        ShaderRejected { return reportBackdrop(name, .ShaderRejected) }
+    }
+}
+
+// The environment override first, then the asset beside the package.
+function glassBackdropOutcome(graphics: borrow Graphics, name: borrow String) -> Result<Int, ResourceFailure> {
+    attempt {
+        let overridden = try loadRgbaTextureFromEnvironment(graphics, "KIRA_GLASS_BG", 1600, 900)
+        return .Ok(overridden)
+    } handle {
+        AssetUnreadable { return glassLoadBackdrop(graphics, name) }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+function reportBackdrop(name: borrow String, failure: ResourceFailure) -> Int {
+    printLine("liquid-glass: " + name + " loaded no backdrop — " + resourceFailureReason(move failure))
+    return 0
 }
