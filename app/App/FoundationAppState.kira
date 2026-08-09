@@ -73,12 +73,12 @@ struct FoundationAppState {
     var cachedLayoutTree: LayoutTree = LayoutTree { nodes: [] }
     var hitRegions: [FoundationHitRegionRecord] = []
     var ui: FoundationUiContext = FoundationUiContext {}
-    // Persistent batched-UI compositor (Metal path): created on the first frame and
+    // Persistent batched-UI compositor: created on the first frame and
     // reached through this handle each frame so the glyph atlas + GPU resources live
     // across frames. (RawPtr fields carry no default — set at construction.)
-    var uiBatchPtr: RawPtr
-    var uiBatchReady: Bool = false
-    // Damage-skip cache (Metal path). The dashboard view is static and the
+    var batch: UiBatch
+    var batchReady: Bool = false
+    // Damage-skip cache. The dashboard view is static and the
     // composed tree changes between frames only through the FPS badge (an integer
     // that is stable while the frame rate is steady) and the viewport (changes on
     // resize). When the displayed FPS and the viewport both match the last
@@ -131,14 +131,13 @@ struct FoundationAppState {
 
 // Decide whether the current frame can re-present the retained UiBatch instead of
 // rebuilding. Safe ONLY when a full frame has already been presented (there is a
-// retained batch), the Metal compositor is active and ready, and every input that
+// retained batch), the retained compositor is active and ready, and every input that
 // can change the produced pixels — the displayed FPS integer and the viewport — is
 // identical to the last presented frame. Any difference forces a full rebuild, so a
 // real change can never be skipped into a stale frame. The static dashboard keeps
 // all of these constant at a steady frame rate, so the common case re-presents.
 function foundationShouldRepresent(
     hasPresented: Bool,
-    gpuTelemetry: Bool,
     batchReady: Bool,
     fps: Int,
     lastFps: Int,
@@ -148,7 +147,6 @@ function foundationShouldRepresent(
     lastViewportH: Int,
 ) -> Bool {
     return hasPresented &&
-        gpuTelemetry &&
         batchReady &&
         fps == lastFps &&
         viewportW == lastViewportW &&
@@ -157,88 +155,60 @@ function foundationShouldRepresent(
 
 // Build a Graphics handle from the active frame so the backend can create resources
 // and submit batched draws on whichever backend the runtime selected.
-function foundationFrameGraphics(frame: borrow GraphicsFrame) -> Graphics {
+function foundationFrameGraphics(frame: borrow RenderFrame) -> Graphics {
     return Graphics {
         userData: frame.userData
         backend: frame.backend
-        metalContext: frame.metalContext
+        backendContext: frame.backendContext
     }
 }
 
-// Whether this frame carries backend GPU telemetry — a CPU/GPU timing pair, a
-// drawable size, resource and draw counts.
+// Per-frame duration (seconds) for the live FPS readout, from whichever clock
+// the backend keeps it on.
+@Native
+function foundationFrameDuration(frame: borrow RenderFrame) -> Float {
+    return frame.statistics().frameSeconds
+}
+
+// The HUD's numbers, asked of the frame rather than of the Metal context.
 //
-// Tested by asking the frame for its native context rather than by naming a
-// backend: the readout wants to know whether the numbers are there, and a
-// backend that grows the same telemetry answers yes without this changing.
-// A frame without it still reports a frame rate, from the run loop's own clock.
+// This used to be two branches on `foundationFrameHasGpuTelemetry`, which was
+// `!pointerIsNull(frame.metalContext)` — "am I Metal" — so on the sokol backend
+// every row but the drawable's extent stayed at its zero default and the panel
+// read `CPU 0.0 ms  GPU 0.0 ms  Resources 0  Workload 0 passes 0 draws 0 tris
+// Window unknown  Frame serial 0`. None of that was a measurement. Both
+// backends answer `RenderFrame.statistics()` now, and a counter a backend
+// genuinely cannot measure says so rather than reading zero.
 @Native
-function foundationFrameHasGpuTelemetry(frame: borrow GraphicsFrame) -> Bool {
-    return !uiBatchPtrIsNull(frame.metalContext)
-}
-
-// Per-frame duration (seconds) for the live FPS readout. On Metal the run loop samples
-// CACurrentMediaTime onto the context; on Sokol the duration comes from sapp.
-@Native
-function foundationFrameDuration(frame: borrow GraphicsFrame, gpuTelemetry: Bool) -> Float {
-    if gpuTelemetry {
-        return metalContextFrameDuration(frame.metalContext)
-    }
-    return rootFrameDuration()
-}
-
-@Native
-function foundationFrameGraphicsStats(frame: borrow GraphicsFrame, gpuTelemetry: Bool) -> FoundationGraphicsStats {
-    let duration = foundationFrameDuration(frame, gpuTelemetry)
+function foundationFrameGraphicsStats(frame: borrow RenderFrame) -> FoundationGraphicsStats {
+    let source = frame.statistics()
     var stats = FoundationGraphicsStats {
-        fps: foundationFpsFromDuration(duration)
-        frameMs: duration * 1000.0
-    }
-    if gpuTelemetry {
-        stats.cpuMs = metalContextCpuDuration(frame.metalContext) * 1000.0
-        stats.gpuMs = metalContextGpuDuration(frame.metalContext) * 1000.0
-        stats.drawableWidth = metalContextPhysicalWidth(frame.metalContext)
-        stats.drawableHeight = metalContextPhysicalHeight(frame.metalContext)
-        stats.allocatedMiBTenths = Int(metalContextAllocatedBytes(frame.metalContext) * U64(10) / U64(1048576))
-        stats.resourceCount = metalContextResourceCount(frame.metalContext)
-        stats.passCount = metalContextPassCount(frame.metalContext)
-        stats.drawCount = metalContextDrawCount(frame.metalContext)
-        stats.triangleCount = metalContextTriangleCount(frame.metalContext)
-        stats.framesInFlight = frame.framesInFlight()
-        stats.frameSerial = metalContextFrameSerial(frame.metalContext)
-        stats.windowState = metalContextWindowState(frame.metalContext)
+        fps: foundationFpsFromDuration(source.frameSeconds)
+        frameMs: source.frameSeconds * 1000.0
+        cpuMs: source.cpuSeconds * 1000.0
+        gpuMs: source.gpuSeconds * 1000.0
+        hasGpuMs: source.hasGpuSeconds
+        drawableWidth: source.drawableWidth
+        drawableHeight: source.drawableHeight
+        allocatedMiBTenths: Int(source.allocatedBytes * U64(10) / U64(1048576))
+        hasAllocated: source.hasAllocatedBytes
+        resourceCount: source.resourceCount
+        passCount: source.passCount
+        drawCount: source.drawCount
+        triangleCount: source.triangleCount
+        framesInFlight: source.framesInFlight
+        frameSerial: source.frameSerial
+        windowState: source.windowState
     }
     return move stats
 }
 
-// Live viewport (points) on the Metal path: the run loop keeps the context's
-// width/height tracking the host view's bounds, so reading them here reflows the UI
-// to the current window size during an interactive resize.
-@Native
-function foundationMetalViewportWidth(frame: borrow GraphicsFrame) -> Int {
-    return metalContextWidth(frame.metalContext)
-}
-
-@Native
-function foundationMetalViewportHeight(frame: borrow GraphicsFrame) -> Int {
-    return metalContextHeight(frame.metalContext)
-}
-
-
-struct FoundationSurfaceTextAppState {
-    var frameCount: Int = 0
-    var surfaceBounds: Rect = Rect {}
-    var surfacePaint: FoundationSurfacePaint = FoundationSurfacePaint {}
-    var textBounds: Rect = Rect {}
-    // `content` carries no default, so the empty string is named here.
-    var textPaint: FoundationTextPaint = FoundationTextPaint { content: "" }
-}
 
 function foundationEmptyRootView() -> FoundationView {
     return Surface(
         children: [],
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
         fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
@@ -250,26 +220,6 @@ function foundationEmptyRootView() -> FoundationView {
         padding: EdgeInsets {},
         clipContent: true
     )
-}
-
-// UI layout works in logical POINTS, not framebuffer pixels. On a Retina
-// framebuffer (high_dpi) sapp_width/height return pixel sizes; dividing by the
-// backing scale (sokolLogical*) keeps the interface at its intended physical
-// size while the framebuffer renders at native resolution for crisp output.
-// Off Retina the backing scale is 1.0, so these are identical to sapp_width/height.
-@Native
-function rootViewportSize() -> Size {
-    return Size(width: sokolLogicalWidthF(), height: sokolLogicalHeightF())
-}
-
-@Native
-function rootViewportWidth() -> Int {
-    return sokolLogicalWidth()
-}
-
-@Native
-function rootViewportHeight() -> Int {
-    return sokolLogicalHeight()
 }
 
 function foundationRenderableViewCount(view: borrow FoundationView) -> Int {
@@ -310,7 +260,7 @@ function foundationLayoutHasNonEmptyFrame(tree: borrow LayoutTree) -> Bool {
 
 
 // No-op default for `engineFrame` below.
-function foundationNoopEngineFrame(frame: borrow mut GraphicsFrame) {
+function foundationNoopEngineFrame(frame: borrow mut RenderFrame) {
     let ignored = frame.backend
     return
 }
@@ -322,7 +272,7 @@ function foundationNoContinuousRebuild() -> Bool { return false }
 // enough that the numbers hold still long enough to be read at all.
 function foundationHudRefreshSeconds() -> Float { return 0.1 }
 
-// Write the graphics overlay into the batch's own HUD stream (uiBatchHudStream).
+// Write the graphics overlay into the batch's own HUD stream (hudStreamIndex).
 // Nothing here touches the application's view tree, its retained tree, its layout or
 // its quads: the overlay is laid out against the viewport on its own and emitted
 // into a stream the UI never writes. A refresh therefore costs one small tree, one
@@ -331,27 +281,18 @@ function foundationHudRefreshSeconds() -> Float { return 0.1 }
 // rebuilding the entire interface.
 function foundationEmitHud(
     graphics: borrow Graphics,
-    batchPtr: RawPtr,
+    batch: UiBatch,
     overlay: borrow FoundationView,
     layout: borrow LayoutTree,
     viewportW: Int,
     viewportH: Int,
 ) {
-    // The batched path never hands this encoder to a pass — the compositor owns
-    // the pass structure — so it is a placeholder released on the way out.
-    let encoder = makeRenderEncoder()
     var hudBackend = KiraGraphicsFoundationBackend {
-        encoder: encoder
         graphics: graphics
-        uiBatchPtr: batchPtr
-        // Asked of the graphics handle rather than asserted. This was `true`,
-        // which was right only because the only backend that reached here was
-        // the one it was describing.
-        gpuTelemetry: !uiBatchPtrIsNull(graphics.metalContext)
+        batch: batch
     }
     hudBackend.beginHudFrame(viewportW, viewportH)
     foundationRender(overlay, layout, hudBackend)
     hudBackend.endHudFrame()
-    nativeStateFree(encoder.storage)
     return
 }

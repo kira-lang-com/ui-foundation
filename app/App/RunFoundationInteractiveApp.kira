@@ -17,7 +17,7 @@ function RunFoundationInteractiveApp(
     // Host hook: runs FIRST every frame, BEFORE the UI render pass begins — the place a
     // hosting engine ticks its simulation and runs its own (offscreen) render passes, e.g.
     // drawing the scene into the render-target texture a TextureView shows this same frame.
-    engineFrame: borrow (borrow mut GraphicsFrame) -> Void = foundationNoopEngineFrame,
+    engineFrame: borrow (borrow mut RenderFrame) -> Void = foundationNoopEngineFrame,
     // Host-owned animation invalidation. Return true only while external state used
     // by rootBuilder is changing without an input event (for example a theme tween).
     needsRebuild: borrow () -> Bool = foundationNoContinuousRebuild,
@@ -33,10 +33,15 @@ function RunFoundationInteractiveApp(
     // builder's OUTPUT STRUCTURE does not depend on the viewport size (fixed
     // chrome); hosts whose widget tree adapts to the viewport keep the default.
     rebuildOnResize: Bool = true,
+    // The mode the window OPENS in. A running app moves between modes with
+    // `frame.setWindowMode`; fullscreen ignores the size above and takes the
+    // display's, which the layout picks up from the frame's viewport like any
+    // other size.
+    windowMode: WindowMode = .Windowed,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
-        uiBatchPtr: uiBatchNullPtr()
+        batch: UiBatch { storage: nullPointer() }
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -45,10 +50,11 @@ function RunFoundationInteractiveApp(
         width: width
         height: height
         sampleCount: 1
+        windowMode: windowMode
         // Platform-aware default: Metal on Apple hosts, Sokol everywhere else
         // (including Web/WASM, where the host-platform probe honestly reports
         // Unknown and Sokol/WebGPU is the only backend). The per-frame path
-        // already branches dynamically via foundationFrameHasGpuTelemetry(frame).
+        // already dispatches on the frame's own backend.
         backend: graphicsDefaultBackend()
     }
 
@@ -60,28 +66,26 @@ function RunFoundationInteractiveApp(
     app.onFrame { frame in
         // Engine-first: host simulation + offscreen passes complete before any UI work, so a
         // TextureView composites THIS frame's engine output, never last frame's.
-        let hostFrame: borrow (borrow mut GraphicsFrame) -> Void = engineFrame
+        let hostFrame: borrow (borrow mut RenderFrame) -> Void = engineFrame
         hostFrame(frame)
         let hostNeedsRebuild: borrow () -> Bool = needsRebuild
         var state = nativeRecover<FoundationAppState>(frame.userData)
         state.ui.frameCount = state.frameCount
-        let gpuTelemetry = foundationFrameHasGpuTelemetry(frame)
-        if gpuTelemetry {
-            var mvW = foundationMetalViewportWidth(frame)
-            var mvH = foundationMetalViewportHeight(frame)
-            if mvW <= 0 {
-                mvW = width
-            }
-            if mvH <= 0 {
-                mvH = height
-            }
-            state.ui.viewport = Size {
-                width: intAsFloat(value: mvW)
-                height: intAsFloat(value: mvH)
-            }
+        // The live window, in points, so an interactive resize reflows. Asked of
+        // the frame rather than branched on the backend: Metal keeps it on its
+        // context and sokol derives it from the drawable, and which of those it
+        // is has nothing to do with laying out an interface.
+        var mvW = frame.viewportWidth()
+        var mvH = frame.viewportHeight()
+        if mvW <= 0.0 {
+            mvW = intAsFloat(value: width)
         }
-        if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
-            state.ui.viewport = rootViewportSize()
+        if mvH <= 0.0 {
+            mvH = intAsFloat(value: height)
+        }
+        state.ui.viewport = Size {
+            width: mvW
+            height: mvH
         }
         if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
             state.ui.viewport = Size {
@@ -91,13 +95,20 @@ function RunFoundationInteractiveApp(
         }
         foundationWriteViewportSnapshot(state.ui.viewport.width, state.ui.viewport.height)
         let graphics = foundationFrameGraphics(frame)
-        var batchPtr = uiBatchNullPtr()
-        if gpuTelemetry {
-            if !state.uiBatchReady {
-                state.uiBatchPtr = uiBatchCreate(graphics)
-                state.uiBatchReady = true
-            }
-            batchPtr = state.uiBatchPtr
+        if !state.batchReady {
+            state.batch = UiBatch { storage: createBatch(graphics) }
+            state.batchReady = true
+        }
+        let batch = state.batch
+
+        // A VM hot patch preserves the window and callback-state store, so the
+        // retained fast path would otherwise keep presenting the old tree
+        // forever. Invalidate one frame when the runner marks a swap boundary;
+        // the normal builder/reconcile/layout path then installs the new code's
+        // view and the steady-state fast path resumes on the following frame.
+        if kiraGraphicsLiveReloadPending() {
+            state.hasPresentedFrame = false
+            state.ui.eventCount = state.ui.eventCount + 1
         }
 
         // Re-present fast path: no events arrived since the last full rebuild and
@@ -112,13 +123,12 @@ function RunFoundationInteractiveApp(
         let vpHNow = Int(state.ui.viewport.height)
         let overlayEnabled = showFpsOverlay || showGraphicsHud
         if overlayEnabled {
-            state.hudRefreshElapsed = state.hudRefreshElapsed + foundationFrameDuration(frame, gpuTelemetry)
+            state.hudRefreshElapsed = state.hudRefreshElapsed + foundationFrameDuration(frame)
         }
         let hudNeedsRefresh = overlayEnabled && state.hudRefreshElapsed >= foundationHudRefreshSeconds()
         if state.hasPresentedFrame &&
             !hostNeedsRebuild() &&
-            gpuTelemetry &&
-            state.uiBatchReady &&
+            state.batchReady &&
             state.ui.eventCount == state.lastPresentedEventCount &&
             vpWNow == state.lastPresentedViewportW &&
             vpHNow == state.lastPresentedViewportH {
@@ -128,16 +138,16 @@ function RunFoundationInteractiveApp(
             // build, the retained reconcile, the layout and every application quad
             // are all still skipped on this frame.
             if hudNeedsRefresh {
-                let hudStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
+                let hudStats = foundationFrameGraphicsStats(frame)
                 let hudOverlay = foundationGraphicsOverlay(hudStats, showGraphicsHud)
                 let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: state.ui.viewport)
-                foundationEmitHud(graphics, state.uiBatchPtr, hudOverlay, hudLayout, vpWNow, vpHNow)
+                foundationEmitHud(graphics, state.batch, hudOverlay, hudLayout, vpWNow, vpHNow)
                 state.hudRefreshElapsed = 0.0
             }
             // Re-runs the retained streams — including the liquid-glass
             // capture/blur passes on a split frame, so glass stays live over an
             // engine viewport that re-renders beneath it.
-            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
             state.frameCount = state.frameCount + 1
             state.ui.clickedKey = 0
             state.ui.scrollX = 0.0
@@ -155,7 +165,6 @@ function RunFoundationInteractiveApp(
         // every frame. It has its own stream now, so the cached tree is reusable
         // whether or not an overlay is on screen.)
         let resizeOnly = !rebuildOnResize &&
-            (gpuTelemetry || !overlayEnabled) &&
             state.hasCachedRoot &&
             state.ui.eventCount == state.lastPresentedEventCount
 
@@ -166,39 +175,15 @@ function RunFoundationInteractiveApp(
             root = state.cachedRoot
         } else {
             let buildRoot: borrow (borrow FoundationUiContext) -> FoundationView = rootBuilder
-            let appRoot = buildRoot(state.ui)
-            if overlayEnabled && !gpuTelemetry {
-                // The immediate Sokol path has no retained batch and no HUD stream
-                // to leave alone — it redraws the whole frame every time — so the
-                // overlay rides in the composed tree there, as it always has.
-                let stats = foundationFrameGraphicsStats(frame, gpuTelemetry)
-                root = foundationComposeWithGraphics(move appRoot, stats, showGraphicsHud)
-            } else {
-                root = move appRoot
-            }
+            root = buildRoot(state.ui)
         }
 
-        // On the batched Metal path the walk only ACCUMULATES quads (the encoder is
-        // untouched until present), so the swapchain pass must not begin yet — a
-        // liquid-glass frame runs its capture/blur passes first. The legacy Sokol
-        // path draws immediately during the walk and keeps its pass open here.
-        var encoder = makeRenderEncoder()
-        if !gpuTelemetry {
-            // The standalone placeholder is replaced immediately on this path;
-            // release it before the pass encoder overwrites it.
-            nativeStateFree(encoder.storage)
-            encoder = frame.beginPass(Color {
-                r: 0.96
-                g: 0.95
-                b: 0.93
-                a: 1.0
-            })
-        }
+        // The walk only ACCUMULATES quads, so the swapchain pass must not begin
+        // yet — a liquid-glass frame runs its capture/blur passes first, and
+        // presentBatch owns the whole pass structure.
         var backend = KiraGraphicsFoundationBackend {
-            encoder: encoder
             graphics: graphics
-            uiBatchPtr: batchPtr
-            gpuTelemetry: gpuTelemetry
+            batch: batch
         }
         let viewport = state.ui.viewport
         // A resize-only frame reuses the cached tree, so the retained structure
@@ -267,26 +252,16 @@ function RunFoundationInteractiveApp(
         }
 
         state.frameCount = state.frameCount + 1
-        backend.endFrame()
-        if gpuTelemetry {
-            // The overlay is written into its own stream on a full frame too, so a
-            // rebuild and a refresh produce the same vertices by the same path —
-            // there is one HUD, not a composed one and a retained one.
-            if overlayEnabled {
-                let hudStats = foundationFrameGraphicsStats(frame, gpuTelemetry)
-                let hudOverlay = foundationGraphicsOverlay(hudStats, showGraphicsHud)
-                let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: viewport)
-                foundationEmitHud(graphics, state.uiBatchPtr, hudOverlay, hudLayout, Int(viewport.width), Int(viewport.height))
-            }
-            uiBatchPresent(state.uiBatchPtr, frame, graphics, 0.96, 0.95, 0.93, 1.0)
-            // The metal path never handed the placeholder to a pass; release it
-            // now that the batch has presented. (On the Sokol path the pass
-            // encoder is released by frame.endPass.)
-            nativeStateFree(encoder.storage)
-        } else {
-            frame.endPass()
+        // The overlay is written into its own stream on a full frame too, so a
+        // rebuild and a refresh produce the same vertices by the same path —
+        // there is one HUD, not a composed one and a retained one.
+        if overlayEnabled {
+            let hudStats = foundationFrameGraphicsStats(frame)
+            let hudOverlay = foundationGraphicsOverlay(hudStats, showGraphicsHud)
+            let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: viewport)
+            foundationEmitHud(graphics, state.batch, hudOverlay, hudLayout, Int(viewport.width), Int(viewport.height))
         }
-        backend.submit()
+        state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
         // Record what this full frame presented; the re-present gate above
         // compares against these next frame.
         state.hasPresentedFrame = true
@@ -316,46 +291,41 @@ function RunFoundationInteractiveApp(
 }
 
 // Cross-backend guard for the damage-skip predicate. Proves that re-present is
-// allowed only when a frame was already presented AND the FPS, viewport width, and
-// viewport height all match the last presented frame, and that the Metal/batch
-// gates hold. Each case flips exactly one input so a regression that drops a field
-// from the comparison (re-presenting a changed frame into a stale image) fails here.
+// allowed only when a frame was already presented, the batch exists, and the FPS,
+// viewport width and viewport height all match the last presented frame. Each case
+// flips exactly one input so a regression that drops a field from the comparison
+// (re-presenting a changed frame into a stale image) fails here.
 function FoundationRepresentSkipSmoke() -> Int {
     var passed = 0
 
     // Steady state: everything matches -> re-present.
     passed = passed + smokePass(
-        foundationShouldRepresent(true, true, true, 60, 60, 1280, 1280, 720, 720)
+        foundationShouldRepresent(true, true, 60, 60, 1280, 1280, 720, 720)
     )
 
     // First frame (nothing presented yet) -> must rebuild.
     passed = passed + smokePass(
-        !foundationShouldRepresent(false, true, true, 60, 60, 1280, 1280, 720, 720)
+        !foundationShouldRepresent(false, true, 60, 60, 1280, 1280, 720, 720)
     )
 
     // FPS changed (badge differs) -> rebuild.
     passed = passed + smokePass(
-        !foundationShouldRepresent(true, true, true, 59, 60, 1280, 1280, 720, 720)
+        !foundationShouldRepresent(true, true, 59, 60, 1280, 1280, 720, 720)
     )
 
     // Viewport width changed (resize) -> rebuild.
     passed = passed + smokePass(
-        !foundationShouldRepresent(true, true, true, 60, 60, 1281, 1280, 720, 720)
+        !foundationShouldRepresent(true, true, 60, 60, 1281, 1280, 720, 720)
     )
 
     // Viewport height changed (resize) -> rebuild.
     passed = passed + smokePass(
-        !foundationShouldRepresent(true, true, true, 60, 60, 1280, 1280, 719, 720)
-    )
-
-    // Metal inactive (Sokol path has no retained batch) -> rebuild.
-    passed = passed + smokePass(
-        !foundationShouldRepresent(true, false, true, 60, 60, 1280, 1280, 720, 720)
+        !foundationShouldRepresent(true, true, 60, 60, 1280, 1280, 719, 720)
     )
 
     // Batch not yet created -> rebuild.
     passed = passed + smokePass(
-        !foundationShouldRepresent(true, true, false, 60, 60, 1280, 1280, 720, 720)
+        !foundationShouldRepresent(true, false, 60, 60, 1280, 1280, 720, 720)
     )
 
     return passed

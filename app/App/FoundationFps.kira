@@ -3,16 +3,12 @@ import KiraLayout
 import KiraGraphics
 // Live FPS indicator for the interactive Foundation runner.
 //
-// The frame duration comes from sokol's filtered (rolling-average)
-// `sapp_frame_duration`, so the displayed number is stable rather than jittery.
-// The number is rendered as real Kira text: the integer is converted to a
+// The frame duration comes from the frame's own statistics — sokol's filtered
+// (rolling-average) `sapp_frame_duration` on one backend and the Metal
+// context's on the other — so the displayed number is stable rather than
+// jittery. It is rendered as real Kira text: the integer is converted to a
 // String one digit at a time via the Foundation codepoint helper, and the badge
 // is overlaid bottom-right on top of the application's own view tree.
-
-@Native
-function rootFrameDuration() -> Float {
-    return sapp_frame_duration()
-}
 
 // Frames per second from a frame duration in seconds. Uses the `Int(...)`
 // numeric cast to round to the nearest whole frame; a non-positive duration
@@ -111,9 +107,15 @@ struct FoundationGraphicsStats {
     var frameMs: Float = 0.0
     var cpuMs: Float = 0.0
     var gpuMs: Float = 0.0
+    // Whether the backend measured the GPU's own frame time and the bytes it
+    // has allocated, or has no way to. A counter nothing measured is not a
+    // counter that measured zero, and a HUD that prints one for the other
+    // reports an instant frame where there is no timer at all.
+    var hasGpuMs: Bool = false
     var drawableWidth: Int = 0
     var drawableHeight: Int = 0
     var allocatedMiBTenths: Int = 0
+    var hasAllocated: Bool = false
     var resourceCount: Int = 0
     var passCount: Int = 0
     var drawCount: Int = 0
@@ -127,8 +129,21 @@ function foundationGraphicsStatsCompactLabel(stats: borrow FoundationGraphicsSta
     var label = foundationConcat(foundationIntToString(stats.fps), " FPS   CPU ")
     label = foundationConcat(label, foundationOneDecimal(stats.cpuMs))
     label = foundationConcat(label, " ms   GPU ")
-    label = foundationConcat(label, foundationOneDecimal(stats.gpuMs))
-    return foundationConcat(label, " ms")
+    label = foundationConcat(label, foundationMillisecondsOrUnmeasured(stats.gpuMs, stats.hasGpuMs))
+    return label
+}
+
+// A millisecond reading, or what to say where nothing measured one.
+//
+// The row stays either way — a row that comes and goes with the backend makes
+// the panel change size between runs of the same app — but it never prints a
+// zero for something nothing measured, which is a fast frame and a missing
+// timer wearing the same digits.
+function foundationMillisecondsOrUnmeasured(value: Float, measured: Bool) -> String {
+    if !measured {
+        return "not measured"
+    }
+    return foundationConcat(foundationOneDecimal(value), " ms")
 }
 
 function foundationGraphicsHudLine(label: borrow String, value: borrow String) -> FoundationView {
@@ -147,17 +162,23 @@ function foundationWindowStateLabel(state: Int) -> String {
     return "unknown"
 }
 
-// Metal-HUD-style expanded diagnostics. This intentionally uses the same normal
-// Foundation view primitives as application UI so it works in captures and tests.
+// Expanded graphics diagnostics, in the shape of the platform's own GPU HUD.
+// Intentionally built from the same Foundation view primitives as application
+// UI, so it works in captures and tests. Rows a backend has no counter for read
+// zero rather than disappearing: a row that comes and goes with the backend
+// makes the panel change size between runs of the same app.
 function foundationGraphicsHud(stats: borrow FoundationGraphicsStats) -> FoundationView {
     let drawable = foundationConcat(
         foundationConcat(foundationIntToString(stats.drawableWidth), " x "),
         foundationIntToString(stats.drawableHeight),
     )
-    let memory = foundationConcat(
-        foundationConcat(foundationIntToString(stats.allocatedMiBTenths / 10), "."),
-        foundationConcat(foundationIntToString(stats.allocatedMiBTenths % 10), " MiB"),
-    )
+    var memory = "not measured"
+    if stats.hasAllocated {
+        memory = foundationConcat(
+            foundationConcat(foundationIntToString(stats.allocatedMiBTenths / 10), "."),
+            foundationConcat(foundationIntToString(stats.allocatedMiBTenths % 10), " MiB"),
+        )
+    }
     let workload = foundationConcat(
         foundationConcat(foundationIntToString(stats.passCount), " passes   "),
         foundationConcat(
@@ -171,23 +192,23 @@ function foundationGraphicsHud(stats: borrow FoundationGraphicsStats) -> Foundat
                 foundationGraphicsHudLine("KIRA GRAPHICS", foundationConcat(foundationIntToString(stats.fps), " FPS")),
                 foundationGraphicsHudLine("Frame", foundationConcat(foundationOneDecimal(stats.frameMs), " ms")),
                 foundationGraphicsHudLine("CPU", foundationConcat(foundationOneDecimal(stats.cpuMs), " ms")),
-                foundationGraphicsHudLine("GPU", foundationConcat(foundationOneDecimal(stats.gpuMs), " ms")),
+                foundationGraphicsHudLine("GPU", foundationMillisecondsOrUnmeasured(stats.gpuMs, stats.hasGpuMs)),
                 foundationGraphicsHudLine("Drawable", drawable),
-                foundationGraphicsHudLine("Metal allocated", memory),
+                foundationGraphicsHudLine("Allocated", memory),
                 foundationGraphicsHudLine("Resources", foundationIntToString(stats.resourceCount)),
                 foundationGraphicsHudLine("Workload", workload),
                 foundationGraphicsHudLine("Frames in flight", foundationIntToString(stats.framesInFlight)),
                 foundationGraphicsHudLine("Window", foundationWindowStateLabel(stats.windowState)),
                 foundationGraphicsHudLine("Frame serial", foundationIntToString(stats.frameSerial)),
             ],
-            width: SizeMode.Hug,
-            height: SizeMode.Hug,
+            width: .Hug,
+            height: .Hug,
             spacing: 3.0,
             padding: EdgeInsets {},
-            crossAxisAlignment: CrossAlignment.Start,
+            crossAxisAlignment: .Start,
         )],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         flex: 0,
         fill: foundationFpsBadgeFill(),
         border: foundationFpsBadgeBorder(),
@@ -206,8 +227,8 @@ function foundationFpsBadge(fps: Int) -> FoundationView {
     let label = foundationGraphicsStatsCompactLabel(FoundationGraphicsStats { fps: fps })
     return Surface(
         children: [Text(move label, foundationFpsTextColor(), 13.0, 600.0)],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         flex: 0,
         fill: foundationFpsBadgeFill(),
         border: foundationFpsBadgeBorder(),
@@ -229,8 +250,8 @@ function foundationFpsBadge(fps: Int) -> FoundationView {
 function foundationGraphicsStatsBadge(stats: borrow FoundationGraphicsStats) -> FoundationView {
     return Surface(
         children: [Text(foundationGraphicsStatsCompactLabel(stats), foundationFpsTextColor(), 13.0, 600.0)],
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         flex: 0,
         fill: foundationFpsBadgeFill(),
         border: foundationFpsBadgeBorder(),
@@ -249,8 +270,8 @@ function foundationGraphicsStatsBadge(stats: borrow FoundationGraphicsStats) -> 
 function foundationFpsSmokeView() -> FoundationView {
     let appRoot = Surface(
         children: [],
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
         fill: Color { r: 0.1 g: 0.1 b: 0.12 a: 1.0 },
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
@@ -342,10 +363,10 @@ function FoundationBadgeResizeSmoke() -> Int {
 function foundationFpsOverlay(fps: Int) -> FoundationView {
     return Frame(
         child: foundationFpsBadge(fps),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.BottomLeading,
+        alignment: .BottomLeading,
         padding: EdgeInsets {
             top: 12.0
             trailing: 12.0
@@ -362,22 +383,12 @@ function foundationGraphicsOverlay(stats: borrow FoundationGraphicsStats, expand
     }
     return Frame(
         child: move badge,
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.BottomLeading,
+        alignment: .BottomLeading,
         padding: EdgeInsets { top: 12.0 trailing: 12.0 bottom: 12.0 leading: 12.0 },
     )
-}
-
-function foundationComposeWithGraphics(root: FoundationView, stats: borrow FoundationGraphicsStats, expanded: Bool) -> FoundationView {
-    return FoundationView {
-        kind: .Frame
-        width: SizeMode.Fill
-        height: SizeMode.Fill
-        alignment: Alignment.TopLeading
-        children: [move root, foundationGraphicsOverlay(stats, expanded)]
-    }
 }
 
 // Overlay the FPS badge bottom-left on top of `root`. The badge lives inside a
@@ -386,10 +397,10 @@ function foundationComposeWithGraphics(root: FoundationView, stats: borrow Found
 function foundationComposeWithFps(root: FoundationView, fps: Int) -> FoundationView {
     let fpsLayer = Frame(
         child: foundationFpsBadge(fps),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.BottomLeading,
+        alignment: .BottomLeading,
         padding: EdgeInsets {
             top: 12.0
             trailing: 12.0
@@ -399,9 +410,9 @@ function foundationComposeWithFps(root: FoundationView, fps: Int) -> FoundationV
     )
     return FoundationView {
         kind: .Frame
-        width: SizeMode.Fill
-        height: SizeMode.Fill
-        alignment: Alignment.TopLeading
+        width: .Fill
+        height: .Fill
+        alignment: .TopLeading
         children: [move root, fpsLayer]
     }
 }

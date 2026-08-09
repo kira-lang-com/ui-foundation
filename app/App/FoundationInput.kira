@@ -360,7 +360,7 @@ function foundationHandleKeyEvent(ui: borrow mut FoundationUiContext, regions: b
 
 // Single entry point used by the interactive app's `onEvent` hook. Owns the
 // recovered `var` so it can hand mutable borrows of its fields to the handlers.
-function foundationPointerButtonInt(button: GraphicsPointerButton) -> Int {
+function foundationPointerButtonInt(button: PointerButton) -> Int {
     match button {
         Left -> return 1;
         Right -> return 2;
@@ -370,7 +370,7 @@ function foundationPointerButtonInt(button: GraphicsPointerButton) -> Int {
     }
 }
 
-function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) {
+function foundationDispatchEvent(userData: RawPtr, event: borrow AppEvent) {
     var state = nativeRecover<FoundationAppState>(userData)
     // eventCount gates the interactive runner's re-present fast path: bumping it
     // forces a full widget rebuild. Pointer MOVES never bump it: hover and drag
@@ -382,7 +382,7 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
     // the window (Stage Manager) turns every move it swallows into an exit, and
     // only the first one — the one that actually clears a hover — changes what the
     // UI looks like. foundationClearHover bumps it in exactly that case.
-    if event.kind != GraphicsEventKind.PointerMoved && event.kind != GraphicsEventKind.PointerExited {
+    if event.kind != .PointerMoved && event.kind != .PointerExited {
         state.ui.eventCount = state.ui.eventCount + 1
     }
     state.ui.modShift = event.modifiers.shift
@@ -394,7 +394,7 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
         }
     }
     let kind = event.kind
-    if kind == GraphicsEventKind.PointerDown || kind == GraphicsEventKind.TouchesBegan {
+    if kind == .PointerDown || kind == .TouchesBegan {
         var button = foundationPointerButtonInt(event.pointerButton)
         if button == 0 {
             // Synthetic/touch downs carry no button — treat as left.
@@ -408,7 +408,7 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
         foundationBeginPress(state.ui, state.hitRegions, index, button == 1)
         return
     }
-    if kind == GraphicsEventKind.KeyUp {
+    if kind == .KeyUp {
         let bit = foundationKeyBit(event.keyCode)
         if bit > 0 {
             let held = (state.ui.keysMask / bit) - ((state.ui.keysMask / bit) / 2) * 2 == 1
@@ -419,31 +419,31 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow GraphicsEvent) 
         foundationWriteInputSnapshot(state.ui)
         return
     }
-    if kind == GraphicsEventKind.PointerMoved || kind == GraphicsEventKind.TouchesMoved || kind == GraphicsEventKind.PointerEntered {
+    if kind == .PointerMoved || kind == .TouchesMoved || kind == .PointerEntered {
         let ignored = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
         foundationUpdateDrag(state.ui, state.hitRegions)
         return
     }
-    if kind == GraphicsEventKind.PointerUp || kind == GraphicsEventKind.TouchesEnded {
+    if kind == .PointerUp || kind == .TouchesEnded {
         let index = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
         foundationEndPress(state.ui, state.hitRegions, index)
         foundationWriteInputSnapshot(state.ui)
         return
     }
-    if kind == GraphicsEventKind.PointerExited || kind == GraphicsEventKind.TouchesCancelled {
+    if kind == .PointerExited || kind == .TouchesCancelled {
         foundationClearHover(state.ui, state.hitRegions)
         return
     }
-    if kind == GraphicsEventKind.Scroll {
+    if kind == .Scroll {
         let ignored = foundationUpdatePointer(state.ui, state.hitRegions, event.pointerX, event.pointerY)
         foundationHandleScroll(state.ui, state.hitRegions, event.scrollX, event.scrollY)
         return
     }
-    if kind == GraphicsEventKind.TextInput {
+    if kind == .TextInput {
         foundationHandleTextInputEvent(state.ui, state.hitRegions, event.textCodepoint)
         return
     }
-    if kind == GraphicsEventKind.KeyDown {
+    if kind == .KeyDown {
         let bit = foundationKeyBit(event.keyCode)
         if bit > 0 {
             let held = (state.ui.keysMask / bit) - ((state.ui.keysMask / bit) / 2) * 2 == 1
@@ -492,10 +492,10 @@ function foundationInputSlotKey() -> String {
 }
 
 function foundationWriteInputSnapshot(ui: borrow FoundationUiContext) {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
-        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    if stateSlotHas(foundationInputSlotKey()) == false {
+        stateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
     }
-    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    var snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     snapshot.button = ui.pressButton
     snapshot.keysMask = ui.keysMask
     snapshot.shift = ui.modShift
@@ -508,10 +508,10 @@ function foundationWriteInputSnapshot(ui: borrow FoundationUiContext) {
 
 // Held pointer button: 0 none, 1 left, 2 right, 3 middle.
 function foundationInputButton() -> Int {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.button
 }
 
@@ -520,28 +520,28 @@ function foundationInputKeyHeld(bit: Int) -> Bool {
     if bit <= 0 {
         return false
     }
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return false
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     let mask = snapshot.keysMask
     return (mask / bit) - ((mask / bit) / 2) * 2 == 1
 }
 
 function foundationInputShift() -> Bool {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return false
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.shift
 }
 
 // Record the bounds of the region a click just fired on (see foundationEndPress).
 function foundationWritePressBounds(ui: borrow FoundationUiContext, bounds: borrow Rect) {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
-        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    if stateSlotHas(foundationInputSlotKey()) == false {
+        stateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
     }
-    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    var snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     snapshot.pressBoundsX = bounds.x
     snapshot.pressBoundsY = bounds.y
     snapshot.pressBoundsW = bounds.width
@@ -551,34 +551,34 @@ function foundationWritePressBounds(ui: borrow FoundationUiContext, bounds: borr
 
 // Bounds of the button the last left-click fired on (for anchoring popups).
 function foundationPressBoundsX() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pressBoundsX
 }
 
 function foundationPressBoundsY() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pressBoundsY
 }
 
 function foundationPressBoundsW() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pressBoundsW
 }
 
 function foundationPressBoundsH() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pressBoundsH
 }
 
@@ -605,36 +605,36 @@ function foundationMenuSettingsSlotKey() -> String {
 }
 
 function foundationSetMenuPlacement(placement: Int) {
-    if uiStateSlotHas(foundationMenuSettingsSlotKey()) == false {
-        uiStateSlotPut(foundationMenuSettingsSlotKey(), nativeUserData(nativeState(FoundationMenuSettings {})))
+    if stateSlotHas(foundationMenuSettingsSlotKey()) == false {
+        stateSlotPut(foundationMenuSettingsSlotKey(), nativeUserData(nativeState(FoundationMenuSettings {})))
     }
-    var settings = nativeRecover<FoundationMenuSettings>(uiStateSlotGet(foundationMenuSettingsSlotKey()))
+    var settings = nativeRecover<FoundationMenuSettings>(stateSlotGet(foundationMenuSettingsSlotKey()))
     settings.placement = placement
     return
 }
 
 function foundationMenuPlacement() -> Int {
-    if uiStateSlotHas(foundationMenuSettingsSlotKey()) == false {
+    if stateSlotHas(foundationMenuSettingsSlotKey()) == false {
         return 0
     }
-    let settings = nativeRecover<FoundationMenuSettings>(uiStateSlotGet(foundationMenuSettingsSlotKey()))
+    let settings = nativeRecover<FoundationMenuSettings>(stateSlotGet(foundationMenuSettingsSlotKey()))
     return settings.placement
 }
 
 // Pointer position at the last press/release/key event (logical pixels).
 function foundationPointerX() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pointerX
 }
 
 function foundationPointerY() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.pointerY
 }
 
@@ -642,35 +642,35 @@ function foundationPointerY() -> Float {
 // Latched across pointer moves, so it reads as "where did the current button
 // press land" for as long as that button is held.
 function foundationHoveredKey() -> Int {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.hoveredKey
 }
 
 function foundationWriteViewportSnapshot(width: Float, height: Float) {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
-        uiStateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
+    if stateSlotHas(foundationInputSlotKey()) == false {
+        stateSlotPut(foundationInputSlotKey(), nativeUserData(nativeState(FoundationInputSnapshot {})))
     }
-    var snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    var snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     snapshot.viewW = width
     snapshot.viewH = height
     return
 }
 
 function foundationViewportWidth() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.viewW
 }
 
 function foundationViewportHeight() -> Float {
-    if uiStateSlotHas(foundationInputSlotKey()) == false {
+    if stateSlotHas(foundationInputSlotKey()) == false {
         return 0.0
     }
-    let snapshot = nativeRecover<FoundationInputSnapshot>(uiStateSlotGet(foundationInputSlotKey()))
+    let snapshot = nativeRecover<FoundationInputSnapshot>(stateSlotGet(foundationInputSlotKey()))
     return snapshot.viewH
 }
