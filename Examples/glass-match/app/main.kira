@@ -1,6 +1,7 @@
 import Foundation
 import KiraLayout
 import KiraUIFoundation
+import KiraGraphics
 
 // glass-match — the pixel-match rig. Renders THE SAME scene the numpy sim scores
 // against: a fullscreen flat-cream backdrop (rig-backdrop.rgba, 825x184, the raw
@@ -10,8 +11,8 @@ import KiraUIFoundation
 // inner content), so only the outer glass shader is exercised.
 //
 // Window is target.png's size (825x184) at scale 1.0 offscreen, so layout points
-// map 1:1 to the target pixels. Backdrop path via KIRA_GLASS_BG env or the
-// absolute workspace fallback.
+// map 1:1 to the target pixels. Backdrop path via KIRA_GLASS_BG env or the asset
+// beside the package.
 
 struct RigState {
     var textureId: Int = 0
@@ -87,6 +88,42 @@ function rootView(textureId: Int) -> FoundationView {
     )
 }
 
+// The rig's backdrop view id, or 0 with the reason on the log.
+//
+// `KIRA_GLASS_BG` points a scripted run at its own file; otherwise the asset is
+// the one beside the package. A missing file is the rig running without a
+// backdrop, which the scene still renders over; a device that refused the
+// upload is a different problem and says so rather than looking like a bad path.
+function rigBackdropView(graphics: borrow Graphics) -> Int {
+    attempt {
+        let view = try rigBackdropOutcome(graphics)
+        return view
+    } handle {
+        AssetUnreadable { return 0 }
+        DeviceRefused { return reportRigBackdrop(.DeviceRefused) }
+        ShaderRejected { return reportRigBackdrop(.ShaderRejected) }
+    }
+}
+
+// The environment override first, then the asset beside the package. Only an
+// unreadable asset falls through: a device that refused the upload will refuse
+// the second one too.
+function rigBackdropOutcome(graphics: borrow Graphics) -> Result<Int, ResourceFailure> {
+    attempt {
+        let overridden = try loadRgbaTextureFromEnvironment(graphics, "KIRA_GLASS_BG", 825, 184)
+        return .Ok(overridden)
+    } handle {
+        AssetUnreadable { return loadRgbaTexture(graphics, "rig-backdrop.rgba", 825, 184) }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+function reportRigBackdrop(failure: ResourceFailure) -> Int {
+    printLine("glass-match: rig-backdrop.rgba loaded no backdrop — " + resourceFailureReason(move failure))
+    return 0
+}
+
 @Main
 function main() {
     let storage = nativeState(RigState {})
@@ -104,15 +141,7 @@ function main() {
             var rig = nativeRecover<RigState>(rigUser)
             if !rig.attempted {
                 rig.attempted = true
-                let graphics = foundationFrameGraphics(frame)
-                var id = uiLoadRgbaTextureFromEnv(graphics, "KIRA_GLASS_BG", 825, 184)
-                if id == 0 {
-                    id = uiLoadRgbaTextureFile(graphics, "rig-backdrop.rgba", 825, 184)
-                }
-                if id == 0 {
-                    id = uiLoadRgbaTextureFile(graphics, "/Users/priamc/.claude/jobs/e33828a0/tmp/pixelmatch/rig-backdrop.rgba", 825, 184)
-                }
-                rig.textureId = id
+                rig.textureId = rigBackdropView(foundationFrameGraphics(frame))
             }
             return
         },
