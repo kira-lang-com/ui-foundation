@@ -15,331 +15,384 @@ import KiraGraphics
 // one opens another only if it sits over content the current layer already drew —
 // that is what makes stacked glass refract the glass beneath it, while chrome that
 // merely coexists (a sidebar, a card, a dock) stays in one layer and one blur chain.
-@Native
-function uiBatchBeginGlassCapture(batchPtr: RawPtr, graphics: borrow Graphics, x: Float, y: Float, w: Float, h: Float) {
-    uiBatchEnsureGlassResources(batchPtr, graphics)
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    if !state.glassReady {
-        return
-    }
-    if state.streamIndex == 0 {
+extend UiBatch {
+    function beginGlassCapture(graphics: borrow Graphics, x: Float, y: Float, w: Float, h: Float) {
+        self.ensureGlassResources(graphics)
+        var state = nativeRecover<UiBatchState>(self.storage)
+        if !state.glassReady {
+            return
+        }
+        if state.streamIndex == 0 {
+            if state.probeGlassLayerOpen {
+                print(646464)
+                print(0)
+                print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h)); print(1)
+            }
+            openStream(state, graphics)
+            return
+        }
+        // Out of layers: the surface joins the last one, refracting the content below
+        // that layer rather than the glass beside it — the pre-stacking behaviour, and
+        // the only alternative to allocating capture chains without bound.
+        if state.streamIndex + 1 > maxDrawStreams() - 1 {
+            return
+        }
+        let occupied = glassLayerOccupied(state, x, y, x + w, y + h)
         if state.probeGlassLayerOpen {
             print(646464)
-            print(0)
-            print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h)); print(1)
+            print(state.streamIndex)
+            print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h))
+            if occupied { print(1) } else { print(0) }
         }
-        uiBatchOpenStream(state, graphics)
+        if occupied {
+            openStream(state, graphics)
+        }
         return
     }
-    // Out of layers: the surface joins the last one, refracting the content below
-    // that layer rather than the glass beside it — the pre-stacking behaviour, and
-    // the only alternative to allocating capture chains without bound.
-    if state.streamIndex + 1 > uiBatchMaxStreams() - 1 {
-        return
-    }
-    let occupied = uiGlassLayerOccupied(state, x, y, x + w, y + h)
-    if state.probeGlassLayerOpen {
-        print(646464)
-        print(state.streamIndex)
-        print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h))
-        if occupied { print(1) } else { print(0) }
-    }
-    if occupied {
-        uiBatchOpenStream(state, graphics)
-    }
-    return
 }
 
-@Native
-function uiBatchGlassSplitActive(batchPtr: RawPtr) -> Bool {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    return state.streamIndex > 0
+
+extend UiBatch {
+    function glassSplitActive() -> Bool {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        return state.streamIndex > 0
+    }
 }
+
 
 // Emit one liquid-glass quad (mode 3): a rounded-rect region that refracts the
 // backdrop. Field packing: fill.rgb = the wash color, fill.a = the BLUR MIX
 // (0..1, sharp capture vs blurred pyramid), borderWidth = the wash BASE strength
 // (the surface fill's alpha) which the shader scales by backdrop luminance —
 // stronger over dark content, near invisible over light.
-@Native
-function uiBatchPushGlass(
-    batchPtr: RawPtr,
-    x: Float, y: Float, w: Float, h: Float,
-    radius: Float,
-    tint: borrow Color,
-    glowIntensity: Float,
-    edgeRefraction: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-    material: borrow FoundationGlassMaterial,
-) {
-    if w <= 0.0 || h <= 0.0 {
-        return
-    }
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    if state.streamIndex == 0 {
-        return
-    }
-    // Record the only capture pixels this surface can sample. The lens may reach
-    // outside its own shape by lensMaxBend; border/shadow sampling needs the small
-    // emitted-quad pad as well. Arrays retain capacity across frames.
-    // FAR's optimized support reaches about 37 logical points beyond the sample
-    // (the 9.23-pixel tap on a quarter-logical target). Reserve 48 points for the
-    // kernel, in addition to lens displacement and the emitted edge pad.
-    let capturePad = material.lensMaxBend + 52.0
-    let boundBase = state.streams[state.streamIndex].glassBoundCount * 4
-    if boundBase + 3 < state.streams[state.streamIndex].glassBounds.count {
-        state.streams[state.streamIndex].glassBounds[boundBase] = x - capturePad
-        state.streams[state.streamIndex].glassBounds[boundBase + 1] = y - capturePad
-        state.streams[state.streamIndex].glassBounds[boundBase + 2] = x + w + capturePad
-        state.streams[state.streamIndex].glassBounds[boundBase + 3] = y + h + capturePad
-    } else {
-        state.streams[state.streamIndex].glassBounds.append(x - capturePad)
-        state.streams[state.streamIndex].glassBounds.append(y - capturePad)
-        state.streams[state.streamIndex].glassBounds.append(x + w + capturePad)
-        state.streams[state.streamIndex].glassBounds.append(y + h + capturePad)
-    }
-    state.streams[state.streamIndex].glassBoundCount = state.streams[state.streamIndex].glassBoundCount + 1
-    let vw = state.viewportW
-    let vh = state.viewportH
-    // Room for the border shadows the shader draws outside the shape. They reach
-    // 0.5px past it, so this is the anti-aliasing band plus a little; the quad
-    // does not have to carry a blurred ambient shadow, which is the disabled
-    // fourth effect and would need ~40.
-    let pad = 4.0
-    let halfW = w / 2.0
-    let halfH = h / 2.0
-    let cx = x + halfW
-    let cy = y + halfH
-    let lhx = halfW + pad
-    let lhy = halfH + pad
-    var clampedRadius = radius
-    if clampedRadius > halfW {
-        clampedRadius = halfW
-    }
-    if clampedRadius > halfH {
-        clampedRadius = halfH
-    }
-    // A rim thinner than a device pixel is a fainter rim, not a thinner one, so
-    // its width is snapped the same way the side line's reach is.
-    let rimWidth = uiGlassBorderSpread(material.innerRimWidth, state.scale)
-    // Region split: the shape is drawn as up to nine non-overlapping patches so
-    // each region's pixels run the cheapest shader that is still exact there.
-    // Inset distances are in the quad's local units (authored points), measured
-    // from the shape's rectangular edge; the corner radius is added because the
-    // rounded boundary curves inward — at a rectangular inset t the SDF's
-    // interior distance is at least t - radius, tight on the corner diagonal.
-    //
-    // The outer ring (everything within `bandInset` of the edge) keeps the full
-    // glass shader: coverage, the border-shadow stack and the skirt live there.
-    // The band ring is at least 0.5pt inside, where the shadow stack is exactly
-    // zero. The core is past every effect's reach — the lens's own 72pt limit,
-    // the 22pt blur edge fade, the 5pt sheen, the edge stroke and the inner rim
-    // — where the shader provably reduces to taps plus washes. The shader-side
-    // thresholds are named constants in Shaders/UiBatch.ksl (blurEdgeEnd,
-    // sheenEnd); the two literals here must match them.
-    let bandInset = clampedRadius + 1.5
-    // The edge effects' reach: the blur-edge fade (22, matching blurEdgeEnd in
-    // Shaders/UiBatch.ksl), the edge stroke, the 5pt sheen and the inner rim.
-    // Past it only the lens is still live; past the lens's own 72pt limit
-    // nothing is. The two bounds delimit the lens ring and the core.
-    var effectReach = 22.0
-    if material.edgeStrokeFade > effectReach {
-        effectReach = material.edgeStrokeFade
-    }
-    if material.edgeStrokePeak + 0.01 > effectReach {
-        effectReach = material.edgeStrokePeak + 0.01
-    }
-    if rimWidth > effectReach {
-        effectReach = rimWidth
-    }
-    let lensInset = clampedRadius + effectReach + 1.0
-    var coreReach = 72.0
-    if effectReach > coreReach {
-        coreReach = effectReach
-    }
-    let coreInset = clampedRadius + coreReach + 1.0
-    // Inner edges of each concentric ring, in local units.
-    let bx = halfW - bandInset
-    let by = halfH - bandInset
-    let lx = halfW - lensInset
-    let ly = halfH - lensInset
-    let kx = halfW - coreInset
-    let ky = halfH - coreInset
-    // Corner-aware full ring: the full shader is only NEEDED within 1.5pt of
-    // the boundary (coverage, shadow skirt) — but a rect ring must add the
-    // corner radius everywhere to stay corner-safe, which put the radius-wide
-    // straight edges of every large surface on the heaviest pipeline. Corner
-    // SQUARES take the radius; the straight strips stay 1.5pt (+ the 4pt
-    // skirt pad). The freed area drains to the band pipeline, whose only
-    // precondition — at least 0.5pt inside — every piece below satisfies:
-    // away from the corner squares one axis' rectangular inset bounds the SDF
-    // exactly, radius or not.
-    let sxE = halfW - 1.5
-    let syE = halfH - 1.5
-    if kx > 4.0 && ky > 4.0 {
-        // Nineteen patches: corner-aware full ring (4 corner squares + 4 thin
-        // strips), band (6), lens ring (4), core.
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, 0.0 - bx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, 0.0 - bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, 0.0 - lhy, bx, 0.0 - syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, syE, bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, sxE, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        // The interior. When every input its pixels depend on matches what the
-        // cache pass last rendered (stream 1's static direct backdrop only),
-        // present the cached bytes as texel copies; a dirty surface renders
-        // live and records its interior range for this frame's cache pass.
-        var cacheEligible = false
-        if state.streamIndex == 1 && state.glassCopyPipelineId != 0 {
-            cacheEligible = true
+extend UiBatch {
+    function pushGlass(
+        x: Float, y: Float, w: Float, h: Float,
+        radius: Float,
+        tint: borrow Color,
+        glowIntensity: Float,
+        edgeRefraction: Float,
+        clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+        material: borrow FoundationGlassMaterial,
+    ) {
+        if w <= 0.0 || h <= 0.0 {
+            return
         }
-        var cachedInterior = false
-        if cacheEligible {
-            cachedInterior = uiGlassCacheKeyMatch(
-                state,
-                cx, cy, halfW, halfH, clampedRadius,
-                tint.r, tint.g, tint.b, tint.a,
-                glowIntensity, edgeRefraction,
-                clipMinX, clipMinY, clipMaxX, clipMaxY,
-                rimWidth,
-                material.washBlend,
-                material.washUpperR, material.washUpperG, material.washUpperB,
-                material.washUpperAlpha, material.washUpperBlend,
-                material.blurNearSplit, material.lensMaxBend, material.refractionReach,
-                vw, vh,
-                Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5,
-            )
+        var state = nativeRecover<UiBatchState>(self.storage)
+        if state.streamIndex == 0 {
+            return
         }
-        // Streams are retained: what is emitted here is replayed every frame
-        // until the next rebuild. Eligible interiors therefore always emit as
-        // copy quads — the draw routes them to the live band pipeline until
-        // the cache pass has rendered them (and whenever the backdrop stops
-        // being provably static), so a copy quad is never wrong, only slower.
-        var interiorMode = 3.25
-        var interiorLensMode = 3.35
-        var interiorCoreMode = 3.45
-        var interiorSpare0 = 0.0
-        var interiorSpare1 = 0.0
-        if cacheEligible {
-            interiorMode = 3.15
-            interiorLensMode = 3.15
-            interiorCoreMode = 3.15
-            interiorSpare0 = 1.0 / (vw * state.scale)
-            interiorSpare1 = 1.0 / (vh * state.scale)
+        let vw = state.viewportW
+        let vh = state.viewportH
+        // The anti-aliasing band, and every hairline the border stack draws, in
+        // the quad's own units. `edgeBand` is two device pixels — the width the
+        // coverage ramp and the border silhouettes' own edges occupy — and the
+        // shader reads it rather than assuming one, which is what makes the edge
+        // the same thickness at every backing scale.
+        let edgeBand = glassHairline(2.0, state.scale)
+        let borderSpread = glassHairline(material.borderSpread, state.scale)
+        let borderSideOffset = glassHairline(material.borderSideOffset, state.scale)
+        let borderSideSpread = glassHairline(material.borderSideSpread, state.scale)
+        let rimWidth = glassHairline(material.innerRimWidth, state.scale)
+        // Room for the border shadows the shader draws outside the shape: the
+        // furthest silhouette's reach plus its own edge band, and never under the
+        // 4pt the quad has always carried. The quad does not have to carry a
+        // blurred ambient shadow, which is the disabled fourth effect and would
+        // need ~40.
+        var pad = 4.0
+        let skirt = borderSideOffset + borderSpread + edgeBand + 1.0
+        if skirt > pad {
+            pad = skirt
         }
-        let interiorStart = state.quadCount
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - syE, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, ly, bx, syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - sxE, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, bx, 0.0 - by, sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        let interiorBandEnd = state.quadCount
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ly, lx, 0.0 - ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, ky, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ky, 0.0 - kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, kx, 0.0 - ky, lx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        let interiorLensEnd = state.quadCount
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorCoreMode, 0.0 - kx, 0.0 - ky, kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth, interiorSpare0, interiorSpare1)
-        if cacheEligible && !cachedInterior {
-            uiGlassCacheRecordRange(
-                state,
-                state.streamIndex,
-                interiorStart,
-                interiorBandEnd - interiorStart,
-                interiorLensEnd - interiorBandEnd,
-                state.quadCount - interiorLensEnd,
-            )
+        // Record the only capture pixels this surface can sample, derived rather
+        // than reserved: `pad` is how far past the shape the surface actually
+        // rasterizes, so it is how far past the shape the border skirt can take a
+        // sharp tap; the lens displaces a tap by at most `lensMaxBend`; and the
+        // blurred levels carry `glassBlurReach()` points of kernel support into
+        // whatever they are sampled at. A capture written to that bound holds
+        // every texel any of the glass shaders reads, for any material — the
+        // constant it replaces stood in for the border stack without naming it,
+        // and no longer covered it once a material spread the stack wider.
+        // Arrays retain capacity across frames.
+        let capturePad = pad + material.lensMaxBend + glassBlurReach()
+        let boundBase = state.streams[state.streamIndex].glassBoundCount * 4
+        if boundBase + 3 < state.streams[state.streamIndex].glassBounds.count {
+            state.streams[state.streamIndex].glassBounds[boundBase] = x - capturePad
+            state.streams[state.streamIndex].glassBounds[boundBase + 1] = y - capturePad
+            state.streams[state.streamIndex].glassBounds[boundBase + 2] = x + w + capturePad
+            state.streams[state.streamIndex].glassBounds[boundBase + 3] = y + h + capturePad
+        } else {
+            state.streams[state.streamIndex].glassBounds.append(x - capturePad)
+            state.streams[state.streamIndex].glassBounds.append(y - capturePad)
+            state.streams[state.streamIndex].glassBounds.append(x + w + capturePad)
+            state.streams[state.streamIndex].glassBounds.append(y + h + capturePad)
         }
+        state.streams[state.streamIndex].glassBoundCount = state.streams[state.streamIndex].glassBoundCount + 1
+        let halfW = w / 2.0
+        let halfH = h / 2.0
+        let cx = x + halfW
+        let cy = y + halfH
+        let lhx = halfW + pad
+        let lhy = halfH + pad
+        var clampedRadius = radius
+        if clampedRadius > halfW {
+            clampedRadius = halfW
+        }
+        if clampedRadius > halfH {
+            clampedRadius = halfH
+        }
+        // Region split: the shape is drawn as up to nine non-overlapping patches so
+        // each region's pixels run the cheapest shader that is still exact there.
+        // Inset distances are in the quad's local units (authored points), measured
+        // from the shape's rectangular edge; the corner radius is added because the
+        // rounded boundary curves inward — at a rectangular inset t the SDF's
+        // interior distance is at least t - radius, tight on the corner diagonal.
+        //
+        // The outer ring (everything within `bandInset` of the edge) keeps the full
+        // glass shader: coverage, the border-shadow stack and the skirt live there.
+        // The band ring is at least half an edge band inside, where the shadow
+        // stack is exactly zero. The core is past every effect's reach — the
+        // lens's own 72pt limit, the 22pt blur edge fade, the 5pt sheen, the edge
+        // stroke and the inner rim — where the shader provably reduces to taps
+        // plus washes. The shader-side thresholds are named constants in
+        // Shaders/UiBatch.ksl (blurEdgeEnd, sheenEnd); the two literals here must
+        // match them.
+        let bandGuard = edgeBand * 1.5
+        let bandInset = clampedRadius + bandGuard
+        // The edge effects' reach: the blur-edge fade (22, matching blurEdgeEnd in
+        // Shaders/UiBatch.ksl), the edge stroke, the 5pt sheen and the inner rim.
+        // Past it only the lens is still live; past the lens's own 72pt limit
+        // nothing is. The two bounds delimit the lens ring and the core.
+        var effectReach = 22.0
+        if material.edgeStrokeFade > effectReach {
+            effectReach = material.edgeStrokeFade
+        }
+        if material.edgeStrokePeak + 0.01 > effectReach {
+            effectReach = material.edgeStrokePeak + 0.01
+        }
+        if rimWidth > effectReach {
+            effectReach = rimWidth
+        }
+        let lensInset = clampedRadius + effectReach + 1.0
+        var coreReach = 72.0
+        if effectReach > coreReach {
+            coreReach = effectReach
+        }
+        let coreInset = clampedRadius + coreReach + 1.0
+        // Inner edges of each concentric ring, in local units.
+        let bx = halfW - bandInset
+        let by = halfH - bandInset
+        let lx = halfW - lensInset
+        let ly = halfH - lensInset
+        let kx = halfW - coreInset
+        let ky = halfH - coreInset
+        // Corner-aware full ring: the full shader is only NEEDED within one and a
+        // half edge bands of the boundary (coverage, shadow skirt) — but a rect
+        // ring must add the corner radius everywhere to stay corner-safe, which
+        // put the radius-wide straight edges of every large surface on the
+        // heaviest pipeline. Corner SQUARES take the radius; the straight strips
+        // stay at the guard (+ the skirt pad). The freed area drains to the band
+        // pipeline, whose only precondition — at least half an edge band inside —
+        // every piece below satisfies: away from the corner squares one axis'
+        // rectangular inset bounds the SDF exactly, radius or not.
+        let sxE = halfW - bandGuard
+        let syE = halfH - bandGuard
+        if kx > 4.0 && ky > 4.0 {
+            // Nineteen patches: corner-aware full ring (4 corner squares + 4 thin
+            // strips), band (6), lens ring (4), core.
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, 0.0 - bx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, 0.0 - bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, 0.0 - lhy, bx, 0.0 - syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - bx, syE, bx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, sxE, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            // The interior. When every input its pixels depend on matches what the
+            // cache pass last rendered (stream 1's static direct backdrop only),
+            // present the cached bytes as texel copies; a dirty surface renders
+            // live and records its interior range for this frame's cache pass.
+            var cacheEligible = false
+            if state.streamIndex == 1 && state.glassCopyPipeline.id != 0 {
+                cacheEligible = true
+            }
+            var cachedInterior = false
+            if cacheEligible {
+                cachedInterior = glassCacheKeyMatch(state, GlassSurfaceKey {
+                    centreX: cx
+                    centreY: cy
+                    halfWidth: halfW
+                    halfHeight: halfH
+                    radius: clampedRadius
+                    tintR: tint.r
+                    tintG: tint.g
+                    tintB: tint.b
+                    tintAlpha: tint.a
+                    glowIntensity: glowIntensity
+                    edgeRefraction: edgeRefraction
+                    clipMinX: clipMinX
+                    clipMinY: clipMinY
+                    clipMaxX: clipMaxX
+                    clipMaxY: clipMaxY
+                    rimWidth: rimWidth
+                    washBlend: material.washBlend
+                    washUpperR: material.washUpperR
+                    washUpperG: material.washUpperG
+                    washUpperB: material.washUpperB
+                    washUpperAlpha: material.washUpperAlpha
+                    washUpperBlend: material.washUpperBlend
+                    blurNearSplit: material.blurNearSplit
+                    lensMaxBend: material.lensMaxBend
+                    refractionReach: material.refractionReach
+                    viewportWidth: vw
+                    viewportHeight: vh
+                    backdrop: Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5 + Float(state.glassCacheEpochValue) * 16384.0
+                })
+            }
+            // Streams are retained: what is emitted here is replayed every frame
+            // until the next rebuild. Eligible interiors therefore always emit as
+            // copy quads — the draw routes them to the live band pipeline until
+            // the cache pass has rendered them (and whenever the backdrop stops
+            // being provably static), so a copy quad is never wrong, only slower.
+            var interiorMode = 3.25
+            var interiorLensMode = 3.35
+            var interiorCoreMode = 3.45
+            var interiorSpare0 = 0.0
+            var interiorSpare1 = 0.0
+            if cacheEligible {
+                interiorMode = 3.15
+                interiorLensMode = 3.15
+                interiorCoreMode = 3.15
+                interiorSpare0 = 1.0 / (vw * state.scale)
+                interiorSpare1 = 1.0 / (vh * state.scale)
+            }
+            let interiorStart = state.quadCount
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - syE, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, ly, bx, syE, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - sxE, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, bx, 0.0 - by, sxE, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            let interiorBandEnd = state.quadCount
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ly, lx, 0.0 - ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, ky, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, 0.0 - lx, 0.0 - ky, 0.0 - kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, kx, 0.0 - ky, lx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            let interiorLensEnd = state.quadCount
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorCoreMode, 0.0 - kx, 0.0 - ky, kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            if cacheEligible && !cachedInterior {
+                glassCacheRecordRange(
+                    state,
+                    state.streamIndex,
+                    interiorStart,
+                    interiorBandEnd - interiorStart,
+                    interiorLensEnd - interiorBandEnd,
+                    state.quadCount - interiorLensEnd,
+                )
+            }
+            return
+        }
+        if lx > 4.0 && ly > 4.0 {
+            // Nine patches: full ring, band ring, lens-shaded center (the lens
+            // shader is exact for everything past the effect bands, however deep).
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, ly, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.35, 0.0 - lx, 0.0 - ly, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            return
+        }
+        if bx > 4.0 && by > 4.0 {
+            // Five patches: outer ring plus a band-shaded center (too small for a core).
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
+            return
+        }
+        self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
         return
     }
-    if lx > 4.0 && ly > 4.0 {
-        // Nine patches: full ring, band ring, lens-shaded center (the lens
-        // shader is exact for everything past the effect bands, however deep).
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, ly, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - ly, 0.0 - lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, lx, 0.0 - ly, bx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.35, 0.0 - lx, 0.0 - ly, lx, ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        return
-    }
-    if bx > 4.0 && by > 4.0 {
-        // Five patches: outer ring plus a band-shaded center (too small for a core).
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, bx, 0.0 - by, lhx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-        return
-    }
-    uiGlassEmitPatch(batchPtr, cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, rimWidth)
-    return
 }
 
-// Floats per interior-cache key: the full tuple of inputs a glass interior's
-// pixels depend on. An exact elementwise compare — never a hash — so a stale
-// interior can only follow from a value missing here, not from a collision.
-function uiGlassCacheKeyFloats() -> Int { return 28 }
 
 // Cached-interior surface slots; surfaces past the cap render live.
-function uiGlassCacheMaxSurfaces() -> Int { return 32 }
+function glassCacheMaxSurfaces() -> Int { return 32 }
 
 // Compare (and store) this surface's cache key at the current push-order
 // slot. True means every input matches the interior already in the cache;
 // false marks the surface dirty and leaves the new key in place.
-function uiGlassCacheKeyMatch(
-    state: borrow mut UiBatchState,
-    k0: Float, k1: Float, k2: Float, k3: Float, k4: Float, k5: Float,
-    k6: Float, k7: Float, k8: Float, k9: Float, k10: Float, k11: Float,
-    k12: Float, k13: Float, k14: Float, k15: Float, k16: Float, k17: Float,
-    k18: Float, k19: Float, k20: Float, k21: Float, k22: Float, k23: Float,
-    k24: Float, k25: Float, k26: Float, k27: Float,
-) -> Bool {
+// What a glass interior's shading depends on.
+//
+// A surface whose every one of these is unchanged shades to the same pixels, so
+// the frame re-presents the cached interior instead of running the glass branch
+// again. This used to be twenty-eight positional `Float` parameters named `k0`
+// through `k27`, compared by a hand-written loop over a flat array — one
+// argument out of order was a silent cache hit on the wrong surface, and
+// nothing named what any of them measured.
+@Derive(Equatable, Clone)
+struct GlassSurfaceKey {
+    var centreX: Float = 0.0
+    var centreY: Float = 0.0
+    var halfWidth: Float = 0.0
+    var halfHeight: Float = 0.0
+    var radius: Float = 0.0
+    var tintR: Float = 0.0
+    var tintG: Float = 0.0
+    var tintB: Float = 0.0
+    var tintAlpha: Float = 0.0
+    var glowIntensity: Float = 0.0
+    var edgeRefraction: Float = 0.0
+    var clipMinX: Float = 0.0
+    var clipMinY: Float = 0.0
+    var clipMaxX: Float = 0.0
+    var clipMaxY: Float = 0.0
+    var rimWidth: Float = 0.0
+    var washBlend: Float = 0.0
+    var washUpperR: Float = 0.0
+    var washUpperG: Float = 0.0
+    var washUpperB: Float = 0.0
+    var washUpperAlpha: Float = 0.0
+    var washUpperBlend: Float = 0.0
+    var blurNearSplit: Float = 0.0
+    var lensMaxBend: Float = 0.0
+    var refractionReach: Float = 0.0
+    var viewportWidth: Float = 0.0
+    var viewportHeight: Float = 0.0
+    // The backdrop this surface refracted, folded together with the cache epoch
+    // so a new backdrop or a cache flush reads as a different surface.
+    var backdrop: Float = 0.0
+}
+
+// Whether this surface's interior can be re-presented from the cache.
+//
+// Records the key either way: a miss is what the next frame compares against.
+// The comparison is `eq_GlassSurfaceKey`, generated from the declaration, so a
+// field added above is compared without this function changing.
+function glassCacheKeyMatch(state: borrow mut UiBatchState, fresh: borrow GlassSurfaceKey) -> Bool {
     let slot = state.glassSurfaceCursor
     state.glassSurfaceCursor = state.glassSurfaceCursor + 1
-    if slot >= uiGlassCacheMaxSurfaces() {
+    if slot >= glassCacheMaxSurfaces() {
         return false
     }
-    let base = slot * uiGlassCacheKeyFloats()
-    var fresh: [Float] = [
-        k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, k10, k11, k12, k13,
-        k14, k15, k16, k17, k18, k19, k20, k21, k22, k23, k24, k25, k26,
-        k27 + Float(state.glassCacheEpochValue) * 16384.0,
-    ]
-    var same = state.glassCacheKeySet[slot] != 0
-    var firstDiff = -1
-    var i = 0
-    while i < uiGlassCacheKeyFloats() {
-        if state.glassCacheKeys[base + i] != fresh[i] {
-            if same {
-                same = false
-                firstDiff = i
-            }
-            state.glassCacheKeys[base + i] = fresh[i]
-        }
-        i = i + 1
-    }
+    let same = state.glassCacheKeySet[slot] != 0 && eq_GlassSurfaceKey(state.glassCacheKeys[slot], fresh)
+    state.glassCacheKeys[slot] = clone_GlassSurfaceKey(fresh)
     state.glassCacheKeySet[slot] = 1
     if state.probeGlassLayers {
         print(686868)
         print(slot)
         if same { print(1) } else { print(0) }
-        print(firstDiff)
     }
-    if same {
-        return true
-    }
-    return false
+    return same
 }
 
 // Remember a dirty surface's interior quads so the cache pass re-renders them.
-function uiGlassCacheRecordRange(state: borrow mut UiBatchState, stream: Int, start: Int, bandCount: Int, lensCount: Int, coreCount: Int) {
+function glassCacheRecordRange(state: borrow mut UiBatchState, stream: Int, start: Int, bandCount: Int, lensCount: Int, coreCount: Int) {
     if bandCount + lensCount + coreCount <= 0 {
         return
     }
@@ -368,70 +421,102 @@ function uiGlassCacheRecordRange(state: borrow mut UiBatchState, stream: Int, st
 // (the codes stay below 3.5 so a fallback draw through the generic pipeline
 // renders every patch with the full glass branch, which is exact for all of
 // them).
-@Native
-function uiGlassEmitPatch(
-    batchPtr: RawPtr,
-    cx: Float, cy: Float, vw: Float, vh: Float,
-    halfW: Float, halfH: Float, radius: Float, mode: Float,
-    lx0: Float, ly0: Float, lx1: Float, ly1: Float,
-    tint: borrow Color,
-    glowIntensity: Float,
-    edgeRefraction: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-    material: borrow FoundationGlassMaterial,
-    rimWidth: Float,
-    spare0: Float = 0.0,
-    spare1: Float = 0.0,
-) {
-    // Clip the patch geometrically. The interior pipelines write with blending
-    // off (an opaque interior replaces its pixel), so a fragment cannot opt
-    // out by returning transparent the way the blended path could — a patch
-    // must simply never rasterize outside its clip. The rectangles are both
-    // axis-aligned, so the intersection is exact; `local` follows because it
-    // is the pixel position minus the centre.
-    var px0 = cx + lx0
-    var py0 = cy + ly0
-    var px1 = cx + lx1
-    var py1 = cy + ly1
-    if px0 < clipMinX { px0 = clipMinX }
-    if py0 < clipMinY { py0 = clipMinY }
-    if px1 > clipMaxX { px1 = clipMaxX }
-    if py1 > clipMaxY { py1 = clipMaxY }
-    if px1 <= px0 || py1 <= py0 {
+extend UiBatch {
+    function glassEmitPatch(
+        cx: Float, cy: Float, vw: Float, vh: Float,
+        halfW: Float, halfH: Float, radius: Float, mode: Float,
+        lx0: Float, ly0: Float, lx1: Float, ly1: Float,
+        tint: borrow Color,
+        glowIntensity: Float,
+        edgeRefraction: Float,
+        clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+        material: borrow FoundationGlassMaterial,
+        // The border block and the inner rim, already turned from the device
+        // pixels the material states them in into the quad's own units, plus the
+        // width of one anti-aliasing band (two device pixels) for the shader to
+        // ramp its coverage and its silhouette edges over.
+        borderSpread: Float,
+        borderSideOffset: Float,
+        borderSideSpread: Float,
+        rimWidth: Float,
+        edgeBand: Float,
+        spare0: Float = 0.0,
+        spare1: Float = 0.0,
+    ) {
+        // Put every CUT between patches on a whole device pixel — see
+        // `glassSnapToDevicePixel` for what goes wrong when one lands on a pixel
+        // centre instead. A cut is an edge two patches share, and every one of
+        // them is an inset measured from the shape's own rectangular extent, so
+        // an edge at or beyond that extent is not a cut: it is the outer boundary
+        // of the surface's skirt, which borders nothing, is drawn by one pipeline
+        // and is never cached. Moving it would move the pixels of every glass
+        // surface for no reason at all.
+        //
+        // The clip rectangle bounds a rasterized extent as much as a cut does —
+        // it truncates a patch, and the shader tests fragments against the same
+        // numbers — so it lands on the grid too, and a patch clamped to it is
+        // still snapped.
+        var state = nativeRecover<UiBatchState>(self.storage)
+        let scale = state.scale
+        let clipX0 = glassSnapToDevicePixel(clipMinX, scale)
+        let clipY0 = glassSnapToDevicePixel(clipMinY, scale)
+        let clipX1 = glassSnapToDevicePixel(clipMaxX, scale)
+        let clipY1 = glassSnapToDevicePixel(clipMaxY, scale)
+        // Clip the patch geometrically. The interior pipelines write with blending
+        // off (an opaque interior replaces its pixel), so a fragment cannot opt
+        // out by returning transparent the way the blended path could — a patch
+        // must simply never rasterize outside its clip. The rectangles are both
+        // axis-aligned, so the intersection is exact; `local` follows because it
+        // is the pixel position minus the centre.
+        var px0 = cx + lx0
+        var py0 = cy + ly0
+        var px1 = cx + lx1
+        var py1 = cy + ly1
+        if lx0 > 0.0 - halfW { px0 = glassSnapToDevicePixel(px0, scale) }
+        if ly0 > 0.0 - halfH { py0 = glassSnapToDevicePixel(py0, scale) }
+        if lx1 < halfW { px1 = glassSnapToDevicePixel(px1, scale) }
+        if ly1 < halfH { py1 = glassSnapToDevicePixel(py1, scale) }
+        if px0 < clipX0 { px0 = clipX0 }
+        if py0 < clipY0 { py0 = clipY0 }
+        if px1 > clipX1 { px1 = clipX1 }
+        if py1 > clipY1 { py1 = clipY1 }
+        if px1 <= px0 || py1 <= py0 {
+            return
+        }
+        self.emitQuad(
+            px0, py0, px1, py1,
+            px0 - cx, py0 - cy, px1 - cx, py1 - cy,
+            halfW, halfH, radius, tint.a, mode, edgeRefraction,
+            tint.r, tint.g, tint.b, glowIntensity,
+            cx / vw, cy / vh, halfW / vw, halfH / vh,
+            clipX0, clipY0, clipX1, clipY1,
+            material.edgeStrokeStrength, material.edgeStrokeDarken,
+            material.edgeStrokePeak, material.edgeStrokeFade,
+            material.sheenStrength, material.lensMaxBend,
+            material.refractionReach, material.blurNearSplit,
+            // Device pixels, converted. The design document measures the ring at
+            // one pixel and the side edge at two, off a 2x capture; carrying the
+            // point values that happened to produce those on a 2x display made
+            // the border thin with the backing scale, so at 1.25x it came out at
+            // 0.6 of a pixel — a fainter line, not the same one.
+            borderSpread,
+            borderSideOffset,
+            borderSideSpread, material.borderGrey,
+            material.borderSideGrey,
+            material.innerRimStrength,
+            rimWidth,
+            // The wash: how `fill` blends (the lower layer), then the upper layer whole.
+            material.washBlend,
+            material.washUpperR, material.washUpperG, material.washUpperB,
+            material.washUpperAlpha, material.washUpperBlend,
+            // Spares: the copy patches carry 1/drawable-size in the first two
+            // (UiGlassCopy turns its device position into the cache texel through
+            // them); the third is the anti-aliasing band every glass pipeline
+            // ramps its coverage over.
+            spare0, spare1, edgeBand
+        )
         return
     }
-    uiBatchEmitQuad(
-        batchPtr,
-        px0, py0, px1, py1,
-        px0 - cx, py0 - cy, px1 - cx, py1 - cy,
-        halfW, halfH, radius, tint.a, mode, edgeRefraction,
-        tint.r, tint.g, tint.b, glowIntensity,
-        cx / vw, cy / vh, halfW / vw, halfH / vh,
-        clipMinX, clipMinY, clipMaxX, clipMaxY,
-        material.edgeStrokeStrength, material.edgeStrokeDarken,
-        material.edgeStrokePeak, material.edgeStrokeFade,
-        material.sheenStrength, material.lensMaxBend,
-        material.refractionReach, material.blurNearSplit,
-        // Authored POINTS, not device pixels. The reference's own capture is 2x, so
-        // its two-pixel side edge is 1.0pt and its one-pixel top edge is 0.5pt —
-        // snapping either to a whole device pixel on a 1x screen doubles the first
-        // and quadruples the second, which is a heavier border than the design, not
-        // a faithful one. At 1x a half-point band is a half-covered pixel, and that
-        // is what the same design looks like at that scale.
-        material.borderSpread,
-        material.borderSideOffset,
-        material.borderSideSpread, material.borderGrey,
-        material.borderSideGrey,
-        material.innerRimStrength,
-        rimWidth,
-        // The wash: how `fill` blends (the lower layer), then the upper layer whole.
-        material.washBlend,
-        material.washUpperR, material.washUpperG, material.washUpperB,
-        material.washUpperAlpha, material.washUpperBlend,
-        // Spares: the copy patches carry 1/drawable-size here (UiGlassCopy
-        // turns its device position into the cache texel through them).
-        spare0, spare1
-    )
-    return
 }
+
 

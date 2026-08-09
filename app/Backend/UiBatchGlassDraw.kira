@@ -12,25 +12,7 @@ import KiraGraphics
 // One fullscreen blur tap: bind the blur pipeline, the direction/resolution params
 // (vertex buffer 0) and the input texture (slot 0), and draw the vertex_id triangle.
 @Native
-function uiBlurPassDraw(encoder: borrow mut RenderEncoder, pipelineId: U32, paramsGroupId: U32, inputGroupId: U32) {
-    let pipeline = RenderPipeline {
-        handle: BackendPipelineHandle {
-            id: pipelineId
-        }
-        id: pipelineId
-    }
-    let params = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: paramsGroupId
-        }
-        id: paramsGroupId
-    }
-    let inputGroup = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: inputGroupId
-        }
-        id: inputGroupId
-    }
+function drawBlurPass(encoder: borrow mut RenderEncoder, pipeline: borrow RenderPipeline, params: borrow BindGroup, inputGroup: borrow BindGroup) {
     encoder.setPipeline(pipeline)
     encoder.setBindGroup(0, inputGroup)
     encoder.setBindGroup(1, params)
@@ -38,98 +20,101 @@ function uiBlurPassDraw(encoder: borrow mut RenderEncoder, pipelineId: U32, para
     return
 }
 
-// Portable/reference realization of the authored blur ladder. NEAR is the exact
-// third H/V iteration and FAR the exact eighth. It is intentionally kept live even
-// on Metal through KIRA_GLASS_REFERENCE, making effect comparisons exercise the
-// same application and compositor rather than a stale offline image.
+// The blur pyramid drawn as render passes, for a backend that cannot encode a
+// compute dispatch — and, through KIRA_GLASS_REFERENCE, live even where one can,
+// so an effect comparison exercises this application and compositor rather than
+// a stale offline image.
+//
+// Four passes, the same four halves `dispatchTextureComputePair` runs: each
+// level filtered along x into its own intermediate, then along y into the level
+// the material samples. The compute pair writes both levels per dispatch because
+// a kernel may store to two images; a fragment stage writes one target, which is
+// the only difference between the two encodings. `Shaders/UiBlur.ksl` and
+// `Shaders/UiGlassBlur{H,V}.ksl` call the same two filters, so the images agree.
 //
 // Native like the pass it belongs to. `beginRenderPass` and `endPass` mutate the
 // frame, and a struct receiver has no seam representation, so a mutating call is
 // always same-engine: leaving this half on the VM put one across the seam and the
 // bytecode compiler refused the program (`MutCallAcrossSeam`). Its only caller is
-// the native uiBatchPresent and its only callee the native uiBlurPassDraw, so the
+// the native presentBatch and its only callee the native drawBlurPass, so the
 // annotation is what the code already was everywhere except here.
 @Native
-function uiGlassIterativeBlur(
-    frame: borrow mut GraphicsFrame,
+function glassDrawnBlur(
+    frame: borrow mut RenderFrame,
     state: borrow mut UiBatchState,
     layer: Int,
-    blurPipelineId: U32,
-    paramsH: U32,
-    paramsV: U32,
+    blurPipeline: borrow RenderPipeline,
 ) {
-    var inputGroup = state.glassLayers[layer].sceneBlurInGroupId
-    var iteration = 1
-    while iteration <= 8 {
-        var hEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-h-pass", state.blurTextureAId, 0.0, 0.0, 0.0, 1.0))
-        uiBlurPassDraw(hEncoder, blurPipelineId, paramsH, inputGroup)
-        frame.endPass()
+    let sceneGroup = state.glassLayers[layer].sceneBlurInGroup
+    var nearH = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-near-h-pass", state.blurTextureA, 0.0, 0.0, 0.0, 1.0))
+    drawBlurPass(nearH, blurPipeline, state.blurParamsNearHGroup, sceneGroup)
+    frame.endPass()
 
-        var outputId = state.glassLayers[layer].nearTextureId
-        var outputGroup = state.glassLayers[layer].nearBlurInGroupId
-        if iteration > uiGlassNearIteration() {
-            outputId = state.glassLayers[layer].blurTextureId
-            outputGroup = state.glassLayers[layer].farBlurInGroupId
-        }
-        var vEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-blur-v-pass", outputId, 0.0, 0.0, 0.0, 1.0))
-        uiBlurPassDraw(vEncoder, blurPipelineId, paramsV, state.blurInputAGroupId)
-        frame.endPass()
-        inputGroup = outputGroup
-        iteration = iteration + 1
-    }
+    var farH = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-far-h-pass", state.blurTextureB, 0.0, 0.0, 0.0, 1.0))
+    drawBlurPass(farH, blurPipeline, state.blurParamsFarHGroup, sceneGroup)
+    frame.endPass()
+
+    var nearV = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-near-v-pass", state.glassLayers[layer].nearTexture, 0.0, 0.0, 0.0, 1.0))
+    drawBlurPass(nearV, blurPipeline, state.blurParamsNearVGroup, state.blurInputAGroup)
+    frame.endPass()
+
+    var farV = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-far-v-pass", state.glassLayers[layer].blurTexture, 0.0, 0.0, 0.0, 1.0))
+    drawBlurPass(farV, blurPipeline, state.blurParamsFarVGroup, state.blurInputBGroup)
+    frame.endPass()
     return
 }
 
 // The sharp tap (slot 1) and blurred backdrop (slot 2) stream `stream` draws with:
 // stream 0 sits under all glass and takes the frame's defaults, and stream j
 // refracts glass layer j-1's capture. Returned as the bind group ids
-// uiBatchDrawStream takes.
-function uiGlassStreamSharpGroup(state: borrow mut UiBatchState, stream: Int) -> U32 {
+// drawStream takes.
+function glassSharpStreamGroup(state: borrow mut UiBatchState, stream: Int) -> BindGroup {
     if stream <= 0 {
-        return 0
+        return emptyBindGroup()
     }
     if stream == 1 && state.directBackdropLayer0 {
-        return state.directBackdropSharpGroupId
+        return state.directBackdropSharpGroup
     }
-    return state.glassLayers[stream - 1].sceneSharpGroupId
+    return state.glassLayers[stream - 1].sceneSharpGroup
 }
 
 // Both blurred levels, in the one group they share.
-function uiGlassStreamSoftNearGroup(state: borrow mut UiBatchState, stream: Int) -> U32 {
+function glassSoftNearStreamGroup(state: borrow mut UiBatchState, stream: Int) -> BindGroup {
     if stream <= 0 {
-        return 0
+        return emptyBindGroup()
     }
-    return state.glassLayers[stream - 1].softNearGroupId
+    return state.glassLayers[stream - 1].softNearGroup
 }
 
 // Draw everything below `layer + 1` once. Capture callers may invoke this under
 // several scissors; the opaque background draw resets an overlapping region before
 // the same premultiplied UI is replayed, so overlapping padded bounds remain exact.
 // Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see uiGlassIterativeBlur).
-@Native
-function uiGlassDrawCaptureContents(batchPtr: RawPtr, state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder, layer: Int) {
-    uiBackgroundDraw(state, encoder)
-    var captured = 0
-    while captured <= layer {
-        uiBatchDrawStream(
-            batchPtr,
-            encoder,
-            state.streams[captured].vertsGroupId,
-            state.streams[captured].quadCount,
-            uiGlassStreamSharpGroup(state, captured),
-            uiGlassStreamSoftNearGroup(state, captured),
-            0
-        )
-        captured = captured + 1
+// representation, so the call is always same-engine (see glassIterativeBlur).
+extend UiBatch {
+    function glassDrawCaptureContents(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder, layer: Int) {
+        drawBackground(state, encoder)
+        var captured = 0
+        while captured <= layer {
+            self.drawStream(
+                encoder,
+                captured,
+                state.streams[captured].quadCount,
+                glassSharpStreamGroup(state, captured),
+                glassSoftNearStreamGroup(state, captured),
+                emptyBindGroup()
+            )
+            captured = captured + 1
+        }
+        return
     }
-    return
 }
+
 
 // Add one capture bound, coalescing overlap with an existing region. Bounds arrive
 // in layout order; adjacent swatches and dock controls therefore fold into one
 // growing union instead of replaying their overlapping blur halos independently.
-function uiGlassMergeCaptureBound(state: borrow mut UiBatchState, x0: Float, y0: Float, x1: Float, y1: Float) {
+function glassMergeCaptureBound(state: borrow mut UiBatchState, x0: Float, y0: Float, x1: Float, y1: Float) {
     var i = 0
     while i < state.captureRectCount {
         let base = i * 4
@@ -172,54 +157,51 @@ function uiGlassMergeCaptureBound(state: borrow mut UiBatchState, x0: Float, y0:
 // Create (or re-create after a resize) the interior-cache texture, its
 // nearest-texel sampler and the bind group that rides the atlas slot around
 // copy runs. A fresh texture invalidates every key: nothing cached yet.
-function uiGlassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borrow Graphics) {
+function glassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borrow Graphics) {
     // Drawable pixels, not logical points: the cache must hold one texel per
     // device pixel or the copies re-present an upscale.
     let cacheW = Int(state.viewportW * state.scale)
     let cacheH = Int(state.viewportH * state.scale)
-    if state.glassCacheTextureId != 0 && state.glassCacheW == cacheW && state.glassCacheH == cacheH {
+    if state.glassCacheTexture.id != 0 && state.glassCacheW == cacheW && state.glassCacheH == cacheH {
         return
     }
-    if state.glassCacheBindGroupId != 0 {
-        uiGlassDestroyBindGroup(graphics, state.glassCacheBindGroupId)
-        state.glassCacheBindGroupId = 0
+    if state.glassCacheGroup.id != 0 {
+        glassDestroyBindGroup(graphics, state.glassCacheGroup)
+        state.glassCacheGroup = emptyBindGroup()
     }
-    if state.glassCacheTextureId != 0 {
-        uiGlassDestroyTexture(graphics, state.glassCacheTextureId)
-        state.glassCacheTextureId = 0
+    if state.glassCacheTexture.id != 0 {
+        glassDestroyTexture(graphics, state.glassCacheTexture)
+        state.glassCacheTexture = emptyGraphicsTexture()
     }
     if cacheW <= 0 || cacheH <= 0 {
         return
     }
-    let cacheTex = graphics.createTexture(TextureDescriptor {
+    let cacheTex = textureOrReport(graphics.createTexture(TextureDescriptor {
         label: "kira-ui-glass-interior-cache"
         width: cacheW
         height: cacheH
-        format: textureFormatSwapchain()
-        usage: textureUsageRenderTargetSampled()
+        format: .Swapchain
+        usage: .RenderTargetSampled
         sampleCount: 1
-        storageMode: 2
-    })
-    if state.glassCacheSamplerId == 0 {
+        storage: .Transient
+    }), "glass interior cache")
+    if state.glassCacheSampler.id == 0 {
         // Nearest: a copy fragment lands exactly on its texel centre, and
         // nearest guarantees the fetch returns that texel's bytes unchanged.
-        state.glassCacheSamplerId = graphics.createSampler(SamplerDescriptor {
+        state.glassCacheSampler = samplerOrReport(graphics.createSampler(SamplerDescriptor {
             label: "kira-ui-glass-cache-nearest"
-            minFilter: textureFilterNearest()
-            magFilter: textureFilterNearest()
-            addressModeU: textureAddressModeClampToEdge()
-            addressModeV: textureAddressModeClampToEdge()
-        }).id
+            minFilter: .Nearest
+            magFilter: .Nearest
+            addressModeU: .ClampToEdge
+            addressModeV: .ClampToEdge
+        }), "glass cache sampler")
     }
-    let sampler = GraphicsSampler {
-        handle: BackendSamplerHandle { id: state.glassCacheSamplerId }
-        id: state.glassCacheSamplerId
-    }
-    let group = graphics.beginBindGroup("kira-ui-glass-cache")
-    graphics.bindGroupAddTexture(group, uiSlotAtlasTexture(), cacheTex)
-    graphics.bindGroupAddSampler(group, uiSlotAtlasSampler(), sampler)
-    state.glassCacheTextureId = cacheTex.id
-    state.glassCacheBindGroupId = group.id
+    let sampler = state.glassCacheSampler
+    let group = bindGroupOrReport(graphics.beginBindGroup("kira-ui-glass-cache"), "group")
+    graphics.bindGroupAddTexture(group, atlasTextureSlot(), cacheTex)
+    graphics.bindGroupAddSampler(group, atlasSamplerSlot(), sampler)
+    state.glassCacheTexture = cacheTex
+    state.glassCacheGroup = group
     state.glassCacheW = cacheW
     state.glassCacheH = cacheH
     state.glassCacheCleared = false
@@ -231,23 +213,20 @@ function uiGlassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: bo
 
 // The cache pass: clear on first use, preserve previously cached interiors on
 // every later one.
-function uiGlassInteriorCachePass(state: borrow mut UiBatchState) -> RenderPassDescriptor {
-    var load = loadActionLoad()
+function glassInteriorCachePass(state: borrow mut UiBatchState) -> RenderPassDescriptor {
+    var load: LoadAction = .Load
     if !state.glassCacheCleared {
-        load = loadActionClear()
+        load = .Clear
     }
     let attachment = ColorAttachment {
         target: RenderTarget {
-            kind: renderTargetKindTexture()
-            texture: GraphicsTexture {
-                handle: BackendTextureHandle { id: state.glassCacheTextureId }
-                id: state.glassCacheTextureId
-            }
+            kind: .Texture
+            texture: state.glassCacheTexture
             mipLevel: 0
             arrayLayer: 0
         }
         loadAction: load
-        storeAction: storeActionStore()
+        storeAction: .Store
         clearColor: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
         resolveTarget: emptyRenderTarget()
         hasResolveTarget: false
@@ -267,16 +246,9 @@ function uiGlassInteriorCachePass(state: borrow mut UiBatchState) -> RenderPassD
 // Re-render each dirty surface's interior quads into the cache with the same
 // pipelines, bind groups and index ranges the live path would use — the cache
 // holds exactly the bytes the composite would have produced.
-function uiGlassDrawCacheRanges(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
-    let ibuf = GraphicsBuffer {
-        handle: BackendBufferHandle { id: state.indexBufferId }
-        id: state.indexBufferId
-    }
-    encoder.setIndexBuffer(ibuf, indexFormatUint32())
-    encoder.setBindGroup(uiGroupAtlas(), BindGroup {
-        handle: BackendBindGroupHandle { id: state.bindGroupId }
-        id: state.bindGroupId
-    })
+function glassDrawCacheRanges(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
+    encoder.setIndexBuffer(state.indexBuffer, .Uint32)
+    encoder.setBindGroup(atlasBindGroup(), state.atlasGroup)
     var r = 0
     while r < state.glassCacheRangeCount {
         let stream = state.glassCacheRangeStream[r]
@@ -289,30 +261,16 @@ function uiGlassDrawCacheRanges(state: borrow mut UiBatchState, encoder: borrow 
             print(state.glassCacheRangeLens[r])
             print(state.glassCacheRangeCore[r])
         }
-        encoder.setBindGroup(uiGroupVerts(), BindGroup {
-            handle: BackendBindGroupHandle { id: state.streams[stream].vertsGroupId }
-            id: state.streams[stream].vertsGroupId
-        })
-        let sharpId = uiGlassStreamSharpGroup(state, stream)
-        encoder.setBindGroup(uiGroupExternal(), BindGroup {
-            handle: BackendBindGroupHandle { id: sharpId }
-            id: sharpId
-        })
-        let softNearId = uiGlassStreamSoftNearGroup(state, stream)
-        encoder.setBindGroup(uiGroupSoftNear(), BindGroup {
-            handle: BackendBindGroupHandle { id: softNearId }
-            id: softNearId
-        })
+        encoder.setBindGroup(vertexBindGroup(), state.streams[stream].vertsGroup)
+        encoder.setBindGroup(externalBindGroup(), glassSharpStreamGroup(state, stream))
+        encoder.setBindGroup(softNearBindGroup(), glassSoftNearStreamGroup(state, stream))
         // One pipeline for the whole interior: the band shader is byte-equal
         // to the full glass branch everywhere at least 0.5pt inside (verified
         // by whole-frame compare), so the cache holds exactly the bytes the
         // composite would produce. The lens/core split only matters for
         // per-frame cost, and a cache render is a rare, one-off frame.
         let total = state.glassCacheRangeBand[r] + state.glassCacheRangeLens[r] + state.glassCacheRangeCore[r]
-        encoder.setPipeline(RenderPipeline {
-            handle: BackendPipelineHandle { id: state.glassBandPipelineId }
-            id: state.glassBandPipelineId
-        })
+        encoder.setPipeline(state.glassBandPipeline)
         encoder.drawIndexedRange(total * 6, state.glassCacheRangeStart[r] * 6)
         r = r + 1
     }

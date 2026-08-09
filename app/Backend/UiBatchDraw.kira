@@ -18,224 +18,174 @@ import KiraGraphics
 //  - slot 2: `slot2GroupId`; 0 means the atlas fallback, which keeps
 //    texture(2)/sampler(2) satisfied on streams that hold no glass.
 //  - slot 3: `slot3GroupId`, the near blur level, same fallback discipline.
-@Native
-function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, vertsGroupId: U32, quadCount: Int, slot1GroupId: U32, slot2GroupId: U32, slot3GroupId: U32) {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    if quadCount <= 0 {
-        return
-    }
-    // Vertices were written straight into the buffer's shared contents during emit, so
-    // there is nothing to upload here — just bind and issue the single indexed draw.
-    let pipeline = RenderPipeline {
-        handle: BackendPipelineHandle {
-            id: state.pipelineId
+extend UiBatch {
+    function drawStream(encoder: borrow mut RenderEncoder, modeStream: Int, quadCount: Int, slot1Group: borrow BindGroup, slot2Group: borrow BindGroup, slot3Group: borrow BindGroup) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        if quadCount <= 0 || modeStream < 0 || modeStream >= state.streams.count {
+            return
         }
-        id: state.pipelineId
-    }
-    let ibuf = GraphicsBuffer {
-        handle: BackendBufferHandle {
-            id: state.indexBufferId
-        }
-        id: state.indexBufferId
-    }
-    let bindGroup = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: state.bindGroupId
-        }
-        id: state.bindGroupId
-    }
-    // Caveat on the glass streams' external slot: a TextureView ABOVE a glass plane
-    // samples the sharp capture instead of its own texture; below-glass
-    // TextureViews (the common case) draw in stream 0 and are fine.
-    var externalGroupId = slot1GroupId
-    if externalGroupId == 0 {
-        externalGroupId = state.fallbackExternalBindGroupId
-        if state.externalBindReady {
-            externalGroupId = state.externalBindGroupId
-        }
-    }
-    // The two blurred levels arrive together, so slot3GroupId is only consulted as
-    // the layer's combined group when the caller has one.
-    var softNearGroupId = slot2GroupId
-    if softNearGroupId == 0 {
-        softNearGroupId = slot3GroupId
-    }
-    if softNearGroupId == 0 {
-        if state.secondaryExternalBindReady {
-            softNearGroupId = state.secondaryExternalBindGroupId
-        } else {
-            softNearGroupId = state.fallbackBackdropBindGroupId
-        }
-    }
-    let externalGroup = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: externalGroupId
-        }
-        id: externalGroupId
-    }
-    let softNearGroup = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: softNearGroupId
-        }
-        id: softNearGroupId
-    }
-    // The vertex data is a STORAGE resource in the shader, not an attribute
-    // stream: it binds through a group like every other resource, and the vertex
-    // stage reads it one slot above (vertex buffer 0 is the attribute stream that
-    // this shader does not have).
-    let vertsGroup = BindGroup {
-        handle: BackendBindGroupHandle {
-            id: vertsGroupId
-        }
-        id: vertsGroupId
-    }
-    encoder.setIndexBuffer(ibuf, indexFormatUint32())
-    encoder.setBindGroup(uiGroupVerts(), vertsGroup)
-    encoder.setBindGroup(uiGroupAtlas(), bindGroup)
-    encoder.setBindGroup(uiGroupExternal(), externalGroup)
-    encoder.setBindGroup(uiGroupSoftNear(), softNearGroup)
-    var modeStream = 0
-    while modeStream < state.streams.count && state.streams[modeStream].vertsGroupId != vertsGroupId {
-        modeStream = modeStream + 1
-    }
-    var completeModes = false
-    if modeStream < state.streams.count {
-        completeModes = state.streams[modeStream].quadModes.count >= quadCount
-    }
-    // Run-splitting is on whenever any per-region pipeline exists; the rect and
-    // glyph fast paths additionally require their own (env-gated) pipelines.
-    let glassSplit = state.glassFullPipelineId != 0 && state.glassBandPipelineId != 0 && state.glassLensPipelineId != 0 && state.glassCorePipelineId != 0
-    let fastRuns = state.rectPipelineId != 0 && state.glyphPipelineId != 0
-    let specialized = (glassSplit || fastRuns) && completeModes
-    if state.probeModes {
-        print(676766)
-        print(modeStream)
-        print(state.streams.count)
-        print(quadCount)
-        if modeStream < state.streams.count {
-            print(state.streams[modeStream].quadModes.count)
-        } else {
-            print(-1)
-        }
-        if specialized { print(1) } else { print(0) }
-    }
-    if specialized {
-        var firstQuad = 0
-        var runCount = 0
-        while firstQuad < quadCount {
-            let modeCode = state.streams[modeStream].quadModes[firstQuad]
-            var runPipelineId = state.pipelineId
-            if fastRuns {
-                if modeCode == 0 { runPipelineId = state.rectPipelineId }
-                if modeCode == 10 { runPipelineId = state.glyphPipelineId }
+        // The stream's vertices are already in its buffer — written into shared
+        // memory as they were emitted on Metal, handed over by
+        // `commitDynamicBuffer` on sokol — so there is nothing to upload here.
+        let bindGroup = state.atlasGroup
+        // Caveat on the glass streams' external slot: a TextureView ABOVE a glass plane
+        // samples the sharp capture instead of its own texture; below-glass
+        // TextureViews (the common case) draw in stream 0 and are fine.
+        var externalGroup = slot1Group
+        if externalGroup.id == 0 {
+            externalGroup = state.fallbackExternalGroup
+            if state.externalBindReady {
+                externalGroup = state.externalGroup
             }
-            // A copy quad presents cached interior pixels — but only when the
-            // cache provably holds them; otherwise it renders live through
-            // the band pipeline, which is exact for every interior region.
-            // A cache sized for a different drawable is not this frame's cache,
-            // whatever its key says: the key describes the blur inputs, and the
-            // dimensions are the other half of the proof.
-            let copySized = state.glassCacheW == Int(state.viewportW * state.scale) && state.glassCacheH == Int(state.viewportH * state.scale)
-            let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTextureId == 0 || !state.glassCacheCleared || !copySized || state.glassCacheRenderedKey != state.glassCacheKeyNow
-            if glassSplit {
-                if modeCode == 30 { runPipelineId = state.glassFullPipelineId }
-                if modeCode == 31 {
-                    runPipelineId = state.glassCopyPipelineId
-                    if copyLive { runPipelineId = state.glassBandPipelineId }
-                }
-                if modeCode == 32 { runPipelineId = state.glassBandPipelineId }
-                if modeCode == 33 { runPipelineId = state.glassLensPipelineId }
-                if modeCode == 34 { runPipelineId = state.glassCorePipelineId }
-            }
-            var endQuad = firstQuad + 1
-            var samePipeline = true
-            while endQuad < quadCount && samePipeline {
-                let nextMode = state.streams[modeStream].quadModes[endQuad]
-                var nextPipelineId = state.pipelineId
-                if fastRuns {
-                    if nextMode == 0 { nextPipelineId = state.rectPipelineId }
-                    if nextMode == 10 { nextPipelineId = state.glyphPipelineId }
-                }
-                if glassSplit {
-                    if nextMode == 30 { nextPipelineId = state.glassFullPipelineId }
-                    if nextMode == 31 {
-                        nextPipelineId = state.glassCopyPipelineId
-                        if copyLive { nextPipelineId = state.glassBandPipelineId }
-                    }
-                    if nextMode == 32 { nextPipelineId = state.glassBandPipelineId }
-                    if nextMode == 33 { nextPipelineId = state.glassLensPipelineId }
-                    if nextMode == 34 { nextPipelineId = state.glassCorePipelineId }
-                }
-                if nextPipelineId == runPipelineId {
-                    endQuad = endQuad + 1
-                } else {
-                    samePipeline = false
-                }
-            }
-            encoder.setPipeline(RenderPipeline {
-                handle: BackendPipelineHandle { id: runPipelineId }
-                id: runPipelineId
-            })
-            // Copy runs read the cache through the atlas slot; swap the group
-            // in for the run and restore the stream's atlas after it.
-            let copyRun = runPipelineId == state.glassCopyPipelineId && state.glassCacheBindGroupId != 0
-            if copyRun {
-                encoder.setBindGroup(uiGroupAtlas(), BindGroup {
-                    handle: BackendBindGroupHandle { id: state.glassCacheBindGroupId }
-                    id: state.glassCacheBindGroupId
-                })
-            }
-            encoder.drawIndexedRange((endQuad - firstQuad) * 6, firstQuad * 6)
-            if copyRun {
-                encoder.setBindGroup(uiGroupAtlas(), bindGroup)
-            }
-            firstQuad = endQuad
-            runCount = runCount + 1
         }
+        // The two blurred levels arrive together, so slot3Group is only consulted as
+        // the layer's combined group when the caller has one.
+        var softNearGroup = slot2Group
+        if softNearGroup.id == 0 {
+            softNearGroup = slot3Group
+        }
+        if softNearGroup.id == 0 {
+            if state.secondaryExternalBindReady {
+                softNearGroup = state.secondaryExternalGroup
+            } else {
+                softNearGroup = state.fallbackBackdropGroup
+            }
+        }
+        // The vertex data is a STORAGE resource in the shader, not an attribute
+        // stream: it binds through a group like every other resource, and the vertex
+        // stage reads it one slot above (vertex buffer 0 is the attribute stream that
+        // this shader does not have).
+        let vertsGroup = state.streams[modeStream].vertsGroup
+        encoder.setIndexBuffer(state.indexBuffer, .Uint32)
+        encoder.setBindGroup(vertexBindGroup(), vertsGroup)
+        encoder.setBindGroup(atlasBindGroup(), bindGroup)
+        encoder.setBindGroup(externalBindGroup(), externalGroup)
+        encoder.setBindGroup(softNearBindGroup(), softNearGroup)
+        let completeModes = state.streams[modeStream].quadModes.count >= quadCount
+        // Run-splitting is on whenever any per-region pipeline exists; the rect and
+        // glyph fast paths additionally require their own (env-gated) pipelines.
+        let glassSplit = state.glassFullPipeline.id != 0 && state.glassBandPipeline.id != 0 && state.glassLensPipeline.id != 0 && state.glassCorePipeline.id != 0
+        let fastRuns = state.rectPipeline.id != 0 && state.glyphPipeline.id != 0
+        let specialized = (glassSplit || fastRuns) && completeModes
         if state.probeModes {
-            print(676767)
+            print(676766)
             print(modeStream)
+            print(state.streams.count)
             print(quadCount)
             print(state.streams[modeStream].quadModes.count)
-            print(runCount)
+            if specialized { print(1) } else { print(0) }
         }
-    } else {
-        encoder.setPipeline(pipeline)
-        encoder.drawIndexed(quadCount * 6)
-    }
-    return
-}
-
-// Submit a glass-free frame as one indexed draw on the active render-pass encoder.
-// Glass frames are drawn stream by stream by uiBatchPresent, which owns the
-// capture/blur passes each layer needs.
-@Native
-function uiBatchFlush(batchPtr: RawPtr, graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    let vertsGroupId = state.streams[state.streamIndex].vertsGroupId
-    let quadCount = state.quadCount
-    var target = encoder
-    uiBatchDrawStream(batchPtr, target, vertsGroupId, quadCount, 0, 0, 0)
-    return
-}
-
-function uiBackgroundPrepare(state: borrow mut UiBatchState, graphics: borrow Graphics) {
-    if !state.backgroundActive || state.backgroundParamsBufferId == 0 {
+        if specialized {
+            var firstQuad = 0
+            var runCount = 0
+            while firstQuad < quadCount {
+                let modeCode = state.streams[modeStream].quadModes[firstQuad]
+                var runPipeline = state.pipeline
+                if fastRuns {
+                    if modeCode == 0 { runPipeline = state.rectPipeline }
+                    if modeCode == 10 { runPipeline = state.glyphPipeline }
+                }
+                // A copy quad presents cached interior pixels — but only when the
+                // cache provably holds them; otherwise it renders live through
+                // the band pipeline, which is exact for every interior region.
+                // A cache sized for a different drawable is not this frame's cache,
+                // whatever its key says: the key describes the blur inputs, and the
+                // dimensions are the other half of the proof.
+                let copySized = state.glassCacheW == Int(state.viewportW * state.scale) && state.glassCacheH == Int(state.viewportH * state.scale)
+                let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTexture.id == 0 || !state.glassCacheCleared || !copySized || state.glassCacheRenderedKey != state.glassCacheKeyNow
+                if glassSplit {
+                    if modeCode == 30 { runPipeline = state.glassFullPipeline }
+                    if modeCode == 31 {
+                        runPipeline = state.glassCopyPipeline
+                        if copyLive { runPipeline = state.glassBandPipeline }
+                    }
+                    if modeCode == 32 { runPipeline = state.glassBandPipeline }
+                    if modeCode == 33 { runPipeline = state.glassLensPipeline }
+                    if modeCode == 34 { runPipeline = state.glassCorePipeline }
+                }
+                var endQuad = firstQuad + 1
+                var samePipeline = true
+                while endQuad < quadCount && samePipeline {
+                    let nextMode = state.streams[modeStream].quadModes[endQuad]
+                    var nextPipeline = state.pipeline
+                    if fastRuns {
+                        if nextMode == 0 { nextPipeline = state.rectPipeline }
+                        if nextMode == 10 { nextPipeline = state.glyphPipeline }
+                    }
+                    if glassSplit {
+                        if nextMode == 30 { nextPipeline = state.glassFullPipeline }
+                        if nextMode == 31 {
+                            nextPipeline = state.glassCopyPipeline
+                            if copyLive { nextPipeline = state.glassBandPipeline }
+                        }
+                        if nextMode == 32 { nextPipeline = state.glassBandPipeline }
+                        if nextMode == 33 { nextPipeline = state.glassLensPipeline }
+                        if nextMode == 34 { nextPipeline = state.glassCorePipeline }
+                    }
+                    if nextPipeline.id == runPipeline.id {
+                        endQuad = endQuad + 1
+                    } else {
+                        samePipeline = false
+                    }
+                }
+                encoder.setPipeline(runPipeline)
+                // Copy runs read the cache through the atlas slot; swap the group
+                // in for the run and restore the stream's atlas after it.
+                let copyRun = runPipeline.id == state.glassCopyPipeline.id && state.glassCacheGroup.id != 0
+                if copyRun {
+                    encoder.setBindGroup(atlasBindGroup(), state.glassCacheGroup)
+                }
+                encoder.drawIndexedRange((endQuad - firstQuad) * 6, firstQuad * 6)
+                if copyRun {
+                    encoder.setBindGroup(atlasBindGroup(), bindGroup)
+                }
+                firstQuad = endQuad
+                runCount = runCount + 1
+            }
+            if state.probeModes {
+                print(676767)
+                print(modeStream)
+                print(quadCount)
+                print(state.streams[modeStream].quadModes.count)
+                print(runCount)
+            }
+        } else {
+            encoder.setPipeline(state.pipeline)
+            encoder.drawIndexed(quadCount * 6)
+        }
         return
     }
-    let params = GraphicsBuffer {
-        handle: BackendBufferHandle { id: state.backgroundParamsBufferId }
-        id: state.backgroundParamsBufferId
+}
+
+
+// Submit a glass-free frame as one indexed draw on the active render-pass encoder.
+// Glass frames are drawn stream by stream by presentBatch, which owns the
+// capture/blur passes each layer needs.
+extend UiBatch {
+    function flushBatch(graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        let quadCount = state.quadCount
+        var target = encoder
+        let none = emptyBindGroup()
+        self.drawStream(target, state.streamIndex, quadCount, none, none, none)
+        return
     }
-    graphics.updateDynamicBuffer(params, [state.backgroundTransition, 0.0, 0.0, 0.0])
+}
+
+
+function prepareBackground(state: borrow mut UiBatchState, graphics: borrow Graphics) {
+    if !state.backgroundActive || state.backgroundParams.id == 0 {
+        return
+    }
+    graphics.updateUniform(state.backgroundParams, [F32(state.backgroundTransition), F32(0.0), F32(0.0), F32(0.0)])
     return
 }
 
 // Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see uiGlassIterativeBlur).
+// representation, so the call is always same-engine (see glassIterativeBlur).
 @Native
-function uiBackgroundDraw(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
-    if !state.backgroundActive || state.backgroundPipelineId == 0 || !state.externalBindReady {
+function drawBackground(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
+    if !state.backgroundActive || state.backgroundPipeline.id == 0 || !state.externalBindReady {
         return
     }
     // Diagnostic bisection: skip the opaque fullscreen photo while leaving every
@@ -244,27 +194,13 @@ function uiBackgroundDraw(state: borrow mut UiBatchState, encoder: borrow mut Re
     if state.benchNoBackground {
         return
     }
-    let pipeline = RenderPipeline {
-        handle: BackendPipelineHandle { id: state.backgroundPipelineId }
-        id: state.backgroundPipelineId
-    }
-    let params = BindGroup {
-        handle: BackendBindGroupHandle { id: state.backgroundParamsGroupId }
-        id: state.backgroundParamsGroupId
-    }
-    let primary = BindGroup {
-        handle: BackendBindGroupHandle { id: state.externalBindGroupId }
-        id: state.externalBindGroupId
-    }
-    var secondaryId = state.fallbackBackdropBindGroupId
+    let params = state.backgroundParamsGroup
+    let primary = state.externalGroup
+    var secondary = state.fallbackBackdropGroup
     if state.secondaryExternalBindReady {
-        secondaryId = state.secondaryExternalBindGroupId
+        secondary = state.secondaryExternalGroup
     }
-    let secondary = BindGroup {
-        handle: BackendBindGroupHandle { id: secondaryId }
-        id: secondaryId
-    }
-    encoder.setPipeline(pipeline)
+    encoder.setPipeline(state.backgroundPipeline)
     encoder.setBindGroup(0, primary)
     encoder.setBindGroup(1, secondary)
     encoder.setBindGroup(2, params)
@@ -277,286 +213,324 @@ function uiBackgroundDraw(state: borrow mut UiBatchState, encoder: borrow mut Re
 // topmost layer. It is bound with the groups the TOPMOST UI stream uses, so a frame
 // that switches the HUD to a backdrop-reading quad shades against the same capture
 // the chrome beneath it does. Costs nothing when no HUD has ever been written —
-// uiBatchDrawStream returns on a zero quad count.
+// drawStream returns on a zero quad count.
 // Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see uiGlassIterativeBlur).
-@Native
-function uiBatchDrawHud(batchPtr: RawPtr, state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
-    let hud = uiBatchHudStream()
-    if state.streams[hud].quadCount <= 0 {
-        return
-    }
-    let top = state.streamIndex
-    uiBatchDrawStream(
-        batchPtr,
-        encoder,
-        state.streams[hud].vertsGroupId,
-        state.streams[hud].quadCount,
-        uiGlassStreamSharpGroup(state, top),
-        uiGlassStreamSoftNearGroup(state, top),
-        0
-    )
-    return
-}
-
-@Native
-function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graphics: borrow Graphics, bgR: Float, bgG: Float, bgB: Float, bgA: Float) {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    // Never let the endpoint-only direct source escape the present that proved
-    // its preconditions. Crossfades and later frames must re-evaluate it.
-    state.directBackdropLayer0 = false
-    state.glassBackdropStatic = false
-    state.directBackdropSharpGroupId = 0
-    // The active stream's count only reaches its entry here: emitting keeps it in
-    // the mirrored hot field.
-    state.streams[state.streamIndex].quadCount = state.quadCount
-    let layers = state.streamIndex
-    let bg = Color {
-        r: bgR
-        g: bgG
-        b: bgB
-        a: bgA
-    }
-    uiBackgroundPrepare(state, graphics)
-    // The swapchain pass CLEARS rather than discarding, even though an opaque
-    // fullscreen photo covers every pixel it clears. Discarding instead was
-    // measured at 2.80/2.88/2.85 ms against 2.97/2.83/2.72 — no change, because a
-    // tile-based GPU initializes the tile rather than writing the clear to
-    // memory. So the clear is free and the discard only risks showing the last
-    // frame wherever the cover turns out to be less than total.
-    let swapchainPass = clearSwapchainRenderPass(bg)
-    if layers == 0 || !state.glassReady {
-        var encoder = frame.beginRenderPass(swapchainPass)
-        uiBackgroundDraw(state, encoder)
-        uiBatchFlush(batchPtr, graphics, encoder)
-        uiBatchDrawHud(batchPtr, state, encoder)
-        frame.endPass()
-        return
-    }
-
-    // KIRA_GLASS_LAYERS=1 prints 616161 then how many glass layers this frame cut
-    // itself into — the number that says whether stacked glass got its own capture
-    // or fell back onto the layer below it (uiBatchMaxStreams caps it).
-    if state.probeGlassLayers {
-        print(616161)
-        print(layers)
-    }
-    // KIRA_UI_BATCH_PROBE=1 prints a sentinel, the stream count, then one quad
-    // count per stream. It turns retained-capacity tuning into measured work
-    // rather than guessing from the shape of the widget tree.
-    if state.probeBatch {
-        print(626262)
-        print(state.streams.count)
-        var probeStream = 0
-        while probeStream < state.streams.count {
-            print(state.streams[probeStream].quadCount)
-            probeStream = probeStream + 1
+// representation, so the call is always same-engine (see glassIterativeBlur).
+extend UiBatch {
+    function drawHud(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
+        let hud = hudStreamIndex()
+        if state.streams[hud].quadCount <= 0 {
+            return
         }
-    }
-    let blurAId = state.blurTextureAId
-    let blurPipelineId = state.blurPipelineId
-    let paramsH = state.blurParamsHGroupId
-    let paramsV = state.blurParamsVGroupId
-    // Diagnostic bisection: isolates the full-resolution composite at native
-    // drawable size. Never enabled by the application; the benchmark uses it to
-    // distinguish 4K final-pass fill/shader cost from the backdrop preparation.
-    let skipBackdropPrep = state.benchFinalOnly
-
-    var layer = 0
-    while layer < layers && !skipBackdropPrep {
-        let referenceBlur = state.referenceBlur
-        var directSourceId: U32 = 0
-        var directSharpGroupId: U32 = 0
-        // Liquid Glass commonly sits directly above one opaque fullscreen photo.
-        // At a steady transition endpoint, rendering that photo into an identical
-        // intermediate before compute blur is pure resampling work. Sample the
-        // original texture instead, but only when there are no stream-0 quads to
-        // preserve. Any crossfade, stacked content, reference run, or portable
-        // fallback retains the ordinary scene capture below.
-        if layer == 0 &&
-            state.streams[0].quadCount == 0 &&
-            state.backgroundActive &&
-            state.externalBindReady &&
-            !referenceBlur &&
-            state.blurComputeHPipelineId != 0 &&
-            state.blurComputeVPipelineId != 0 {
-            if state.backgroundTransition <= 0.001 {
-                directSourceId = state.externalTextureId
-                directSharpGroupId = state.externalBindGroupId
-            } else if state.backgroundTransition >= 0.999 && state.secondaryExternalBindReady {
-                directSourceId = state.secondaryExternalTextureId
-                directSharpGroupId = state.secondaryExternalSharpBindGroupId
-            }
-        }
-        if directSourceId != 0 && directSharpGroupId != 0 {
-            state.directBackdropLayer0 = true
-            state.directBackdropSharpGroupId = directSharpGroupId
-            // The direct photo is the one backdrop the interior cache may
-            // trust: its blur inputs are static between transitions. Any
-            // capture-path layer leaves this false and every interior copy
-            // routes to the live band pipeline instead.
-            if layer == 0 {
-                state.glassBackdropStatic = true
-            }
-        }
-        // Capture: every stream below layer+1, drawn into this layer's own target.
-        // Redrawn per layer rather than accumulated into one texture because the
-        // capture a layer refracts must not contain the layer itself — and a target
-        // cannot be sampled by the pass that writes it, which an accumulating
-        // capture would need.
-        if directSourceId == 0 {
-            var sceneEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-scene-pass", state.glassLayers[layer].sceneTextureId, bgR, bgG, bgB, bgA))
-            let boundsStream = layer + 1
-            let boundCount = state.streams[boundsStream].glassBoundCount
-            if boundCount > 0 {
-                var bound = 0
-                while bound < boundCount {
-                    let base = bound * 4
-                    uiGlassMergeCaptureBound(
-                        state,
-                        state.streams[boundsStream].glassBounds[base],
-                        state.streams[boundsStream].glassBounds[base + 1],
-                        state.streams[boundsStream].glassBounds[base + 2],
-                        state.streams[boundsStream].glassBounds[base + 3]
-                    )
-                    bound = bound + 1
-                }
-                bound = 0
-                while bound < state.captureRectCount {
-                    let base = bound * 4
-                    let sx = Float(state.glassTexW) / state.viewportW
-                    let sy = Float(state.glassTexH) / state.viewportH
-                    var x0 = Int(state.captureRects[base] * sx)
-                    var y0 = Int(state.captureRects[base + 1] * sy)
-                    var x1 = Int(state.captureRects[base + 2] * sx + 1.0)
-                    var y1 = Int(state.captureRects[base + 3] * sy + 1.0)
-                    if x0 < 0 { x0 = 0 }
-                    if y0 < 0 { y0 = 0 }
-                    if x1 > state.glassTexW { x1 = state.glassTexW }
-                    if y1 > state.glassTexH { y1 = state.glassTexH }
-                    if x1 > x0 && y1 > y0 {
-                        sceneEncoder.setScissorRect(x0, y0, x1 - x0, y1 - y0)
-                        uiGlassDrawCaptureContents(batchPtr, state, sceneEncoder, layer)
-                    }
-                    bound = bound + 1
-                }
-                state.captureRectCount = 0
-                sceneEncoder.setScissorRect(0, 0, state.glassTexW, state.glassTexH)
-            } else {
-                // Defensive fallback for a custom backend that opens a glass stream but
-                // emits no bounds metadata.
-                uiGlassDrawCaptureContents(batchPtr, state, sceneEncoder, layer)
-            }
-            frame.endPass()
-        }
-
-        if !referenceBlur && state.blurComputeHPipelineId != 0 && state.blurComputeVPipelineId != 0 {
-            var computeSourceId = state.glassLayers[layer].sceneTextureId
-            if directSourceId != 0 {
-                computeSourceId = directSourceId
-            }
-            // The direct path blurs a static photo, and a static input has a
-            // static blur: skip the dispatch while the source and extent match
-            // the frame that produced the cached textures. Any capture-path
-            // dispatch (redrawn scene content) drops the cache, so a layer
-            // stack that mixes both never reads a stale result.
-            let blurCached = directSourceId != 0 &&
-                layer == 0 &&
-                state.blurCacheSourceId == computeSourceId &&
-                state.blurCacheW == state.glassBlurW &&
-                state.blurCacheH == state.glassBlurH
-            if !blurCached {
-                frame.dispatchTextureComputePair(
-                    state.blurComputeHPipelineId,
-                    state.blurComputeVPipelineId,
-                    Int(computeSourceId),
-                    Int(blurAId),
-                    Int(state.blurTextureBId),
-                    Int(state.glassLayers[layer].nearTextureId),
-                    Int(state.glassLayers[layer].blurTextureId),
-                    Int(state.samplerId),
-                    state.glassBlurW,
-                    state.glassBlurH,
-                )
-                // The compute writes leave both outputs in the uncompressed
-                // shader-write layout, and every glass tap of every later
-                // frame samples them. Re-tile once per (rare, cached)
-                // recompute so the taps read the fast layout.
-                frame.optimizeTexture(Int(state.glassLayers[layer].nearTextureId))
-                frame.optimizeTexture(Int(state.glassLayers[layer].blurTextureId))
-                if directSourceId != 0 && layer == 0 {
-                    state.blurCacheSourceId = computeSourceId
-                    state.blurCacheW = state.glassBlurW
-                    state.blurCacheH = state.glassBlurH
-                } else {
-                    state.blurCacheSourceId = 0
-                }
-            }
-        } else {
-            uiGlassIterativeBlur(frame, state, layer, blurPipelineId, paramsH, paramsV)
-            state.blurCacheSourceId = 0
-        }
-        layer = layer + 1
-    }
-
-    // Final pass: the swapchain composite — every stream in emission order at full
-    // resolution, each glass layer refracting the blur of what was under it.
-    // Interior cache: re-render this frame's dirty glass interiors into the
-    // cache texture before the composite reads them back as copies. The pass
-    // preserves previously cached surfaces (load) once the texture has been
-    // cleared a first time.
-    state.glassCacheKeyNow = Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5
-    if state.probeGlassLayers {
-        print(696969)
-        print(state.glassCacheRangeCount)
-        if state.glassBackdropStatic { print(1) } else { print(0) }
-        if state.glassCacheCleared { print(1) } else { print(0) }
-        if state.glassCacheRenderedKey == state.glassCacheKeyNow { print(1) } else { print(0) }
-    }
-    // Sized BEFORE anything asks whether the cache may be copied, and whether or
-    // not this frame has dirty interiors to render into it. The drawable changes
-    // size without any glass quad being re-pushed — a resize while the retained
-    // stream replays leaves nothing dirty — and a cache still holding the old
-    // dimensions is sampled by the new geometry's uv, which clamps to the edge and
-    // presents black slabs. Re-creating it here drops `glassCacheCleared`, so every
-    // copy routes to the live band pipeline until a rebuild refills the cache at
-    // the size the drawable is now.
-    if state.glassBackdropStatic {
-        uiGlassEnsureInteriorCache(state, graphics)
-    }
-    if state.glassBackdropStatic && state.glassCacheRangeCount > 0 {
-        if state.glassCacheTextureId != 0 {
-            var cacheEncoder = frame.beginRenderPass(uiGlassInteriorCachePass(state))
-            uiGlassDrawCacheRanges(state, cacheEncoder)
-            frame.endPass()
-            state.glassCacheCleared = true
-            // Consumed: the retained stream replays every frame, but these
-            // interiors are in the cache now.
-            state.glassCacheRangeCount = 0
-            state.glassCacheRenderedKey = state.glassCacheKeyNow
-        }
-    }
-    var mainEncoder = frame.beginRenderPass(swapchainPass)
-    uiBackgroundDraw(state, mainEncoder)
-    var stream = 0
-    var finalStreamCount = layers
-    if state.benchBackgroundOnly {
-        finalStreamCount = 0
-    }
-    while stream <= finalStreamCount {
-        uiBatchDrawStream(
-            batchPtr,
-            mainEncoder,
-            state.streams[stream].vertsGroupId,
-            state.streams[stream].quadCount,
-            uiGlassStreamSharpGroup(state, stream),
-            uiGlassStreamSoftNearGroup(state, stream),
-            0
+        let top = state.streamIndex
+        self.drawStream(
+            encoder,
+            hud,
+            state.streams[hud].quadCount,
+            glassSharpStreamGroup(state, top),
+            glassSoftNearStreamGroup(state, top),
+            emptyBindGroup()
         )
-        stream = stream + 1
+        return
     }
-    uiBatchDrawHud(batchPtr, state, mainEncoder)
-    frame.endPass()
+}
+
+
+extend UiBatch {
+    function presentBatch(frame: borrow mut RenderFrame, graphics: borrow Graphics, bgR: Float, bgG: Float, bgB: Float, bgA: Float) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        // Never let the endpoint-only direct source escape the present that proved
+        // its preconditions. Crossfades and later frames must re-evaluate it.
+        state.directBackdropLayer0 = false
+        state.glassBackdropStatic = false
+        state.directBackdropSharpGroup = emptyBindGroup()
+        // The active stream's count only reaches its entry here: emitting keeps it in
+        // the mirrored hot field.
+        state.streams[state.streamIndex].quadCount = state.quadCount
+        let layers = state.streamIndex
+        let bg = Color {
+            r: bgR
+            g: bgG
+            b: bgB
+            a: bgA
+        }
+        prepareBackground(state, graphics)
+        // Any glyph packed during this frame's walk reaches the atlas texture
+        // here, before the first pass samples it.
+        self.commitAtlas(graphics)
+        // Hand every stream's written prefix to the GPU before any pass reads it.
+        // On Metal this is nothing — the emit already wrote into the buffer — and
+        // on sokol it is the one upload per buffer the frame is allowed.
+        var commitStream = 0
+        while commitStream < state.streams.count {
+            self.commitStream(graphics, commitStream)
+            commitStream = commitStream + 1
+        }
+        // The swapchain pass CLEARS rather than discarding, even though an opaque
+        // fullscreen photo covers every pixel it clears. Discarding instead was
+        // measured at 2.80/2.88/2.85 ms against 2.97/2.83/2.72 — no change, because a
+        // tile-based GPU initializes the tile rather than writing the clear to
+        // memory. So the clear is free and the discard only risks showing the last
+        // frame wherever the cover turns out to be less than total.
+        let swapchainPass = clearSwapchainRenderPass(bg)
+        if layers == 0 || !state.glassReady {
+            var encoder = frame.beginRenderPass(swapchainPass)
+            drawBackground(state, encoder)
+            self.flushBatch(graphics, encoder)
+            self.drawHud(state, encoder)
+            frame.endPass()
+            announceVisibleContent(state)
+            return
+        }
+
+        // KIRA_GLASS_LAYERS=1 prints 616161 then how many glass layers this frame cut
+        // itself into — the number that says whether stacked glass got its own capture
+        // or fell back onto the layer below it (maxDrawStreams caps it).
+        if state.probeGlassLayers {
+            print(616161)
+            print(layers)
+        }
+        // KIRA_UI_BATCH_PROBE=1 prints a sentinel, the stream count, then one quad
+        // count per stream. It turns retained-capacity tuning into measured work
+        // rather than guessing from the shape of the widget tree.
+        if state.probeBatch {
+            print(626262)
+            print(state.streams.count)
+            var probeStream = 0
+            while probeStream < state.streams.count {
+                print(state.streams[probeStream].quadCount)
+                probeStream = probeStream + 1
+            }
+        }
+        let blurPipeline = state.blurPipeline
+        // Diagnostic bisection: isolates the full-resolution composite at native
+        // drawable size. Never enabled by the application; the benchmark uses it to
+        // distinguish 4K final-pass fill/shader cost from the backdrop preparation.
+        let skipBackdropPrep = state.benchFinalOnly
+
+        var layer = 0
+        while layer < layers && !skipBackdropPrep {
+            let referenceBlur = state.referenceBlur
+            var directSourceId: U32 = 0
+            var directSharpGroup = emptyBindGroup()
+            // Liquid Glass commonly sits directly above one opaque fullscreen photo.
+            // At a steady transition endpoint, rendering that photo into an identical
+            // intermediate before compute blur is pure resampling work. Sample the
+            // original texture instead, but only when there are no stream-0 quads to
+            // preserve. Any crossfade, stacked content, reference run, or portable
+            // fallback retains the ordinary scene capture below.
+            if layer == 0 &&
+                state.streams[0].quadCount == 0 &&
+                state.backgroundActive &&
+                state.externalBindReady &&
+                !referenceBlur &&
+                state.blurComputeHPipelineId != 0 &&
+                state.blurComputeVPipelineId != 0 {
+                if state.backgroundTransition <= 0.001 {
+                    directSourceId = state.externalTextureId
+                    directSharpGroup = state.externalGroup
+                } else if state.backgroundTransition >= 0.999 && state.secondaryExternalBindReady {
+                    directSourceId = state.secondaryExternalTextureId
+                    directSharpGroup = state.secondaryExternalSharpGroup
+                }
+            }
+            if directSourceId != 0 && directSharpGroup.id != 0 {
+                state.directBackdropLayer0 = true
+                state.directBackdropSharpGroup = directSharpGroup
+                // The direct photo is the one backdrop the interior cache may
+                // trust: its blur inputs are static between transitions. Any
+                // capture-path layer leaves this false and every interior copy
+                // routes to the live band pipeline instead.
+                if layer == 0 {
+                    state.glassBackdropStatic = true
+                }
+            }
+            // Capture: every stream below layer+1, drawn into this layer's own target.
+            // Redrawn per layer rather than accumulated into one texture because the
+            // capture a layer refracts must not contain the layer itself — and a target
+            // cannot be sampled by the pass that writes it, which an accumulating
+            // capture would need.
+            if directSourceId == 0 {
+                var sceneEncoder = frame.beginRenderPass(glassTexturePass("kira-ui-glass-scene-pass", state.glassLayers[layer].sceneTexture, bgR, bgG, bgB, bgA))
+                let boundsStream = layer + 1
+                let boundCount = state.streams[boundsStream].glassBoundCount
+                if boundCount > 0 {
+                    var bound = 0
+                    while bound < boundCount {
+                        let base = bound * 4
+                        glassMergeCaptureBound(
+                            state,
+                            state.streams[boundsStream].glassBounds[base],
+                            state.streams[boundsStream].glassBounds[base + 1],
+                            state.streams[boundsStream].glassBounds[base + 2],
+                            state.streams[boundsStream].glassBounds[base + 3]
+                        )
+                        bound = bound + 1
+                    }
+                    bound = 0
+                    while bound < state.captureRectCount {
+                        let base = bound * 4
+                        let sx = Float(state.glassTexW) / state.viewportW
+                        let sy = Float(state.glassTexH) / state.viewportH
+                        var x0 = Int(state.captureRects[base] * sx)
+                        var y0 = Int(state.captureRects[base + 1] * sy)
+                        var x1 = Int(state.captureRects[base + 2] * sx + 1.0)
+                        var y1 = Int(state.captureRects[base + 3] * sy + 1.0)
+                        if x0 < 0 { x0 = 0 }
+                        if y0 < 0 { y0 = 0 }
+                        if x1 > state.glassTexW { x1 = state.glassTexW }
+                        if y1 > state.glassTexH { y1 = state.glassTexH }
+                        if x1 > x0 && y1 > y0 {
+                            sceneEncoder.setScissorRect(x0, y0, x1 - x0, y1 - y0)
+                            self.glassDrawCaptureContents(state, sceneEncoder, layer)
+                        }
+                        bound = bound + 1
+                    }
+                    state.captureRectCount = 0
+                    sceneEncoder.setScissorRect(0, 0, state.glassTexW, state.glassTexH)
+                } else {
+                    // Defensive fallback for a custom backend that opens a glass stream but
+                    // emits no bounds metadata.
+                    self.glassDrawCaptureContents(state, sceneEncoder, layer)
+                }
+                frame.endPass()
+            }
+
+            if !referenceBlur && state.blurComputeHPipelineId != 0 && state.blurComputeVPipelineId != 0 {
+                // The compute source is a texture rather than an id, because a
+                // backend that splits an image from its views binds a view: the
+                // capture carries its own, and the direct backdrop is a view id
+                // the widget tree carried here on its own.
+                var computeSource = state.glassLayers[layer].sceneTexture
+                if directSourceId != 0 {
+                    computeSource = sampledTextureFromViewId(directSourceId)
+                }
+                let computeSourceId = computeSource.viewId
+                // The direct path blurs a static photo, and a static input has a
+                // static blur: skip the dispatch while the source and extent match
+                // the frame that produced the cached textures. Any capture-path
+                // dispatch (redrawn scene content) drops the cache, so a layer
+                // stack that mixes both never reads a stale result.
+                let blurCached = directSourceId != 0 &&
+                    layer == 0 &&
+                    state.blurCacheSourceId == computeSourceId &&
+                    state.blurCacheW == state.glassBlurW &&
+                    state.blurCacheH == state.glassBlurH
+                if !blurCached {
+                    frame.dispatchTextureComputePair(
+                        state.blurComputeHPipelineId,
+                        state.blurComputeVPipelineId,
+                        computeSource,
+                        state.blurTextureA,
+                        state.blurTextureB,
+                        state.glassLayers[layer].nearTexture,
+                        state.glassLayers[layer].blurTexture,
+                        state.sampler,
+                        state.glassBlurW,
+                        state.glassBlurH,
+                    )
+                    // The compute writes leave both outputs in the uncompressed
+                    // shader-write layout, and every glass tap of every later
+                    // frame samples them. Re-tile once per (rare, cached)
+                    // recompute so the taps read the fast layout.
+                    frame.optimizeTexture(Int(state.glassLayers[layer].nearTexture.id))
+                    frame.optimizeTexture(Int(state.glassLayers[layer].blurTexture.id))
+                    if directSourceId != 0 && layer == 0 {
+                        state.blurCacheSourceId = computeSourceId
+                        state.blurCacheW = state.glassBlurW
+                        state.blurCacheH = state.glassBlurH
+                    } else {
+                        state.blurCacheSourceId = 0
+                    }
+                }
+            } else {
+                glassDrawnBlur(frame, state, layer, blurPipeline)
+                state.blurCacheSourceId = 0
+            }
+            layer = layer + 1
+        }
+
+        // Final pass: the swapchain composite — every stream in emission order at full
+        // resolution, each glass layer refracting the blur of what was under it.
+        // Interior cache: re-render this frame's dirty glass interiors into the
+        // cache texture before the composite reads them back as copies. The pass
+        // preserves previously cached surfaces (load) once the texture has been
+        // cleared a first time.
+        state.glassCacheKeyNow = Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5
+        if state.probeGlassLayers {
+            print(696969)
+            print(state.glassCacheRangeCount)
+            if state.glassBackdropStatic { print(1) } else { print(0) }
+            if state.glassCacheCleared { print(1) } else { print(0) }
+            if state.glassCacheRenderedKey == state.glassCacheKeyNow { print(1) } else { print(0) }
+        }
+        // Sized BEFORE anything asks whether the cache may be copied, and whether or
+        // not this frame has dirty interiors to render into it. The drawable changes
+        // size without any glass quad being re-pushed — a resize while the retained
+        // stream replays leaves nothing dirty — and a cache still holding the old
+        // dimensions is sampled by the new geometry's uv, which clamps to the edge and
+        // presents black slabs. Re-creating it here drops `glassCacheCleared`, so every
+        // copy routes to the live band pipeline until a rebuild refills the cache at
+        // the size the drawable is now.
+        if state.glassBackdropStatic {
+            glassEnsureInteriorCache(state, graphics)
+        }
+        if state.glassBackdropStatic && state.glassCacheRangeCount > 0 {
+            if state.glassCacheTexture.id != 0 {
+                var cacheEncoder = frame.beginRenderPass(glassInteriorCachePass(state))
+                glassDrawCacheRanges(state, cacheEncoder)
+                frame.endPass()
+                state.glassCacheCleared = true
+                // Consumed: the retained stream replays every frame, but these
+                // interiors are in the cache now.
+                state.glassCacheRangeCount = 0
+                state.glassCacheRenderedKey = state.glassCacheKeyNow
+            }
+        }
+        var mainEncoder = frame.beginRenderPass(swapchainPass)
+        drawBackground(state, mainEncoder)
+        var stream = 0
+        var finalStreamCount = layers
+        if state.benchBackgroundOnly {
+            finalStreamCount = 0
+        }
+        while stream <= finalStreamCount {
+            self.drawStream(
+                mainEncoder,
+                stream,
+                state.streams[stream].quadCount,
+                glassSharpStreamGroup(state, stream),
+                glassSoftNearStreamGroup(state, stream),
+                emptyBindGroup()
+            )
+            stream = stream + 1
+        }
+        self.drawHud(state, mainEncoder)
+        frame.endPass()
+        announceVisibleContent(state)
+        return
+    }
+}
+
+
+// Say, once per run, that a frame carried real application content.
+//
+// The markers a live session and the example harness wait on. On the immediate
+// path they come from the C batch when its vertex list turns out non-empty; the
+// retained path's equivalent moment is a presented frame whose streams held
+// quads, which is here.
+function announceVisibleContent(state: borrow mut UiBatchState) {
+    if state.announcedVisibleContent {
+        return
+    }
+    for stream in 0..state.streams.count {
+        if state.streams[stream].quadCount > 0 {
+            state.announcedVisibleContent = true
+            kiraGraphicsLiveVisibleContentSubmitted()
+            return
+        }
+    }
     return
 }
+
 
