@@ -84,15 +84,15 @@ function foundationBlendId(mode: borrow FoundationBlendMode) -> Float {
 // on everything it can be: Luminosity resolves to Normal here because that is what
 // it resolves to on the way out, so a round trip lands where the shader lands.
 function foundationBlendModeFromId(id: Float) -> FoundationBlendMode {
-    if id < 0.5 { return FoundationBlendMode.Normal }
-    if id < 1.5 { return FoundationBlendMode.LinearDodge }
-    if id < 2.5 { return FoundationBlendMode.ColorDodge }
-    if id < 3.5 { return FoundationBlendMode.HardLight }
-    if id < 4.5 { return FoundationBlendMode.Overlay }
-    if id < 5.5 { return FoundationBlendMode.Lighten }
-    if id < 6.5 { return FoundationBlendMode.Darken }
-    if id < 7.5 { return FoundationBlendMode.Multiply }
-    return FoundationBlendMode.Normal
+    if id < 0.5 { return .Normal }
+    if id < 1.5 { return .LinearDodge }
+    if id < 2.5 { return .ColorDodge }
+    if id < 3.5 { return .HardLight }
+    if id < 4.5 { return .Overlay }
+    if id < 5.5 { return .Lighten }
+    if id < 6.5 { return .Darken }
+    if id < 7.5 { return .Multiply }
+    return .Normal
 }
 
 // One fill in a material's stack: what colour, how opaque, blended how.
@@ -104,7 +104,7 @@ struct FoundationTintLayer {
         a: 1.0
     }
     let alpha: Float = 0.0
-    let blend: FoundationBlendMode = FoundationBlendMode.Normal
+    let blend: FoundationBlendMode = .Normal
 }
 
 // A material's fills, in the document's order. Two is all any of them use.
@@ -138,8 +138,8 @@ function foundationBlack() -> Color {
 // to know where it came from.
 function foundationSchemeOther(scheme: borrow FoundationScheme) -> FoundationScheme {
     match scheme {
-        Light -> return FoundationScheme.Dark;
-        Dark -> return FoundationScheme.Light;
+        Light -> return .Dark;
+        Dark -> return .Light;
     }
 }
 

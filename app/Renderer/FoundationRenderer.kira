@@ -1,7 +1,28 @@
 import KiraLayout
 function foundationRender(root: borrow FoundationView, tree: borrow LayoutTree, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
     var current = backend
-    return foundationRenderView(root, tree, 0, current)
+    let rendered = foundationRenderView(root, tree, 0, current)
+    if current.batch.layoutDebugEnabled() {
+        return rendered + foundationRenderDebugView(root, tree, 0, current)
+    }
+    return rendered
+}
+
+function foundationRenderDebugChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+    let firstChild = tree.nodes[nodeIndex].firstChild
+    var current = backend
+    var rendered = 0
+    for childOffset in 0..view.children.count {
+        rendered = rendered + foundationRenderDebugView(view.children[childOffset], tree, firstChild + childOffset, current)
+    }
+    return rendered
+}
+
+function foundationRenderDebugView(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+    var current = backend
+    let frame = layoutFrame(tree, nodeIndex)
+    current.drawLayoutDebug(frame, view, nodeIndex)
+    return foundationRenderDebugChildren(view, tree, nodeIndex, current) + 1
 }
 
 function foundationRenderChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
@@ -64,7 +85,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         Text -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextFields(frame, view.content, view.color, view.size, view.adaptiveInk)
+            current.drawTextFields(frame, view.content, view.color, view.size, view.adaptiveInk, view.inkLeft, view.inkRight, view.inkTop, view.inkBottom)
             return 1
         }
         HitArea -> {
