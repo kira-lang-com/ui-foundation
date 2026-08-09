@@ -55,12 +55,12 @@ function LiquidGlassSurface(
     width: SizeMode,
     height: SizeMode,
     radius: Float,
-    frost: FoundationFrost = FoundationFrost.XHigh,
+    frost: FoundationFrost = .XHigh,
     // Overrides the table's colour while keeping its opacities and blend modes,
     // for a surface that wants the platform's material in a hue of its own. White
     // leaves the Light table exactly as the platform ships it.
     tint: Color = Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
-    blur: FoundationBlur = FoundationBlur.Step,
+    blur: FoundationBlur = .Step,
     edgeRefraction: Float = 1.0,
     glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
     // The thin white line the edges catch, on by default — it is what gives the
@@ -76,7 +76,7 @@ function LiquidGlassSurface(
     //
     // Last in the list because defaults bind POSITIONALLY: a parameter added in
     // the middle silently shifts every argument after it at every call site.
-    scheme: FoundationScheme = FoundationScheme.Light,
+    scheme: FoundationScheme = .Light,
     // How far the surface has got MOVING to `scheme`. 1 means arrived, which is
     // what a surface that is not animating anything wants; below that the material
     // is partway across from the other scheme's table, passing through clear glass
@@ -113,8 +113,8 @@ function LiquidGlassSurface(
 function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> FoundationView {
     return Surface(
         children: [child],
-        width: SizeMode.Fixed(width),
-        height: SizeMode.Fill,
+        width: .Fixed(width),
+        height: .Fill,
         flex: 0,
         fill: Color { r: 0.13 g: 0.14 b: 0.19 a: 0.96 },
         border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.08 },
@@ -131,8 +131,8 @@ function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> Fo
 function Card(children: [FoundationView]) -> FoundationView {
     return Surface(
         children: move children,
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         flex: 0,
         fill: Color {
             r: 1.0
@@ -151,7 +151,7 @@ function Card(children: [FoundationView]) -> FoundationView {
         shape: .RegularRoundedRect,
         material: .Frosted,
         effects: [
-            FoundationEffect.LayerGlow(Glow {
+            .LayerGlow(Glow {
                 color: Color {
                     r: 0.30
                     g: 0.55

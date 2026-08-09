@@ -87,7 +87,7 @@ function foundationBlurMix(blur: borrow FoundationBlur) -> Float {
     match blur {
         // A raw Surface has no frost step to follow, so Step means the blur of the
         // platform's default material — Regular, which FoundationFrost calls High.
-        Step -> return foundationFrostBlur(FoundationFrost.High);
+        Step -> return foundationFrostBlur(.High);
         None -> return 0.0;
         Light -> return 0.2;
         Medium -> return 0.4;
@@ -170,22 +170,33 @@ struct FoundationGlassMaterial {
     // a zero-blur shadow IS — the silhouette, so only the band its spread pushes
     // past the shape shows. `borderSpread` is the ring all the way round;
     // `borderSideOffset`/`borderSideSpread` are the pair that reach past the left
-    // and right extremes. Defaults are the design document's numbers.
-    let borderSpread: Float = 0.5
-    let borderSideOffset: Float = 1.25
-    let borderSideSpread: Float = 0.75
+    // and right extremes.
+    //
+    // These four and `innerRimWidth` are in DEVICE PIXELS, not points — the one
+    // block of the material that is. A hairline is a hairline: the design
+    // document measures its ring at one pixel and its side edge at two, and a
+    // border that thinned with the backing scale would be that design only on
+    // the 2x display it was captured from. Everything else here (`lensMaxBend`,
+    // `refractionReach`, the stroke's peak and fade) is a design LENGTH and
+    // stays in points, so it grows with the interface. `glassEmitPatch` divides
+    // these by the backing scale on the way into the quad, which is what puts
+    // them in the shape's own units.
+    let borderSpread: Float = 1.0
+    let borderSideOffset: Float = 2.5
+    let borderSideSpread: Float = 1.5
     // One ink for all three silhouettes, #DBDBDB, exactly as the document gives
     // them. The sides come out darker than the top because two of the three reach
     // a side edge and only the ring reaches the top, and the three MULTIPLY where
     // they overlap — not because any of them is a different colour.
     let borderGrey: Float = 0.859
     let borderSideGrey: Float = 0.859
-    // The inner rim: one pixel just INSIDE the edge, a little darker than what the
-    // surface shows there. Measured off the reference, where the side line reads
-    // 199 and the pixel behind it 228 over a white interior — a touch under half a
-    // pixel of the same ink, which is what stops the edge ending abruptly.
+    // The inner rim: the pixels just INSIDE the edge, a little darker than what
+    // the surface shows there. Measured off the reference, where the side line
+    // reads 199 and the pixel behind it 228 over a white interior — a touch
+    // under half a pixel of the same ink, which is what stops the edge ending
+    // abruptly. Device pixels, like the border block above.
     let innerRimStrength: Float = 0.0
-    let innerRimWidth: Float = 1.0
+    let innerRimWidth: Float = 2.0
     // The wash, as the platform writes it: two fills, each with its own colour,
     // opacity and blend mode (app/Core/Materials.kira). The LOWER layer's colour
     // and opacity are the surface `fill` itself — a wash was one alpha for as long
@@ -251,12 +262,12 @@ function foundationTintFill(stack: borrow FoundationTintStack) -> Color {
 // the platform ships, in order.
 function foundationFrostStyle(frost: borrow FoundationFrost) -> FoundationMaterialStyle {
     match frost {
-        Translucent -> return FoundationMaterialStyle.Ultrathin;
-        Light -> return FoundationMaterialStyle.Ultrathin;
-        Medium -> return FoundationMaterialStyle.Thin;
-        High -> return FoundationMaterialStyle.Regular;
-        XHigh -> return FoundationMaterialStyle.Thick;
-        Max -> return FoundationMaterialStyle.Chrome;
+        Translucent -> return .Ultrathin;
+        Light -> return .Ultrathin;
+        Medium -> return .Thin;
+        High -> return .Regular;
+        XHigh -> return .Thick;
+        Max -> return .Chrome;
     }
 }
 
@@ -269,11 +280,11 @@ function foundationFrostStack(
 ) -> FoundationTintStack {
     match frost {
         Translucent -> return FoundationTintStack {};
-        Light -> return foundationMaterialTint(FoundationMaterialStyle.Ultrathin, scheme);
-        Medium -> return foundationMaterialTint(FoundationMaterialStyle.Thin, scheme);
-        High -> return foundationMaterialTint(FoundationMaterialStyle.Regular, scheme);
-        XHigh -> return foundationMaterialTint(FoundationMaterialStyle.Thick, scheme);
-        Max -> return foundationMaterialTint(FoundationMaterialStyle.Chrome, scheme);
+        Light -> return foundationMaterialTint(.Ultrathin, scheme);
+        Medium -> return foundationMaterialTint(.Thin, scheme);
+        High -> return foundationMaterialTint(.Regular, scheme);
+        XHigh -> return foundationMaterialTint(.Thick, scheme);
+        Max -> return foundationMaterialTint(.Chrome, scheme);
     }
 }
 
@@ -309,10 +320,10 @@ struct FoundationSurfacePaint {
     }
     let borderWidth: Float = 0.0
     let radius: Float = 0.0
-    let material: FoundationMaterial = FoundationMaterial.Flat
+    let material: FoundationMaterial = .Flat
     let effects: [FoundationEffect] = []
     let clipContent: Bool = false
-    let shape: FoundationShape = FoundationShape.RegularRoundedRect
+    let shape: FoundationShape = .RegularRoundedRect
 }
 
 struct FoundationHitRegionPaint {

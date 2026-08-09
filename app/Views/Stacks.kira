@@ -67,8 +67,8 @@ function Frame(
 function Spacer(minLength: Float, flex: Int) -> FoundationView {
     return FoundationView {
         kind: .Spacer
-        width: SizeMode.Fill
-        height: SizeMode.Fill
+        width: .Fill
+        height: .Fill
         flex: flex
         minLength: minLength
     }
@@ -85,21 +85,21 @@ function LayoutPriority(child: FoundationView, value: Int) -> FoundationView {
 function VStack(children: [FoundationView], spacing: Float, padding: EdgeInsets) -> FoundationView {
     return Column(
         children: move children,
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: spacing,
         padding: move padding,
-        crossAxisAlignment: CrossAlignment.Stretch
+        crossAxisAlignment: .Stretch
     )
 }
 
 function HStack(children: [FoundationView], spacing: Float, padding: EdgeInsets) -> FoundationView {
     return Row(
         children: move children,
-        width: SizeMode.Hug,
-        height: SizeMode.Hug,
+        width: .Hug,
+        height: .Hug,
         spacing: spacing,
         padding: move padding,
-        crossAxisAlignment: CrossAlignment.Center
+        crossAxisAlignment: .Center
     )
 }

@@ -28,6 +28,29 @@ function foundationTextRunLineHeight(size: Float) -> Float {
     return kira_text_line_height("", size)
 }
 
+// Visible glyph bounds relative to the baseline. These are deliberately kept
+// separate from line height: layout must not reserve the font's invisible
+// leading when a text leaf is placed inside a padded card or stack.
+@Native
+function foundationTextRunInkTop(content: borrow String, size: Float) -> Float {
+    return kira_text_run_ink_top("", content, size)
+}
+
+@Native
+function foundationTextRunInkBottom(content: borrow String, size: Float) -> Float {
+    return kira_text_run_ink_bottom("", content, size)
+}
+
+@Native
+function foundationTextRunInkLeft(content: borrow String, size: Float) -> Float {
+    return kira_text_run_ink_left("", content, size)
+}
+
+@Native
+function foundationTextRunInkRight(content: borrow String, size: Float) -> Float {
+    return kira_text_run_ink_right("", content, size)
+}
+
 // Decode an opaque String into its Unicode codepoints (up to 512), so an editable
 // text buffer can be SEEDED from an existing String. String is otherwise opaque
 // (count/+/== only); the native decoder walks the UTF-8 bytes in one call.
@@ -36,14 +59,14 @@ function foundationStringToCodepoints(content: borrow String) -> [Int] {
     var codes: [Int] = []
     if content.count > 0 {
         let max = 512
-        let out = uiMemAlloc(U64(max * 4))
-        let count = Int(uiTextDecodeCodepoints(content, out, I32(max)))
+        let out = allocateBytes(U64(max * 4))
+        let count = Int(decodeCodepoints(content, out, I32(max)))
         var i = 0
         while i < count {
-            codes.append(uiMemReadInt(out, U64(i * 4)))
+            codes.append(readInt(out, U64(i * 4)))
             i = i + 1
         }
-        uiMemFree(out)
+        freeBytes(out)
     }
     return move codes
 }
@@ -106,6 +129,10 @@ function Text(content: String, color: Color, size: Float, weight: Float) -> Foun
         content: content
         color: color
         size: size
+        inkLeft: foundationTextRunInkLeft(content: content, size: size)
+        inkRight: foundationTextRunInkRight(content: content, size: size)
+        inkTop: foundationTextRunInkTop(content: content, size: size)
+        inkBottom: foundationTextRunInkBottom(content: content, size: size)
         weight: weight
     }
 }
@@ -119,6 +146,10 @@ function AdaptiveText(content: String, fallback: Color, size: Float, weight: Flo
         content: content
         color: fallback
         size: size
+        inkLeft: foundationTextRunInkLeft(content: content, size: size)
+        inkRight: foundationTextRunInkRight(content: content, size: size)
+        inkTop: foundationTextRunInkTop(content: content, size: size)
+        inkBottom: foundationTextRunInkBottom(content: content, size: size)
         weight: weight
         adaptiveInk: true
     }
