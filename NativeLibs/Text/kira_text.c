@@ -315,6 +315,13 @@ kira_text_face* kira_text_face_load_memory(kira_text_engine* engine,
     return kira_text_face_wrap(face, blob);
 }
 
+kira_text_face* kira_text_face_load_bundled(kira_text_engine* engine) {
+    return kira_text_face_load_memory(engine,
+                                      kira_figtree_font_data,
+                                      (long)KIRA_FIGTREE_FONT_SIZE,
+                                      0);
+}
+
 void kira_text_face_destroy(kira_text_face* face) {
     if (face == NULL) {
         return;
@@ -738,59 +745,6 @@ const char* kira_text_probe_report(const char* font_path) {
     return report;
 }
 
-/* Forward declaration of the kira-graphics GPU primitive. Both libraries are
- * static and linked into the same executable, so this resolves at final link
- * without ui-foundation taking a build-time include dependency on kira-graphics.
- */
-extern void kg_ui_blit_coverage(double x, double y, int width, int rows,
-                                int pitch, const unsigned char* coverage,
-                                double r, double g, double b, double a);
-
-/* Atlas-backed coverage draw: packs each glyph into the kira-graphics glyph
- * atlas once (keyed by `key`) and thereafter draws a single textured quad
- * instead of decomposing the coverage bitmap into per-pixel quads every frame.
- * Drop-in for kg_ui_blit_coverage with a stable, non-zero key. Weakly linked so
- * unit builds without the sokol backend fall back to per-pixel blitting. */
-extern void kg_ui_draw_glyph_coverage(int64_t key,
-                                       double x, double y, int width, int rows,
-                                       int pitch, const unsigned char* coverage,
-                                       double r, double g, double b, double a)
-    __attribute__((weak));
-
-/* Stable, non-zero atlas key for a rasterized glyph. Folds the resolved font
- * PATH (not the cached face pointer — that pointer is unstable across the
- * 16-slot face cache's LRU eviction and can be reused by malloc for a different
- * font, which would collide keys and mis-render), the shaped glyph id, and the
- * quantized physical pixel size — the exact triple that determines the coverage
- * bitmap — into a 64-bit FNV-1a mix. */
-static int64_t kira_text_glyph_key(const char* font_path,
-                                    uint32_t glyph, double phys_size) {
-    int px_q = (int)(phys_size * 2.0 + 0.5); /* 0.5px buckets, matches face cache */
-    uint64_t k = 1469598103934665603ull; /* FNV offset basis */
-    for (const char* p = font_path; p != NULL && *p != '\0'; p += 1) {
-        k = (k ^ (uint64_t)(unsigned char)*p) * 1099511628211ull;
-    }
-    k = (k ^ (uint64_t)glyph) * 1099511628211ull;
-    k = (k ^ (uint64_t)(uint32_t)px_q) * 1099511628211ull;
-    return (int64_t)(k | 1ull); /* never 0 (the atlas empty-slot sentinel) */
-}
-
-/* Physical-pixels-per-point backing scale of the current UI pass (kira-graphics
- * sokol backend). On a Retina/high_dpi framebuffer this is > 1.0; glyphs must be
- * rasterized at pixel_size * scale to stay crisp. Weakly linked so unit builds
- * without the sokol backend fall back to 1.0. */
-extern double kg_ui_dpi_scale(void) __attribute__((weak));
-
-static double kira_text_backing_scale(void) {
-    if (kg_ui_dpi_scale) {
-        double s = kg_ui_dpi_scale();
-        if (s >= 1.0) {
-            return s;
-        }
-    }
-    return 1.0;
-}
-
 /* Embedded Figtree font face — lazily loaded from the bundled byte array. */
 static kira_text_engine* g_embedded_engine = NULL;
 static kira_text_face*   g_embedded_face   = NULL;
@@ -883,81 +837,6 @@ static kira_text_face* kira_text_cached_face(const char* path, float pixel_size)
     return face;
 }
 
-void kira_text_draw_run(const char* font_path,
-                        const char* utf8,
-                        double x, double y, double w, double h,
-                        double r, double g, double b, double a,
-                        double pixel_size) {
-    if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0 || a <= 0.0) {
-        return;
-    }
-    font_path = kira_text_resolve_font(font_path, utf8);
-    if (font_path == NULL) {
-        return;
-    }
-
-    /* All incoming geometry (x/y/w/h, pixel_size) is in logical POINTS. Rasterize
-     * glyphs at physical resolution (point-size * backing scale) so text is crisp
-     * on Retina/high_dpi, then divide FreeType/HarfBuzz metrics (which are now in
-     * physical pixels) back into point space for positioning. kg_ui_blit_coverage
-     * receives the glyph origin in points and maps the physical coverage bitmap
-     * back down internally. Off Retina scale == 1.0, so this is a no-op. */
-    const double scale = kira_text_backing_scale();
-    const double inv_scale = 1.0 / scale;
-    const double phys_size = pixel_size * scale;
-
-    kira_text_face* face = kira_text_cached_face(font_path, (float)phys_size);
-    if (face == NULL) {
-        return;
-    }
-
-    kira_text_vmetrics vmetrics;
-    kira_text_face_vmetrics(face, &vmetrics);
-    double text_height = ((double)vmetrics.ascender + (double)vmetrics.descender) * inv_scale;
-    double baseline = y + (h - text_height) * 0.5 + (double)vmetrics.ascender * inv_scale;
-
-    hb_font_t* hb = kira_text_hb_font(face);
-    if (hb == NULL) {
-        return;
-    }
-
-    int byte_len = (int)strlen(utf8);
-    hb_buffer_t* buffer = hb_buffer_create();
-    hb_buffer_add_utf8(buffer, utf8, byte_len, 0, byte_len);
-    hb_buffer_guess_segment_properties(buffer);
-    hb_shape(hb, buffer, NULL, 0);
-
-    unsigned int count = hb_buffer_get_length(buffer);
-    hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, NULL);
-    hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, NULL);
-
-    double pen_x = x;
-    for (unsigned int i = 0; i < count; i += 1) {
-        uint32_t glyph = infos[i].codepoint; /* glyph id after shaping */
-        double x_offset = (double)positions[i].x_offset / 64.0 * inv_scale;
-        double y_offset = (double)positions[i].y_offset / 64.0 * inv_scale;
-
-        kira_text_glyph_bitmap bitmap;
-        if (kira_text_face_render_glyph(face, glyph, &bitmap)) {
-            if (bitmap.width > 0 && bitmap.rows > 0) {
-                double gx = pen_x + x_offset + (double)bitmap.bearing_x * inv_scale;
-                double gy = baseline - y_offset - (double)bitmap.bearing_y * inv_scale;
-                if (kg_ui_draw_glyph_coverage) {
-                    kg_ui_draw_glyph_coverage(
-                        kira_text_glyph_key(font_path, glyph, phys_size),
-                        gx, gy, bitmap.width, bitmap.rows, bitmap.pitch,
-                        bitmap.buffer, r, g, b, a);
-                } else {
-                    kg_ui_blit_coverage(gx, gy, bitmap.width, bitmap.rows, bitmap.pitch,
-                                        bitmap.buffer, r, g, b, a);
-                }
-            }
-        }
-        pen_x += (double)positions[i].x_advance / 64.0 * inv_scale;
-    }
-    hb_buffer_destroy(buffer);
-}
-
 double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size) {
     if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0) {
         return 0.0;
@@ -990,6 +869,246 @@ double kira_text_line_height(const char* font_path, double pixel_size) {
     kira_text_vmetrics vmetrics;
     kira_text_face_vmetrics(face, &vmetrics);
     return (double)vmetrics.line_height;
+}
+
+/* Visible run bounds, cached separately from the face/advance cache. The UI
+ * asks for these during lowering, so the first request may shape and rasterize
+ * the string, but steady frames only do two small key lookups. Horizontal values
+ * are coordinates from the run origin; vertical values are positive distances
+ * from the baseline: top is above it, bottom is below it. */
+#define KIRA_TEXT_INK_CACHE_SLOTS 128
+#define KIRA_TEXT_INK_CACHE_PATH_MAX 260
+#define KIRA_TEXT_INK_CACHE_TEXT_MAX 256
+
+typedef struct {
+    int valid;
+    int pixel_size_q;
+    char path[KIRA_TEXT_INK_CACHE_PATH_MAX];
+    char text[KIRA_TEXT_INK_CACHE_TEXT_MAX];
+    float left;
+    float right;
+    float top;
+    float bottom;
+} kira_text_ink_cache_slot;
+
+static kira_text_ink_cache_slot g_ink_cache[KIRA_TEXT_INK_CACHE_SLOTS];
+static int g_ink_cache_next = 0;
+
+static int kira_text_run_ink_bounds(
+    kira_text_face* face,
+    const char* utf8,
+    float* out_left,
+    float* out_right,
+    float* out_top,
+    float* out_bottom
+) {
+    if (out_left != NULL) {
+        *out_left = 0.0f;
+    }
+    if (out_right != NULL) {
+        *out_right = 0.0f;
+    }
+    if (out_top != NULL) {
+        *out_top = 0.0f;
+    }
+    if (out_bottom != NULL) {
+        *out_bottom = 0.0f;
+    }
+    if (face == NULL || face->face == NULL || utf8 == NULL || utf8[0] == '\0') {
+        return 0;
+    }
+
+    hb_font_t* hb = kira_text_hb_font(face);
+    if (hb == NULL) {
+        return 0;
+    }
+    hb_buffer_t* buffer = hb_buffer_create();
+    if (buffer == NULL) {
+        return 0;
+    }
+    hb_buffer_add_utf8(buffer, utf8, -1, 0, -1);
+    hb_buffer_guess_segment_properties(buffer);
+    hb_shape(hb, buffer, NULL, 0);
+
+    unsigned int count = hb_buffer_get_length(buffer);
+    hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, NULL);
+    hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, NULL);
+    float pen_x = 0.0f;
+    float left = 0.0f;
+    float right = 0.0f;
+    float top = 0.0f;
+    float bottom = 0.0f;
+    int found = 0;
+    for (unsigned int i = 0; i < count; i += 1) {
+        float glyph_x = pen_x + kira_text_f26dot6(positions[i].x_offset);
+        pen_x += kira_text_f26dot6(positions[i].x_advance);
+        if (FT_Load_Glyph(face->face, infos[i].codepoint, FT_LOAD_NO_HINTING) != 0) {
+            continue;
+        }
+        if (face->face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+            FT_Render_Glyph(face->face->glyph, FT_RENDER_MODE_NORMAL) != 0) {
+            continue;
+        }
+        FT_GlyphSlot slot = face->face->glyph;
+        if (slot->bitmap.rows <= 0 || slot->bitmap.width <= 0) {
+            continue;
+        }
+        float glyph_left = glyph_x + (float)slot->bitmap_left;
+        float glyph_right = glyph_left + (float)slot->bitmap.width;
+        float y_offset = kira_text_f26dot6(positions[i].y_offset);
+        float glyph_top = y_offset + (float)slot->bitmap_top;
+        float glyph_bottom = glyph_top - (float)slot->bitmap.rows;
+        if (!found || glyph_left < left) {
+            left = glyph_left;
+        }
+        if (!found || glyph_right > right) {
+            right = glyph_right;
+        }
+        if (!found || glyph_top > top) {
+            top = glyph_top;
+        }
+        if (!found || glyph_bottom < bottom) {
+            bottom = glyph_bottom;
+        }
+        found = 1;
+    }
+    hb_buffer_destroy(buffer);
+    if (!found) {
+        return 0;
+    }
+    if (out_left != NULL) {
+        *out_left = left;
+    }
+    if (out_right != NULL) {
+        *out_right = right;
+    }
+    if (out_top != NULL) {
+        *out_top = top;
+    }
+    if (out_bottom != NULL) {
+        *out_bottom = 0.0f - bottom;
+    }
+    return 1;
+}
+
+static int kira_text_cached_ink_bounds(
+    const char* font_path,
+    const char* utf8,
+    double pixel_size,
+    double* out_left,
+    double* out_right,
+    double* out_top,
+    double* out_bottom
+) {
+    if (out_left != NULL) {
+        *out_left = 0.0;
+    }
+    if (out_right != NULL) {
+        *out_right = 0.0;
+    }
+    if (out_top != NULL) {
+        *out_top = 0.0;
+    }
+    if (out_bottom != NULL) {
+        *out_bottom = 0.0;
+    }
+    if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0) {
+        return 0;
+    }
+    font_path = kira_text_resolve_font(font_path, utf8);
+    if (font_path == NULL) {
+        return 0;
+    }
+
+    size_t path_len = strlen(font_path);
+    size_t text_len = strlen(utf8);
+    const double raster_measure_scale = 4.0;
+    double raster_size = pixel_size * raster_measure_scale;
+    int pixel_size_q = (int)(raster_size * 100.0 + 0.5);
+
+    if (path_len < KIRA_TEXT_INK_CACHE_PATH_MAX &&
+        text_len < KIRA_TEXT_INK_CACHE_TEXT_MAX) {
+        for (int i = 0; i < KIRA_TEXT_INK_CACHE_SLOTS; i += 1) {
+            kira_text_ink_cache_slot* slot = &g_ink_cache[i];
+            if (slot->valid && slot->pixel_size_q == pixel_size_q &&
+                strcmp(slot->path, font_path) == 0 &&
+                strcmp(slot->text, utf8) == 0) {
+                if (out_left != NULL) {
+                    *out_left = (double)slot->left / raster_measure_scale;
+                }
+                if (out_right != NULL) {
+                    *out_right = (double)slot->right / raster_measure_scale;
+                }
+                if (out_top != NULL) {
+                    *out_top = (double)slot->top / raster_measure_scale;
+                }
+                if (out_bottom != NULL) {
+                    *out_bottom = (double)slot->bottom / raster_measure_scale;
+                }
+                return 1;
+            }
+        }
+    }
+
+    kira_text_face* face = kira_text_cached_face(font_path, (float)raster_size);
+    float left = 0.0f;
+    float right = 0.0f;
+    float top = 0.0f;
+    float bottom = 0.0f;
+    if (!kira_text_run_ink_bounds(face, utf8, &left, &right, &top, &bottom)) {
+        return 0;
+    }
+
+    if (path_len < KIRA_TEXT_INK_CACHE_PATH_MAX &&
+        text_len < KIRA_TEXT_INK_CACHE_TEXT_MAX) {
+        kira_text_ink_cache_slot* slot = &g_ink_cache[g_ink_cache_next];
+        g_ink_cache_next = (g_ink_cache_next + 1) % KIRA_TEXT_INK_CACHE_SLOTS;
+        slot->valid = 1;
+        slot->pixel_size_q = pixel_size_q;
+        snprintf(slot->path, sizeof(slot->path), "%s", font_path);
+        snprintf(slot->text, sizeof(slot->text), "%s", utf8);
+        slot->left = left;
+        slot->right = right;
+        slot->top = top;
+        slot->bottom = bottom;
+    }
+    if (out_left != NULL) {
+        *out_left = (double)left / raster_measure_scale;
+    }
+    if (out_right != NULL) {
+        *out_right = (double)right / raster_measure_scale;
+    }
+    if (out_top != NULL) {
+        *out_top = (double)top / raster_measure_scale;
+    }
+    if (out_bottom != NULL) {
+        *out_bottom = (double)bottom / raster_measure_scale;
+    }
+    return 1;
+}
+
+double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size) {
+    double left = 0.0;
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, &left, NULL, NULL, NULL);
+    return left;
+}
+
+double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size) {
+    double right = 0.0;
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, &right, NULL, NULL);
+    return right;
+}
+
+double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size) {
+    double top = 0.0;
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, NULL, &top, NULL);
+    return top;
+}
+
+double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size) {
+    double bottom = 0.0;
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, NULL, NULL, &bottom);
+    return bottom;
 }
 
 int kira_text_utf8_next(const char* s, int len, int32_t* index, uint32_t* codepoint) {

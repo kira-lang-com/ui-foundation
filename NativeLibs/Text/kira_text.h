@@ -41,6 +41,14 @@ kira_text_face* kira_text_face_load_memory(kira_text_engine* engine,
                                            long length,
                                            int face_index);
 
+/* Load the Figtree variable face compiled into this library.
+ *
+ * The one face that exists wherever the library is linked, including a
+ * wasm32-emscripten build, where there is no filesystem to name a system font
+ * in. Callers that want a host face ask for one by path first and fall back to
+ * this, so a face is never simply absent and text is never simply missing. */
+kira_text_face* kira_text_face_load_bundled(kira_text_engine* engine);
+
 void kira_text_face_destroy(kira_text_face* face);
 
 /* Select the working pixel size for metrics and rasterization.
@@ -113,23 +121,15 @@ int kira_text_decode_codepoints(const char* s, int32_t* out, int max);
  * probe call. This exercises real behavior; it is not a success marker. */
 const char* kira_text_probe_report(const char* font_path);
 
-/* Render a UTF-8 string into the active kira-graphics UI pass: shape it left to
- * right (FreeType advances + kerning), rasterize each glyph, and blit its
- * coverage as anti-aliased quads. The text is vertically centered within the
- * (x, y, w, h) box and left-aligned at x; color is linear RGBA. `font_path` may
- * be NULL/empty to auto-discover a system font. Faces are cached by (path,size)
- * across calls. This must be called while a kira-graphics UI pass is active. */
-void kira_text_draw_run(const char* font_path,
-                        const char* utf8,
-                        double x, double y, double w, double h,
-                        double r, double g, double b, double a,
-                        double pixel_size);
-
-/* Layout helpers that reuse the same (path,size) face cache as kira_text_draw_run
- * so measured advances match what is later rasterized. `font_path` may be
+/* Layout helpers over a (path,size) face cache of their own, so measured
+ * advances match what the caller later rasterizes. `font_path` may be
  * NULL/empty to auto-discover. Both return 0 if no face is available. */
 double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size);
 double kira_text_line_height(const char* font_path, double pixel_size);
+double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size);
+double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size);
+double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size);
+double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size);
 
 #ifdef __cplusplus
 }
