@@ -17,42 +17,6 @@ struct FoundationHitRegionRecord {
     let interaction: FoundationInteraction = FoundationInteraction {}
 }
 
-function graphicsRect(bounds: borrow Rect) -> GraphicsRect {
-    return GraphicsRect {
-        x: bounds.x
-        y: bounds.y
-        width: bounds.width
-        height: bounds.height
-    }
-}
-
-// Legacy immediate-mode text blit (Sokol path only). The retained Metal path
-// rasterizes glyphs into a Kira Graphics atlas and draws them as batched textured
-// quads through the abstraction (see UiBatch.kira) — no immediate blit.
-@Native
-function foundationDrawText(content: borrow String, bounds: borrow Rect, color: borrow Color, size: Float) {
-    kira_text_draw_run("", content, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a, size)
-    return
-}
-
-// Legacy immediate-mode icon blit (Sokol path only, incl. wasm32-emscripten):
-// the icon counterpart of foundationDrawText. The rasterized coverage is cached
-// per (icon, pixel size) inside kiraicon and blitted tinted through
-// kg_ui_blit_coverage, exactly like text glyph coverage.
-@Native
-function foundationDrawIcon(svg: borrow String, bounds: borrow Rect, color: borrow Color) {
-    uiIconDrawRun(svg, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a)
-    return
-}
-
-function foundationDefaultGraphics() -> Graphics {
-    return Graphics {
-        userData: uiBatchNullPtr()
-        backend: GraphicsBackend.Sokol
-        metalContext: uiBatchNullPtr()
-    }
-}
-
 // Drop the last saved clip rect (4 floats) off the stack, returning the shorter array.
 function foundationPopClipStack(stack: [Float]) -> [Float] {
     var out: [Float] = []
@@ -77,16 +41,22 @@ function foundationPopOneFloat(stack: [Float]) -> [Float] {
     return out
 }
 
-// The Foundation render backend. On the Metal path every primitive is accumulated
-// into a single batched draw through the Kira Graphics abstraction (UiBatch); on the
-// legacy Sokol path it forwards to the immediate-mode render encoder. The backend is
-// constructed per frame; the batch (atlas, glyph cache, GPU resources) persists in
-// the app state and is reached here through `uiBatchPtr`.
+// The Foundation render backend. Every primitive is accumulated into a single
+// batched draw through the Kira Graphics abstraction (UiBatch): the backdrop is
+// captured, blurred through the pyramid and refracted by the glass shaders, and
+// the whole frame reaches the GPU as one quad stream per layer. The backend is
+// constructed per frame; the batch (atlas, glyph cache, GPU resources) persists
+// in the app state and is reached here through `batch`.
+//
+// There was a second, immediate-mode path beside this one, selected by a flag
+// that was really asking "am I Metal". It had no capture and no blur at all —
+// its LiquidGlass material was a flat translucent tint — so every backend but
+// Metal drew something the application is not. It is gone: both backends run the
+// retained path, and a build with no system font rasterizes from the face
+// compiled into the text library rather than falling back to another renderer.
 class KiraGraphicsFoundationBackend {
-    var encoder: RenderEncoder
     var graphics: Graphics
-    var uiBatchPtr: RawPtr
-    var gpuTelemetry: Bool = false
+    var batch: UiBatch
     var hitRegions: [FoundationHitRegionRecord] = []
     var clipDepth: Int = 0
     var backdropDepth: Int = 0
@@ -135,48 +105,20 @@ class KiraGraphicsFoundationBackend {
         self.clipMaxX = intAsFloat(value: width)
         self.clipMaxY = intAsFloat(value: height)
 
-        let bg = Color {
-            r: 0.96
-            g: 0.95
-            b: 0.93
-            a: 1.0
-        }
-        let transparent = Color {
-            r: 0.0
-            g: 0.0
-            b: 0.0
-            a: 0.0
-        }
-        if self.gpuTelemetry {
-            uiBatchBegin(self.uiBatchPtr, intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
-            // Claim this frame's slot in each vertex stream before anything emits into
-            // one; the frames still on the GPU keep theirs.
-            uiBatchBeginFrameSlots(self.uiBatchPtr, self.graphics)
-            // Metal capture and presentation passes already clear to this exact
-            // page colour. Emitting the same opaque fullscreen quad shaded every
-            // 4K pixel again and was invisible under any application content.
-            return
-        }
-        self.encoder.drawSurface(
-            GraphicsRect {
-                x: 0.0
-                y: 0.0
-                width: intAsFloat(value: width)
-                height: intAsFloat(value: height)
-            },
-            bg,
-            transparent,
-            0.0,
-            0.0
-        )
+        self.batch.beginBatch(intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
+        // Claim this frame's slot in each vertex stream before anything emits into
+        // one; the frames still on the GPU keep theirs.
+        self.batch.beginFrameSlots(self.graphics)
+        // No page-colour quad: the capture and presentation passes already clear
+        // to it, so emitting an opaque fullscreen quad shaded every 4K pixel
+        // again and was invisible under any application content.
         return
     }
 
     // Begin a HUD-only walk. The clip state is reset exactly as beginFrame resets
     // it, but the batch is NOT rewound: the UI streams keep the vertices, counts and
     // ring slots the last full frame left them, and everything emitted from here
-    // until endHudFrame lands in the HUD's own stream. Metal only — the immediate
-    // Sokol path has no retained batch to leave alone, so it redraws whole frames.
+    // until endHudFrame lands in the HUD's own stream.
     function beginHudFrame(width: Int, height: Int) {
         self.clipDepth = 0
         self.backdropDepth = 0
@@ -192,29 +134,12 @@ class KiraGraphicsFoundationBackend {
         self.clipMinY = 0.0
         self.clipMaxX = intAsFloat(value: width)
         self.clipMaxY = intAsFloat(value: height)
-        uiBatchBeginHud(self.uiBatchPtr, self.graphics)
+        self.batch.beginHud(self.graphics)
         return
     }
 
     function endHudFrame() {
-        uiBatchEndHud(self.uiBatchPtr)
-        return
-    }
-
-    function endFrame() {
-        if self.gpuTelemetry {
-            // The batch is presented by uiBatchPresent AFTER the walk (the run
-            // loops own the pass structure — a liquid-glass frame needs the
-            // capture/blur passes to run before the swapchain pass begins).
-            return
-        }
-        while self.clipDepth > 0 {
-            popClip()
-        }
-        return
-    }
-
-    function submit() {
+        self.batch.endHud()
         return
     }
 
@@ -245,18 +170,12 @@ class KiraGraphicsFoundationBackend {
         self.clipMinY = ny0
         self.clipMaxX = nx1
         self.clipMaxY = ny1
-        if !self.gpuTelemetry {
-            self.encoder.pushClip(graphicsRect(frame), radius)
-        }
         self.clipDepth = self.clipDepth + 1
         return
     }
 
     function popClip() {
         if self.clipDepth > 0 {
-            if !self.gpuTelemetry {
-                self.encoder.popClip()
-            }
             let n = self.clipStack.count
             if n >= 4 {
                 self.clipMinX = self.clipStack[n - 4]
@@ -290,9 +209,7 @@ class KiraGraphicsFoundationBackend {
                 b: 0.0
                 a: 0.0
             }
-            if self.gpuTelemetry {
-                uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
-            }
+            self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
             return
         }
         // Rounded-clip realization: the batch clip is rectangular, so a square
@@ -308,38 +225,24 @@ class KiraGraphicsFoundationBackend {
                 effectiveRadius = self.clipRadius
             }
         }
-        if self.gpuTelemetry {
-            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, effectiveRadius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
-            return
-        }
-        self.encoder.drawSurface(graphicsRect(bounds), fill, border, borderWidth, effectiveRadius)
+        self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, effectiveRadius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
         return
     }
 
     // TextureView: register the external texture with the batch (slot-1 bind group,
-    // cached per id) and emit its mode-2 quad on the Metal path. The Sokol path
-    // composites through the immediate-2D textured pipeline (kg_ui_draw_texture),
-    // which samples the registered render-target texture directly.
+    // cached per id) and emit its mode-2 quad.
+    //
+    // `radius` is not applied: the mode-2 quad carries no rounded-rect coverage
+    // mask yet, so the viewport composites square-cornered. Rounding it is a
+    // change to `Shaders/UiBatch.ksl`'s mode-2 branch, which both backends run.
     function drawTextureFields(bounds: borrow Rect, texture: Int, secondaryTexture: Int, transition: Float, opacity: Float, radius: Float) {
         self.drewVisibleUi = true
         if texture <= 0 {
             return
         }
-        if self.gpuTelemetry {
-            // NOTE: the Metal UiBatch external-texture path (mode 2) does not yet
-            // apply a rounded-rect coverage mask, so `radius` is a no-op here; the
-            // viewport composites square-cornered on Metal. The Sokol path below
-            // rounds it. Rounding the Metal external quad is a separate task.
-            uiBatchSetExternalTextures(self.uiBatchPtr, self.graphics, U32(texture), U32(secondaryTexture))
-            uiBatchPushExternalRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, opacity, transition, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
-            return
-        }
-        if secondaryTexture > 0 && transition > 0.0 {
-            self.encoder.drawTexture(graphicsRect(bounds), texture, opacity * (1.0 - transition), radius)
-            self.encoder.drawTexture(graphicsRect(bounds), secondaryTexture, opacity * transition, radius)
-        } else {
-            self.encoder.drawTexture(graphicsRect(bounds), texture, opacity, radius)
-        }
+        let ignoredRadius = radius
+        self.batch.setExternalTextures(self.graphics, U32(texture), U32(secondaryTexture))
+        self.batch.pushExternalRect(bounds.x, bounds.y, bounds.width, bounds.height, opacity, transition, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
         return
     }
 
@@ -350,11 +253,7 @@ class KiraGraphicsFoundationBackend {
 
     function drawSquircleSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
-        if self.gpuTelemetry {
-            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
-            return
-        }
-        self.encoder.drawSquircleSurface(graphicsRect(bounds), fill, border, borderWidth, radius)
+        self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, 0.25)
         return
     }
 
@@ -363,25 +262,78 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, adaptiveInk: Bool) {
+    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, adaptiveInk: Bool, inkLeft: Float = 0.0, inkRight: Float = 0.0, inkTop: Float = 0.0, inkBottom: Float = 0.0) {
         self.drewVisibleUi = true
-        if self.gpuTelemetry {
-            uiBatchPushText(self.uiBatchPtr, self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma)
-            return
-        }
-        // The immediate-mode path has no capture to read: adaptive text keeps the
-        // colour it was authored with.
-        foundationDrawText(content, bounds, color, size)
+        self.batch.pushText(self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma, inkLeft, inkRight, inkTop, inkBottom)
         return
     }
 
     function drawIconFields(bounds: borrow Rect, svg: borrow String, color: borrow Color) {
         self.drewVisibleUi = true
-        if self.gpuTelemetry {
-            uiBatchPushIcon(self.uiBatchPtr, self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+        self.batch.pushIcon(self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+        return
+    }
+
+    // Debug-only geometry pass. Set KIRA_UI_LAYOUT_DEBUG=1 to draw the retained
+    // frame for every node and print its coordinates/padding in logical points.
+    // Text gets a second cyan box for the visible ink height used by layout.
+    function drawLayoutDebug(frame: borrow Rect, view: borrow FoundationView, nodeIndex: Int) {
+        if !self.batch.layoutDebugEnabled() {
             return
         }
-        foundationDrawIcon(svg, bounds, color)
+        let transparent = Color {
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+        }
+        let frameColor = Color {
+            r: 1.0
+            g: 0.20
+            b: 0.05
+            a: 0.78
+        }
+        let inkColor = Color {
+            r: 0.05
+            g: 0.85
+            b: 1.0
+            a: 0.95
+        }
+        self.batch.pushRect(frame.x, frame.y, frame.width, frame.height, transparent, frameColor, 0.75, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+
+        print("KIRA_UI_LAYOUT_NODE")
+        print(nodeIndex)
+        print(Int(frame.x * 100.0))
+        print(Int(frame.y * 100.0))
+        print(Int(frame.width * 100.0))
+        print(Int(frame.height * 100.0))
+        print(Int(view.padding.leading * 100.0))
+        print(Int(view.padding.trailing * 100.0))
+        print(Int(view.padding.top * 100.0))
+        print(Int(view.padding.bottom * 100.0))
+        print(Int(view.gap * 100.0))
+        var hasInk = false
+        if view.kind == .Text && view.inkRight > view.inkLeft && view.inkTop > 0.0 && view.inkBottom >= 0.0 {
+            hasInk = true
+        }
+        if hasInk {
+            let inkWidth = view.inkRight - view.inkLeft
+            let inkHeight = view.inkTop + view.inkBottom
+            var inkY = frame.y
+            if frame.height > inkHeight {
+                inkY = frame.y + (frame.height - inkHeight) / 2.0
+            }
+            self.batch.pushRect(frame.x, inkY, inkWidth, inkHeight, transparent, inkColor, 0.75, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            print(Int(view.inkLeft * 100.0))
+            print(Int(view.inkRight * 100.0))
+            print(Int(view.inkTop * 100.0))
+            print(Int(view.inkBottom * 100.0))
+        } else {
+            print(0)
+            print(0)
+            print(0)
+            print(0)
+        }
         return
     }
 
@@ -389,15 +341,15 @@ class KiraGraphicsFoundationBackend {
         self.backdropDepth = self.backdropDepth + 1
         self.glassWashStack.append(self.glassWash)
         self.glassWashLumaStack.append(self.glassWashLuma)
-        // REAL liquid glass on the batched Metal path: cut the quad stream so
+        // REAL liquid glass on the batched path: cut the quad stream so
         // everything below this surface becomes the captured-and-blurred backdrop,
         // and emit the refracting mode-3 quad in the surface's rounded shape. The
         // surface's own fill/border/children draw over it through the normal path.
         // The bounds decide whether this surface can share the layer already open or
         // is stacked on it and needs a capture of its own.
-        if material == .LiquidGlass && self.gpuTelemetry {
+        if material == .LiquidGlass {
             self.drewVisibleUi = true
-            uiBatchBeginGlassCapture(self.uiBatchPtr, self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
+            self.batch.beginGlassCapture(self.graphics, bounds.x, bounds.y, bounds.width, bounds.height)
             // What adaptive text has to measure is the WHOLE wash, both fills and
             // their blend modes — not the lower fill's opacity, which is what this
             // used to hand over. The platform's light materials put nearly all of
@@ -433,7 +385,7 @@ class KiraGraphicsFoundationBackend {
             // The surface's fill IS the glass wash: the shader applies it
             // adaptively (stronger over dark backdrop, near invisible over light),
             // so the separate fill quad is suppressed for this surface.
-            uiBatchPushGlass(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, glassMaterial)
+            self.batch.pushGlass(bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, glassMaterial)
             self.suppressNextFill = true
             return
         }
@@ -462,26 +414,22 @@ class KiraGraphicsFoundationBackend {
     }
 
     function drawGlowFields(bounds: borrow Rect, color: borrow Color, radius: Float, intensity: Float) {
-        if self.gpuTelemetry {
-            // Glow is rendered as a soft translucent rounded surface behind the layer
-            // (a single batched quad). A separable-blur effect pass can refine this
-            // later; the approximation keeps the abstraction backend-agnostic.
-            let glow = Color {
-                r: color.r
-                g: color.g
-                b: color.b
-                a: color.a * intensity * 0.5
-            }
-            let noBorder = Color {
-                r: 0.0
-                g: 0.0
-                b: 0.0
-                a: 0.0
-            }
-            uiBatchPushRect(self.uiBatchPtr, bounds.x, bounds.y, bounds.width, bounds.height, glow, noBorder, 0.0, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
-            return
+        // Glow is rendered as a soft translucent rounded surface behind the layer
+        // (a single batched quad). A separable-blur effect pass can refine this
+        // later; the approximation keeps the abstraction backend-agnostic.
+        let glow = Color {
+            r: color.r
+            g: color.g
+            b: color.b
+            a: color.a * intensity * 0.5
         }
-        self.encoder.drawGlow(graphicsRect(bounds), color, radius, intensity)
+        let noBorder = Color {
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+        }
+        self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, glow, noBorder, 0.0, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
         return
     }
 
@@ -568,13 +516,14 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
+    // The flat wash a non-refracting material draws as. `beginBackdrop` answers
+    // LiquidGlass with a real capture and never reaches here, so its entry is
+    // the wash a glass surface would have if it were drawn flat — the near-zero
+    // tint that matches the platform's "clear" appearance.
     function materialTint(material: borrow FoundationMaterial) -> Color {
         match material {
             Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
             Frosted -> return Color { r: 0.88 g: 0.94 b: 1.0 a: 0.10 };
-            // Metal path: a subtle wash mixed over the refracted backdrop sample
-            // (mode-3 tint) — near-zero, matching the platform "clear" appearance.
-            // Sokol fallback: drawn as a translucent tint quad.
             LiquidGlass -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.04 };
         }
     }

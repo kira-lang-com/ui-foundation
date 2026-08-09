@@ -1,0 +1,328 @@
+import Foundation
+import KiraGraphics
+// The compositor's persistent state: the emission streams it writes quads into,
+// the per-layer liquid-glass targets, the glyph slot record, and the one
+// `UiBatchState` that holds every GPU resource, cache and dial the batch keeps
+// between frames.
+//
+// Split out of `UiBatch.kira`, which was past the file-size ceiling with the
+// declarations and the behaviour in one place. What stayed there is the class
+// itself, the fixed sizes and the frame lifecycle; what moved here is the shape
+// of the thing a frame is accumulated into.
+
+// One emission stream: the vertex buffer it writes into, this frame's slot in that
+// buffer, and how many quads it holds. The ACTIVE stream's fields are mirrored into
+// UiBatchState's contentsPtr/frameBase/quadCount so every emit path
+// stays stream-agnostic; switching streams writes the live count back here.
+struct UiStream {
+    var buffer: GraphicsBuffer = emptyGraphicsBuffer()
+    var contentsPtr: RawPtr
+    var frameBase: Int = 0
+    var quadCount: Int = 0
+    // The group the stream's vertices bind through. Built with the buffer, since
+    // drawing has no Graphics to build one with — and a group per stream rather
+    // than one rebound per draw, because the buffer is what differs.
+    var vertsGroup: BindGroup = emptyBindGroup()
+    // Liquid Glass surfaces emitted into this stream. The preceding scene capture
+    // only rasterizes these padded sample regions; final UI remains full 4K.
+    var glassBounds: [Float] = []
+    var glassBoundCount: Int = 0
+    var quadModes: [Int] = []
+}
+
+// An unallocated stream slot. A zero buffer id is what marks it: no backend hands
+// out id 0, so whoever reaches the slot first can tell it apart from a live one and
+// create its buffer in place.
+function placeholderStream() -> UiStream {
+    return UiStream {
+        contentsPtr: nullPointer()
+    }
+}
+
+// Give an unallocated slot its own vertex buffer, bind group and mode table. Called
+// the first time a frame reaches the slot — the first frame that stacks glass that
+// deep, or the first HUD refresh — so an app that never uses one pays nothing.
+function createDrawStream(state: borrow mut UiBatchState, graphics: borrow Graphics, index: Int) {
+    if state.streams[index].buffer.id != 0 {
+        return
+    }
+    let dynamic = dynamicBufferOrReport(graphics.createDynamicBuffer("kira-ui-verts", streamFloatCapacity()), "stream buffer")
+    state.streams[index].buffer = dynamic.buffer
+    state.streams[index].contentsPtr = dynamic.contents
+    // Claim a slot as the buffer is born: a glass layer opens mid-frame, after
+    // beginFrameSlots has already claimed for everything that existed. The
+    // HUD claims again immediately in beginHud and so spends two of its ring
+    // slots on the frame it is created, which is free — a buffer nobody has drawn
+    // from yet has no in-flight frame holding any of them.
+    state.streams[index].frameBase = graphics.dynamicBufferFrameStart(dynamic.buffer) / 4
+    state.streams[index].vertsGroup = bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), dynamic.buffer.id), "verts group")
+    state.streams[index].quadModes = zeroedInts(maxQuadsPerBatch())
+    return
+}
+
+// What glass layer k refracts: a capture of streams 0..k (the scene texture) and
+// that capture run through the blur pyramid. Both belong to the layer rather than
+// the frame — stream k+1 samples them in the final pass, by which time layer k+1's
+// own capture has been taken, so one shared pair would already have been overwritten.
+// Layer 0's capture is the only one every glass frame needs; the rest are created
+// the first time a frame stacks that deep (glassEnsureLayerScene).
+struct UiGlassLayer {
+    // Capture of everything under layer k+1. `sceneSharpGroup` is how mode 3
+    // reads it (the sharp tap), `sceneBlurInGroup` how the blur chain does.
+    var sceneTexture: GraphicsTexture = emptyGraphicsTexture()
+    var sceneSharpGroup: BindGroup = emptyBindGroup()
+    var sceneBlurInGroup: BindGroup = emptyBindGroup()
+    // The blurred capture at TWO radii, so a blur step grows the radius instead of
+    // cross-fading sharp against fully-soft — that mix double-images rather than
+    // blurs, which is why a low step used to read as edge refraction and nothing
+    // else. `near` is the narrower of the two filters in
+    // `Shaders/UiGlassBlurCommon.ksl` and `blur` the wider; mode 3 walks
+    // sharp -> near -> far across the dial.
+    var nearTexture: GraphicsTexture = emptyGraphicsTexture()
+    var blurTexture: GraphicsTexture = emptyGraphicsTexture()
+    // Both blurred levels ride ONE bind group: the compositor has four group slots
+    // and five things to bind, and these two always change together.
+    var softNearGroup: BindGroup = emptyBindGroup()
+}
+
+struct UiGlyphSlot {
+    var key: Int = 0
+    var atlasX: Int = 0
+    var atlasY: Int = 0
+    var w: Int = 0
+    var h: Int = 0
+    var bearingX: Int = 0
+    var bearingY: Int = 0
+    var advance: Float = 0.0
+    var valid: Bool = false
+}
+
+struct UiBatchState {
+    var pipeline: RenderPipeline = emptyRenderPipeline()
+    var rectPipeline: RenderPipeline = emptyRenderPipeline()
+    var glyphPipeline: RenderPipeline = emptyRenderPipeline()
+    // Liquid-glass region pipelines. The full glass branch's static register
+    // allocation throttles GPU occupancy for every fragment its pipeline
+    // shades, so glass interiors route to shaders holding only the math their
+    // region provably executes: the band (inside the shadow's reach) and the
+    // deep core (past every edge effect). Both are exact subsets — see
+    // Shaders/UiGlassBand.ksl and Shaders/UiGlassCore.ksl.
+    var glassFullPipeline: RenderPipeline = emptyRenderPipeline()
+    var glassBandPipeline: RenderPipeline = emptyRenderPipeline()
+    var glassLensPipeline: RenderPipeline = emptyRenderPipeline()
+    var glassCorePipeline: RenderPipeline = emptyRenderPipeline()
+    // Interior cache: a glass interior's pixels depend only on the surface's
+    // geometry, dial, material and the (static) backdrop textures, so a frame
+    // where none of those changed re-presents the previous shading as an
+    // opaque texel copy instead of re-running it. The cache texture is
+    // drawable-sized; dirty surfaces re-render their interior patches into it
+    // in a load-preserving pass before the composite, and the composite draws
+    // mode-3.15 copy quads through UiGlassCopy.ksl. When the backdrop is not
+    // provably static this frame, copy quads route to the band pipeline and
+    // render live — the fallback is exact, never stale.
+    var glassCopyPipeline: RenderPipeline = emptyRenderPipeline()
+    var glassCacheTexture: GraphicsTexture = emptyGraphicsTexture()
+    var glassCacheGroup: BindGroup = emptyBindGroup()
+    var glassCacheSampler: GraphicsSampler = emptyGraphicsSampler()
+    var glassCacheW: Int = 0
+    var glassCacheH: Int = 0
+    var glassCacheCleared: Bool = false
+    var glassBackdropStatic: Bool = false
+    // One exact key per push-order slot; a mismatch marks the surface dirty
+    // for this frame. Compared field by field — never hashed — so a stale
+    // interior can only follow from a value missing from `GlassSurfaceKey`,
+    // not from a collision. Preallocated and written by index, the one array
+    // shape proven to persist across frames in native state.
+    var glassCacheKeys: [GlassSurfaceKey] = []
+    var glassCacheKeySet: [Int] = []
+    var glassCacheEpochValue: Int = 0
+    // Backdrop key at the last cache render vs. this frame: a mismatch means
+    // the cached interiors were shaded against a different backdrop, and every
+    // copy quad routes live until an emission re-renders the cache.
+    var glassCacheRenderedKey: Float = -1.0
+    var glassCacheKeyNow: Float = -2.0
+    var glassSurfaceCursor: Int = 0
+    // Dirty-surface interior ranges to re-render into the cache this frame:
+    // per entry, the stream index, the first band quad, and the band/lens/core
+    // quad counts (contiguous by construction of pushGlass).
+    var glassCacheRangeStream: [Int] = []
+    var glassCacheRangeStart: [Int] = []
+    var glassCacheRangeBand: [Int] = []
+    var glassCacheRangeLens: [Int] = []
+    var glassCacheRangeCore: [Int] = []
+    var glassCacheRangeCount: Int = 0
+    // KIRA_GLASS_CACHE_OFF: route every copy quad live (band pipeline).
+    var glassCacheDisabled: Bool = false
+    var adaptiveGlyphPipeline: RenderPipeline = emptyRenderPipeline()
+    // Metal-only fast path for an opaque fullscreen TextureView. Non-fullscreen
+    // and translucent textures remain in the portable generic batch.
+    var backgroundPipeline: RenderPipeline = emptyRenderPipeline()
+    // The crossfade position, as a real uniform rather than a buffer bound at a
+    // uniform slot. `UiBackground.ksl` declares it `uniform params`, and a
+    // backend that pushes uniforms through its own call (sokol does) has no way
+    // to read them out of a buffer a caller bound instead.
+    var backgroundParams: Uniform = emptyUniform()
+    var backgroundParamsGroup: BindGroup = emptyBindGroup()
+    var backgroundActive: Bool = false
+    var backgroundTransition: Float = 0.0
+    var indexBuffer: GraphicsBuffer = emptyGraphicsBuffer()
+    var atlasTexture: GraphicsTexture = emptyGraphicsTexture()
+    var sampler: GraphicsSampler = emptyGraphicsSampler()
+    var atlasGroup: BindGroup = emptyBindGroup()
+    // External-texture slot (TextureView, mode 2). The fallback group binds the atlas at
+    // slot 1 so the shader's texture(1)/sampler(1) arguments are always satisfied; a real
+    // external texture replaces it via setExternalTexture (bind group cached per id).
+    var fallbackExternalGroup: BindGroup = emptyBindGroup()
+    var externalTextureId: U32 = 0
+    var externalGroup: BindGroup = emptyBindGroup()
+    var externalBindReady: Bool = false
+    // Optional TextureView crossfade target. It occupies the backdrop/near group
+    // only for stream 0; glass streams replace that group with their own blur pair.
+    var secondaryExternalTextureId: U32 = 0
+    var secondaryExternalGroup: BindGroup = emptyBindGroup()
+    var secondaryExternalSharpGroup: BindGroup = emptyBindGroup()
+    var secondaryExternalBindReady: Bool = false
+    // Per-present direct-source specialization for layer 0. Set only when the
+    // captured stream contains no quads and the opaque photo is at a steady
+    // transition endpoint; every other frame uses the normal capture.
+    var directBackdropLayer0: Bool = false
+    var directBackdropSharpGroup: BindGroup = emptyBindGroup()
+    // Blur-chain cache for the direct-backdrop path: the blur of a static photo
+    // is itself static, so the compute pair re-runs only when the source texture
+    // or the blur extent changes. Zero means no cached result. The capture path
+    // never caches — its input is scene content that can change every frame.
+    var blurCacheSourceId: U32 = 0
+    var blurCacheW: Int = 0
+    var blurCacheH: Int = 0
+
+    var atlasW: Int = 0
+    var atlasH: Int = 0
+    // The atlas's CPU side: RGBA8 for the whole texture, packed into runtime
+    // memory rather than a Kira array because it is megabyte-scale and is handed
+    // to the upload as a pointer.
+    //
+    // It exists because a glyph has to be composited BESIDE the glyphs already
+    // packed: the upload replaces the whole image, and sokol has no sub-region
+    // form at all. One upload per frame that added a glyph is also fewer uploads
+    // than the one-per-glyph the sub-region path cost on the backend that does.
+    var atlasPixels: RawPtr
+    var atlasDirty: Bool = false
+    // Whether this session has already announced that it drew real content.
+    // The announcement is once per run, and the compositor is the only thing
+    // that knows a stream held quads.
+    var announcedVisibleContent: Bool = false
+    var cursorX: Int = 0
+    var cursorY: Int = 0
+    var rowHeight: Int = 0
+    var glyphs: [UiGlyphSlot] = []
+    // O(1) glyph lookup: open-addressing hash from glyph cache key to index into
+    // `glyphs`. Key 0 marks an empty slot (cache keys are always >= 1025).
+    var glyphHashKeys: [Int] = []
+    var glyphHashVals: [Int] = []
+
+    var engine: RawPtr
+    var face: RawPtr
+    var fontReady: Bool = false
+    var fontSizeSet: Int = 0
+    var ascender: Float = 0.0
+    var descender: Float = 0.0
+
+    // Vertices are written straight into the dynamic vertex buffer's shared contents
+    // (GPU-visible memory) as they are emitted — no per-frame Kira array. Keeping a
+    // 27k-float array in this nativeState struct made every emitQuad recover O(n) and
+    // the frame O(n^2); writing through this raw pointer keeps the hot path O(1).
+    var contentsPtr: RawPtr
+    var quadCount: Int = 0
+    // The vertex buffer holds one slot per frame in flight, so `contentsPtr` is the
+    // base of the whole ring and this is the float index where THIS frame's slot
+    // starts (claimed once per frame in beginFrameSlots). Emitting without it
+    // would write the frame being built into the bytes the GPU is still drawing —
+    // part of the window from one frame and part from the next.
+    var frameBase: Int = 0
+    // Liquid glass cuts the frame into streams — one per glass layer, in draw
+    // order (see maxDrawStreams). `streamIndex` is the ACTIVE entry, the one the
+    // fields above mirror; entries past stream 1 are allocated the first frame that
+    // actually stacks glass, so an app that never overlaps glass pays nothing.
+    var streams: [UiStream] = []
+    var streamIndex: Int = 0
+    // Which stream emission returns to when the HUD is done with its own (see
+    // hudStreamIndex). A HUD refresh borrows the mirrored hot fields above and
+    // hands them back untouched, so a full frame can write the HUD mid-walk and a
+    // HUD-only frame can write it with no frame around it at all.
+    var hudReturnStream: Int = 0
+    // Diagnostic switches, read from the environment ONCE. They are launch knobs —
+    // nothing changes them while a process runs — and reading them per quad or per
+    // draw put a linear environ scan on the frame's hottest loops.
+    var probeQuads: Bool = false
+    var probeCost: Bool = false
+    var probeModes: Bool = false
+    var probeBatch: Bool = false
+    var probeGlassLayers: Bool = false
+    var probeGlassLayerOpen: Bool = false
+    var layoutDebug: Bool = false
+    var benchFinalOnly: Bool = false
+    var benchBackgroundOnly: Bool = false
+    var benchNoBackground: Bool = false
+    var referenceBlur: Bool = false
+    // Which cells of the viewport the CURRENT layer has drawn into, stamped with
+    // `gridStamp` so starting a layer clears the grid by bumping a counter. Only
+    // maintained once a glass layer is open (nothing below the first glass surface
+    // can change where its layer boundary falls).
+    var glassGrid: [Int] = []
+    var gridStamp: Int = 0
+    // Exact clipped quad bounds for the active layer. The old 33 pt occupancy
+    // cells classified adjacent controls as overlapping and doubled blur work.
+    // Storage is retained and overwritten each frame to avoid allocation churn.
+    var glassRects: [Float] = []
+    var glassRectCount: Int = 0
+    // Scratch union of padded glass sampling bounds for scene-capture scissors.
+    // Retained across frames to avoid allocation in the presentation path.
+    var captureRects: [Float] = []
+    var captureRectCount: Int = 0
+    // Offscreen liquid-glass resources, created lazily on the first glass frame and
+    // recreated grow-only on resize (the backdrop capture is sampled 1:1 through uv
+    // 0..1, so a target larger than the viewport still composites correctly).
+    var glassReady: Bool = false
+    var glassTexW: Int = 0
+    var glassTexH: Int = 0
+    var blurTextureA: GraphicsTexture = emptyGraphicsTexture()
+    var blurTextureB: GraphicsTexture = emptyGraphicsTexture()
+    var blurPipeline: RenderPipeline = emptyRenderPipeline()
+    var blurComputeHPipelineId: Int = 0
+    var blurComputeVPipelineId: Int = 0
+    // One uniform per pass of the drawn blur ladder: the texel step along the
+    // axis that pass filters, and which level it writes. Four passes, four
+    // uniforms — a uniform is applied at the draw that reads it, so the ladder
+    // cannot rewrite one between two draws of the same frame and still be
+    // encodable by a backend that records them. They reach the shader through a
+    // bind group rather than the encoder's vertex buffer, because the vertex
+    // buffer is Metal's buffer 0 and a KSL uniform at group slot 0 emits at
+    // buffer 1 (slot + 1, the stream occupies 0). Binding it as a group is what
+    // makes the two agree.
+    var blurParamsNearH: Uniform = emptyUniform()
+    var blurParamsFarH: Uniform = emptyUniform()
+    var blurParamsNearV: Uniform = emptyUniform()
+    var blurParamsFarV: Uniform = emptyUniform()
+    var blurParamsNearHGroup: BindGroup = emptyBindGroup()
+    var blurParamsFarHGroup: BindGroup = emptyBindGroup()
+    var blurParamsNearVGroup: BindGroup = emptyBindGroup()
+    var blurParamsFarVGroup: BindGroup = emptyBindGroup()
+    // Capture + blurred backdrop per glass layer (see UiGlassLayer).
+    var glassLayers: [UiGlassLayer] = []
+    // The blur's two horizontal intermediates at slot 0 — the near half writes
+    // texture A and the far half texture B, and each vertical pass reads the one
+    // its own half wrote — and the slot-2 atlas fallback that keeps
+    // texture(2)/sampler(2) satisfied on streams with no glass. The compute pair
+    // writes the same two textures.
+    var blurInputAGroup: BindGroup = emptyBindGroup()
+    var blurInputBGroup: BindGroup = emptyBindGroup()
+    var fallbackBackdropGroup: BindGroup = emptyBindGroup()
+    var glassBlurW: Int = 0
+    var glassBlurH: Int = 0
+    var viewportW: Float = 1.0
+    var viewportH: Float = 1.0
+    // Retina backing scale (physical pixels per point). Glyphs are rasterized at
+    // point-size x scale and positioned in points, so text is crisp at native
+    // resolution; surfaces are SDF-shaded per physical pixel and need no extra scale.
+    var scale: Float = 1.0
+}

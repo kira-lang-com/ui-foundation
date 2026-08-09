@@ -12,11 +12,12 @@ import KiraGraphics
 // Create the compositor's persistent GPU resources and font, store the state behind a
 // nativeState handle, and return that handle.
 @Native
-function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
+function createBatch(graphics: borrow Graphics) -> RawPtr {
     var state = UiBatchState {
-        engine: uiNullPtr()
-        face: uiNullPtr()
-        contentsPtr: uiNullPtr()
+        engine: nullPointer()
+        face: nullPointer()
+        contentsPtr: nullPointer()
+        atlasPixels: nullPointer()
     }
 
     // The compositor's shader is written in KSL (Shaders/UiBatch.ksl) and
@@ -29,18 +30,8 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     // the `.ksl` and the string disagreed; a shader bug fixed in the readable
     // file simply did not reach the GPU.
     let batchArtifact = ksl!("Shaders/UiBatch.ksl")
-    let shader = graphics.createShaderFromKslArtifact(
-        "kira-ui-batch",
-        batchArtifact.combinedMsl,
-        batchArtifact.vertexWgsl,
-        batchArtifact.fragmentWgsl,
-        batchArtifact.vertexGlsl,
-        batchArtifact.fragmentGlsl,
-        batchArtifact.vertexEntry,
-        batchArtifact.fragmentEntry,
-        batchArtifact.uniformReflection
-    )
-    let pipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let shader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-batch", batchArtifact), "shader")
+    let pipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-batch-pipeline"
         shader: shader
         // Taken from the artifact rather than written here: the pipeline looks
@@ -58,28 +49,33 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     enabled: true
-                    preset: blendPresetPremultipliedAlpha()
+                    preset: .PremultipliedAlpha
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.pipelineId = pipeline.id
+    }), "pipeline")
+    state.pipeline = pipeline
 
     // Glass region pipelines, from the same KSL toolchain as the generic one —
     // every backend gets them. Their draw path falls back to the generic
@@ -87,18 +83,8 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     // is missing, so a backend that fails to build one degrades to today's
     // behavior rather than to missing glass.
     let glassArtifact = ksl!("Shaders/UiGlassFull.ksl")
-    let glassShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-glass-full",
-        glassArtifact.combinedMsl,
-        glassArtifact.vertexWgsl,
-        glassArtifact.fragmentWgsl,
-        glassArtifact.vertexGlsl,
-        glassArtifact.fragmentGlsl,
-        glassArtifact.vertexEntry,
-        glassArtifact.fragmentEntry,
-        glassArtifact.uniformReflection
-    )
-    let glassPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let glassShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-glass-full", glassArtifact), "glass shader")
+    let glassPipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-glass-full-pipeline"
         shader: glassShader
         vertexEntry: glassArtifact.vertexEntry
@@ -109,41 +95,36 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     enabled: true
-                    preset: blendPresetPremultipliedAlpha()
+                    preset: .PremultipliedAlpha
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.glassFullPipelineId = glassPipeline.id
+    }), "glass pipeline")
+    state.glassFullPipeline = glassPipeline
     let bandArtifact = ksl!("Shaders/UiGlassBand.ksl")
-    let bandShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-glass-band",
-        bandArtifact.combinedMsl,
-        bandArtifact.vertexWgsl,
-        bandArtifact.fragmentWgsl,
-        bandArtifact.vertexGlsl,
-        bandArtifact.fragmentGlsl,
-        bandArtifact.vertexEntry,
-        bandArtifact.fragmentEntry,
-        bandArtifact.uniformReflection
-    )
-    let bandPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let bandShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-glass-band", bandArtifact), "band shader")
+    let bandPipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-glass-band-pipeline"
         shader: bandShader
         vertexEntry: bandArtifact.vertexEntry
@@ -154,7 +135,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     // The interior is opaque (alpha exactly 1), and an
                     // opaque replace lets the tiler eliminate every
@@ -162,38 +143,33 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
                     // blending over them. Same output as premultiplied
                     // over at alpha 1, measured cheaper.
                     enabled: false
-                    preset: blendPresetReplace()
+                    preset: .Replace
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.glassBandPipelineId = bandPipeline.id
+    }), "band pipeline")
+    state.glassBandPipeline = bandPipeline
     let coreArtifact = ksl!("Shaders/UiGlassCore.ksl")
-    let coreShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-glass-core",
-        coreArtifact.combinedMsl,
-        coreArtifact.vertexWgsl,
-        coreArtifact.fragmentWgsl,
-        coreArtifact.vertexGlsl,
-        coreArtifact.fragmentGlsl,
-        coreArtifact.vertexEntry,
-        coreArtifact.fragmentEntry,
-        coreArtifact.uniformReflection
-    )
-    let corePipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let coreShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-glass-core", coreArtifact), "core shader")
+    let corePipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-glass-core-pipeline"
         shader: coreShader
         vertexEntry: coreArtifact.vertexEntry
@@ -204,7 +180,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     // The interior is opaque (alpha exactly 1), and an
                     // opaque replace lets the tiler eliminate every
@@ -212,38 +188,33 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
                     // blending over them. Same output as premultiplied
                     // over at alpha 1, measured cheaper.
                     enabled: false
-                    preset: blendPresetReplace()
+                    preset: .Replace
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.glassCorePipelineId = corePipeline.id
+    }), "core pipeline")
+    state.glassCorePipeline = corePipeline
     let lensArtifact = ksl!("Shaders/UiGlassLens.ksl")
-    let lensShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-glass-lens",
-        lensArtifact.combinedMsl,
-        lensArtifact.vertexWgsl,
-        lensArtifact.fragmentWgsl,
-        lensArtifact.vertexGlsl,
-        lensArtifact.fragmentGlsl,
-        lensArtifact.vertexEntry,
-        lensArtifact.fragmentEntry,
-        lensArtifact.uniformReflection
-    )
-    let lensPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let lensShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-glass-lens", lensArtifact), "lens shader")
+    let lensPipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-glass-lens-pipeline"
         shader: lensShader
         vertexEntry: lensArtifact.vertexEntry
@@ -254,7 +225,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     // The interior is opaque (alpha exactly 1), and an
                     // opaque replace lets the tiler eliminate every
@@ -262,38 +233,33 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
                     // blending over them. Same output as premultiplied
                     // over at alpha 1, measured cheaper.
                     enabled: false
-                    preset: blendPresetReplace()
+                    preset: .Replace
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.glassLensPipelineId = lensPipeline.id
+    }), "lens pipeline")
+    state.glassLensPipeline = lensPipeline
     let copyArtifact = ksl!("Shaders/UiGlassCopy.ksl")
-    let copyShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-glass-copy",
-        copyArtifact.combinedMsl,
-        copyArtifact.vertexWgsl,
-        copyArtifact.fragmentWgsl,
-        copyArtifact.vertexGlsl,
-        copyArtifact.fragmentGlsl,
-        copyArtifact.vertexEntry,
-        copyArtifact.fragmentEntry,
-        copyArtifact.uniformReflection
-    )
-    let copyPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let copyShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-glass-copy", copyArtifact), "copy shader")
+    let copyPipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-glass-copy-pipeline"
         shader: copyShader
         vertexEntry: copyArtifact.vertexEntry
@@ -304,56 +270,51 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
+                format: .Swapchain
                 blend: BlendState {
                     enabled: false
-                    preset: blendPresetReplace()
+                    preset: .Replace
                 }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
         primitive: PrimitiveDescriptor {
-            topology: primitiveTopologyTriangleList()
+            topology: .TriangleList
         }
-    })
-    state.glassCopyPipelineId = copyPipeline.id
+    }), "copy pipeline")
+    state.glassCopyPipeline = copyPipeline
 
-    if graphics.backend == GraphicsBackend.Metal && environmentIsSet("KIRA_UI_SPECIALIZED_RUNS") {
-        state.rectPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-rect-fast", ksl!("Shaders/UiRect.ksl"))
-        state.glyphPipelineId = uiCreateSpecializedPipeline(graphics, "kira-ui-glyph-fast", ksl!("Shaders/UiGlyph.ksl"))
+    if environmentIsSet("KIRA_UI_SPECIALIZED_RUNS") {
+        state.rectPipeline = createSpecializedPipeline(graphics, "kira-ui-rect-fast", ksl!("Shaders/UiRect.ksl"))
+        state.glyphPipeline = createSpecializedPipeline(graphics, "kira-ui-glyph-fast", ksl!("Shaders/UiGlyph.ksl"))
         // Adaptive glyphs sit immediately after their glass surface. Keeping both
         // on the generic pipeline merges each island into one ordered range; a
         // separate adaptive pipeline costs more switches than it saves. That is
         // why there is no `Shaders/UiAdaptiveGlyph.ksl` — a shader nothing
         // compiles is a shader that rots.
-        state.adaptiveGlyphPipelineId = 0
+        state.adaptiveGlyphPipeline = emptyRenderPipeline()
     }
 
     // This compositor is instantiated only by the Metal Foundation backend. The
     // public/Sokol TextureView implementation remains unchanged, and any texture
-    // that does not satisfy the opaque-fullscreen gate below uses `pipelineId`.
+    // that does not satisfy the opaque-fullscreen gate below uses `pipeline`.
     let backgroundArtifact = ksl!("Shaders/UiBackground.ksl")
-    let backgroundShader = graphics.createShaderFromKslArtifact(
-        "kira-ui-opaque-background",
-        backgroundArtifact.combinedMsl,
-        backgroundArtifact.vertexWgsl,
-        backgroundArtifact.fragmentWgsl,
-        backgroundArtifact.vertexGlsl,
-        backgroundArtifact.fragmentGlsl,
-        backgroundArtifact.vertexEntry,
-        backgroundArtifact.fragmentEntry,
-        backgroundArtifact.uniformReflection
-    )
-    let backgroundPipeline = graphics.createRenderPipeline(RenderPipelineDescriptor {
+    let backgroundShader = shaderOrReport(graphics.createShaderFromKslArtifact("kira-ui-opaque-background", backgroundArtifact), "background shader")
+    let backgroundPipeline = pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: "kira-ui-opaque-background-pipeline"
         shader: backgroundShader
         vertexEntry: backgroundArtifact.vertexEntry
@@ -361,122 +322,138 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
         vertexLayout: VertexLayout { stride: 0 attributes: [] }
         colorTargets: [
             ColorTargetDescriptor {
-                format: textureFormatSwapchain()
-                blend: BlendState { enabled: false preset: blendPresetReplace() }
+                format: .Swapchain
+                blend: BlendState { enabled: false preset: .Replace }
             }
         ]
         depthStencil: DepthStencilDescriptor {
             depthEnabled: false
             depthWriteEnabled: false
-            depthCompare: compareFunctionAlways()
-            format: textureFormatDepth24Stencil8()
+            depthCompare: .Always
+            // No depth at all, not a depth buffer with the test switched off:
+            // the compositor never reads or writes depth, and the passes it draws
+            // into carry no depth attachment. A backend that bakes the format
+            // into the pipeline and checks it against the pass — sokol does —
+            // refuses a pipeline claiming a depth format the pass has not got.
+            format: .None
         }
         rasterization: RasterizationDescriptor {
-            cullMode: cullModeNone()
-            frontFace: frontFaceCounterClockwise()
+            cullMode: .None
+            frontFace: .CounterClockwise
         }
-        primitive: PrimitiveDescriptor { topology: primitiveTopologyTriangleList() }
-    })
-    state.backgroundPipelineId = backgroundPipeline.id
-    let backgroundParams = graphics.createDynamicBuffer(4)
-    state.backgroundParamsBufferId = backgroundParams.id
-    state.backgroundParamsGroupId = graphics.createBufferBindGroup("kira-ui-opaque-background-params", uiSlotBackgroundParams(), Int(backgroundParams.id)).id
+        primitive: PrimitiveDescriptor { topology: .TriangleList }
+    }), "background pipeline")
+    state.backgroundPipeline = backgroundPipeline
+    // A real uniform, not a buffer bound at a uniform slot: `UiBackground.ksl`
+    // declares `uniform params`, and a backend that pushes uniforms through its
+    // own call rather than reading them out of memory has no way to see a buffer
+    // a caller bound instead.
+    state.backgroundParams = uniformOrReport(graphics.createUniform(UniformDescriptor {
+        label: "kira-ui-opaque-background-params"
+        expectedFloatCount: 4
+        data: [F32(0.0), F32(0.0), F32(0.0), F32(0.0)]
+    }), "background params")
+    state.backgroundParamsGroup = bindGroupOrReport(graphics.createUniformBindGroup("kira-ui-opaque-background-params", backgroundParamsSlot(), state.backgroundParams), "background params group")
 
-    let floatCapacity = uiBatchStreamFloatCapacity()
-    let vbuf = graphics.createDynamicBuffer(floatCapacity)
-    state.vertexBufferId = vbuf.id
-    state.contentsPtr = graphics.dynamicBufferContents(vbuf)
+    let floatCapacity = streamFloatCapacity()
+    let vbuf = dynamicBufferOrReport(graphics.createDynamicBuffer("kira-ui-verts", floatCapacity), "stream buffer")
+    state.contentsPtr = vbuf.contents
     state.streams.append(UiStream {
-        bufferId: vbuf.id
-        contentsPtr: state.contentsPtr
-        vertsGroupId: graphics.createBufferBindGroup("kira-ui-verts", uiSlotVerts(), Int(vbuf.id)).id
-        quadModes: uiBatchIntZeros(uiBatchCapacityQuads())
+        buffer: vbuf.buffer
+        contentsPtr: vbuf.contents
+        vertsGroup: bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), vbuf.buffer.id), "verts group")
+        quadModes: zeroedInts(maxQuadsPerBatch())
     })
 
     // Second stream: the first glass layer. Allocated up front so the common
     // single-layer glass frame never allocates mid-frame; layers beyond this one
-    // allocate on the first frame that stacks glass (uiBatchOpenStream).
-    let vbuf2 = graphics.createDynamicBuffer(floatCapacity)
+    // allocate on the first frame that stacks glass (openStream).
+    let vbuf2 = dynamicBufferOrReport(graphics.createDynamicBuffer("kira-ui-verts", floatCapacity), "stream buffer")
     state.streams.append(UiStream {
-        bufferId: vbuf2.id
-        contentsPtr: graphics.dynamicBufferContents(vbuf2)
-        vertsGroupId: graphics.createBufferBindGroup("kira-ui-verts", uiSlotVerts(), Int(vbuf2.id)).id
-        quadModes: uiBatchIntZeros(uiBatchCapacityQuads())
+        buffer: vbuf2.buffer
+        contentsPtr: vbuf2.contents
+        vertsGroup: bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), vbuf2.buffer.id), "verts group")
+        quadModes: zeroedInts(maxQuadsPerBatch())
     })
 
     // The rest of the stream slots — the deeper glass layers and the HUD's own —
     // exist as placeholders from the start so every slot has a FIXED index. The HUD
-    // is at uiBatchHudStream() whether or not glass ever stacks that deep, which is
+    // is at hudStreamIndex() whether or not glass ever stacks that deep, which is
     // what lets a HUD refresh address its stream without disturbing the layers.
-    while state.streams.count < uiBatchStreamSlots() {
-        state.streams.append(uiBatchPlaceholderStream())
+    while state.streams.count < streamSlotCount() {
+        state.streams.append(placeholderStream())
     }
 
-    state.glassGrid = uiBatchIntZeros(uiGlassGridCells())
+    state.glassGrid = zeroedInts(glassGridCells())
 
-    let ibuf = graphics.createIndexBuffer(IndexBufferDescriptor {
+    let ibuf = bufferOrReport(graphics.createIndexBuffer(IndexBufferDescriptor {
         label: "kira-ui-batch-indices"
-        usage: bufferUsageIndex()
-        data: uiBatchQuadIndices(uiBatchCapacityQuads())
-    })
-    state.indexBufferId = ibuf.id
+        data: quadIndices(maxQuadsPerBatch())
+    }), "ibuf")
+    state.indexBuffer = ibuf
 
-    let atlasSize = uiBatchAtlasSize()
-    let atlas = graphics.createTexture(TextureDescriptor {
+    let atlasSize = glyphAtlasSize()
+    let atlas = textureOrReport(graphics.createTexture(TextureDescriptor {
         label: "kira-ui-glyph-atlas"
         width: atlasSize
         height: atlasSize
-        format: textureFormatRgba8Unorm()
-        usage: textureUsageSampled()
+        format: .Rgba8Unorm
+        // Streaming, because the atlas is composited into and re-uploaded as
+        // glyphs are packed. An immutable image would refuse the upload.
+        usage: .SampledStreaming
         sampleCount: 1
-        storageMode: 0
-    })
-    state.atlasTextureId = atlas.id
+        storage: .Persistent
+    }), "glyph atlas")
+    state.atlasTexture = atlas
     state.atlasW = atlasSize
     state.atlasH = atlasSize
-    state.cursorX = uiAtlasGutter()
-    state.cursorY = uiAtlasGutter()
+    // The atlas's CPU side. Zeroed, so a glyph quad whose uv strays into a slot
+    // nothing has packed reads transparent rather than whatever the allocator
+    // last left there.
+    state.atlasPixels = allocateBytes(U64(atlasSize * atlasSize * 4))
+    state.cursorX = atlasGutter()
+    state.cursorY = atlasGutter()
     state.rowHeight = 0
 
-    let sampler = graphics.createSampler(SamplerDescriptor {
+    let sampler = samplerOrReport(graphics.createSampler(SamplerDescriptor {
         label: "kira-ui-glyph-sampler"
-        minFilter: textureFilterLinear()
-        magFilter: textureFilterLinear()
-        addressModeU: textureAddressModeClampToEdge()
-        addressModeV: textureAddressModeClampToEdge()
-    })
-    state.samplerId = sampler.id
+        minFilter: .Linear
+        magFilter: .Linear
+        addressModeU: .ClampToEdge
+        addressModeV: .ClampToEdge
+    }), "sampler")
+    state.sampler = sampler
 
-    let bindGroup = graphics.beginBindGroup("kira-ui-batch-atlas")
-    graphics.bindGroupAddTexture(bindGroup, uiSlotAtlasTexture(), atlas)
-    graphics.bindGroupAddSampler(bindGroup, uiSlotAtlasSampler(), sampler)
-    state.bindGroupId = bindGroup.id
+    let bindGroup = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-atlas"), "bind group")
+    graphics.bindGroupAddTexture(bindGroup, atlasTextureSlot(), atlas)
+    graphics.bindGroupAddSampler(bindGroup, atlasSamplerSlot(), sampler)
+    state.atlasGroup = bindGroup
 
     // The external-texture fallback: the shader always declares that slot, and
     // until a TextureView registers a real texture the atlas satisfies it (mode-2
     // quads are only emitted once one has).
-    let fallbackExternal = graphics.beginBindGroup("kira-ui-batch-external-fallback")
-    graphics.bindGroupAddTexture(fallbackExternal, uiSlotExternalTexture(), atlas)
-    graphics.bindGroupAddSampler(fallbackExternal, uiSlotExternalSampler(), sampler)
-    state.fallbackExternalBindGroupId = fallbackExternal.id
+    let fallbackExternal = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-fallback"), "fallback external")
+    graphics.bindGroupAddTexture(fallbackExternal, externalTextureSlot(), atlas)
+    graphics.bindGroupAddSampler(fallbackExternal, externalSamplerSlot(), sampler)
+    state.fallbackExternalGroup = fallbackExternal
 
     // Same discipline for the two blurred levels, which share one group: a frame
     // with no glass keeps both satisfied by the atlas.
-    let fallbackSoftNear = graphics.beginBindGroup("kira-ui-batch-soft-near-fallback")
-    graphics.bindGroupAddTexture(fallbackSoftNear, uiSlotBackdropTexture(), atlas)
-    graphics.bindGroupAddSampler(fallbackSoftNear, uiSlotBackdropSampler(), sampler)
-    graphics.bindGroupAddTexture(fallbackSoftNear, uiSlotNearTexture(), atlas)
-    graphics.bindGroupAddSampler(fallbackSoftNear, uiSlotNearSampler(), sampler)
-    state.fallbackBackdropBindGroupId = fallbackSoftNear.id
+    let fallbackSoftNear = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-soft-near-fallback"), "fallback soft near")
+    graphics.bindGroupAddTexture(fallbackSoftNear, backdropTextureSlot(), atlas)
+    graphics.bindGroupAddSampler(fallbackSoftNear, backdropSamplerSlot(), sampler)
+    graphics.bindGroupAddTexture(fallbackSoftNear, nearTextureSlot(), atlas)
+    graphics.bindGroupAddSampler(fallbackSoftNear, nearSamplerSlot(), sampler)
+    state.fallbackBackdropGroup = fallbackSoftNear
 
-    var cacheKeySeed: [Float] = []
-    while cacheKeySeed.count < uiGlassCacheMaxSurfaces() * uiGlassCacheKeyFloats() {
-        cacheKeySeed.append(0.0)
+    var cacheKeySeed: [GlassSurfaceKey] = []
+    while cacheKeySeed.count < glassCacheMaxSurfaces() {
+        cacheKeySeed.append(GlassSurfaceKey())
     }
     state.glassCacheKeys = cacheKeySeed
-    state.glassCacheKeySet = uiBatchIntZeros(uiGlassCacheMaxSurfaces())
-    state.glyphHashKeys = uiBatchIntZeros(uiBatchGlyphHashCap())
-    state.glyphHashVals = uiBatchIntZeros(uiBatchGlyphHashCap())
+    state.glassCacheKeySet = zeroedInts(glassCacheMaxSurfaces())
+    state.glyphHashKeys = zeroedInts(glyphCacheCapacity())
+    state.glyphHashVals = zeroedInts(glyphCacheCapacity())
 
     state.probeQuads = environmentIsSet("KIRA_UI_QUAD_PROBE")
     state.probeCost = environmentIsSet("KIRA_UI_COST_PROBE")
@@ -484,15 +461,15 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     state.probeBatch = environmentIsSet("KIRA_UI_BATCH_PROBE")
     state.probeGlassLayers = environmentIsSet("KIRA_GLASS_LAYERS")
     state.probeGlassLayerOpen = environmentIsSet("KIRA_GLASS_LAYER_PROBE")
+    state.layoutDebug = environmentIsSet("KIRA_UI_LAYOUT_DEBUG")
     state.benchFinalOnly = environmentIsSet("KIRA_GLASS_BENCH_FINAL_ONLY")
     state.benchBackgroundOnly = environmentIsSet("KIRA_GLASS_BENCH_BACKGROUND_ONLY")
     state.benchNoBackground = environmentIsSet("KIRA_GLASS_BENCH_NO_BACKGROUND")
     state.glassCacheDisabled = environmentIsSet("KIRA_GLASS_CACHE_OFF")
     state.referenceBlur = environmentIsSet("KIRA_GLASS_REFERENCE")
 
-    uiBatchStateLoadFont(state)
+    loadBatchFont(state)
 
     let storage = nativeState(state)
     return nativeUserData(storage)
 }
-

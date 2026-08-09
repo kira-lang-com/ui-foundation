@@ -8,8 +8,8 @@ import KiraGraphics
 // rasterization, the cross-platform equivalent of FreeType) and to the kira_runtime
 // raw-memory helpers used to read the C glyph-bitmap struct and decode UTF-8. There
 // is NO rendering shim: glyph coverage is rasterized, packed into a Kira Graphics
-// atlas texture, and drawn as textured quads through the abstraction — the legacy
-// immediate-mode kira_text_draw_run blit path is gone.
+// atlas texture, and drawn as textured quads through the abstraction. There is no
+// immediate-mode blit path beside it on any backend.
 
 // ---------------------------------------------------------------------------
 // kira_runtime raw memory helpers (read the glyph bitmap struct, decode UTF-8).
@@ -24,30 +24,21 @@ import KiraGraphics
 
 // NOTE: only U32/U64/RawPtr/Bool-return FFI is known to lower in this toolchain;
 // I32-RETURN and F32-RETURN do not. The engine's signed 32-bit int fields are read
-// as u32 and sign-corrected (uiMemReadInt), and its 32-bit float fields are read as
-// u32 and decoded (uiF32FromBits / uiMemReadFloat — see UiBatch.kira).
+// as u32 and sign-corrected (readInt), and its 32-bit float fields are read as
+// u32 and decoded (floatFromBits / readFloat — see UiBatch.kira).
 
 @Native
-function uiMemAlloc(size: U64) -> RawPtr {
-    return metalMemAlloc(size)
-}
-@Native
-function uiMemFree(ptr: RawPtr) {
-    metalMemFree(ptr)
-    return
-}
-@Native
-function uiMemWriteU32(ptr: RawPtr, offset: U64, value: U32) {
+function writeU32(ptr: RawPtr, offset: U64, value: U32) {
     metalMemWriteU32(ptr, offset, value)
     return
 }
 @Native
-function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
+function writeF32(ptr: RawPtr, offset: U64, value: Float) {
     metalMemWriteF32(ptr, offset, value)
     return
 }
 // Write one quad's record: the thirty floats the KSL `UiQuad` struct reads for
-// every mode, in its field order (see uiBatchFloatsPerQuad in UiBatch.kira).
+// every mode, in its field order (see quadFloatCount in UiBatch.kira).
 // `px`/`py` are pixel coordinates, which the fragment stage clips against; `pos`
 // is the same point in clip space, with the y flip a top-left-origin UI needs.
 //
@@ -62,7 +53,7 @@ function uiMemWriteF32(ptr: RawPtr, offset: U64, value: Float) {
 // writes through the runtime's raw-memory helpers, which are on every native
 // link line and need no platform to have anything.
 @Native
-function uiWriteQuadRecord(
+function writeQuadRecord(
     ptr: RawPtr, baseFloats: U64,
     px0: Float, py0: Float, px1: Float, py1: Float,
     lx0: Float, ly0: Float, lx1: Float, ly1: Float,
@@ -74,36 +65,36 @@ function uiWriteQuadRecord(
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
 ) {
     let bytes = baseFloats * U64(4)
-    uiMemWriteF32(ptr, bytes, px0 / vw * 2.0 - 1.0)
-    uiMemWriteF32(ptr, bytes + U64(4), 1.0 - py0 / vh * 2.0)
-    uiMemWriteF32(ptr, bytes + U64(8), px1 / vw * 2.0 - 1.0)
-    uiMemWriteF32(ptr, bytes + U64(12), 1.0 - py1 / vh * 2.0)
-    uiMemWriteF32(ptr, bytes + U64(16), px0)
-    uiMemWriteF32(ptr, bytes + U64(20), py0)
-    uiMemWriteF32(ptr, bytes + U64(24), px1)
-    uiMemWriteF32(ptr, bytes + U64(28), py1)
-    uiMemWriteF32(ptr, bytes + U64(32), lx0)
-    uiMemWriteF32(ptr, bytes + U64(36), ly0)
-    uiMemWriteF32(ptr, bytes + U64(40), lx1)
-    uiMemWriteF32(ptr, bytes + U64(44), ly1)
-    uiMemWriteF32(ptr, bytes + U64(48), halfW)
-    uiMemWriteF32(ptr, bytes + U64(52), halfH)
-    uiMemWriteF32(ptr, bytes + U64(56), radius)
-    uiMemWriteF32(ptr, bytes + U64(60), borderWidth)
-    uiMemWriteF32(ptr, bytes + U64(64), mode)
-    uiMemWriteF32(ptr, bytes + U64(68), edgeRefraction)
-    uiMemWriteF32(ptr, bytes + U64(72), fr)
-    uiMemWriteF32(ptr, bytes + U64(76), fg)
-    uiMemWriteF32(ptr, bytes + U64(80), fb)
-    uiMemWriteF32(ptr, bytes + U64(84), fa)
-    uiMemWriteF32(ptr, bytes + U64(88), br)
-    uiMemWriteF32(ptr, bytes + U64(92), bg)
-    uiMemWriteF32(ptr, bytes + U64(96), bb)
-    uiMemWriteF32(ptr, bytes + U64(100), ba)
-    uiMemWriteF32(ptr, bytes + U64(104), clipMinX)
-    uiMemWriteF32(ptr, bytes + U64(108), clipMinY)
-    uiMemWriteF32(ptr, bytes + U64(112), clipMaxX)
-    uiMemWriteF32(ptr, bytes + U64(116), clipMaxY)
+    writeF32(ptr, bytes, px0 / vw * 2.0 - 1.0)
+    writeF32(ptr, bytes + U64(4), 1.0 - py0 / vh * 2.0)
+    writeF32(ptr, bytes + U64(8), px1 / vw * 2.0 - 1.0)
+    writeF32(ptr, bytes + U64(12), 1.0 - py1 / vh * 2.0)
+    writeF32(ptr, bytes + U64(16), px0)
+    writeF32(ptr, bytes + U64(20), py0)
+    writeF32(ptr, bytes + U64(24), px1)
+    writeF32(ptr, bytes + U64(28), py1)
+    writeF32(ptr, bytes + U64(32), lx0)
+    writeF32(ptr, bytes + U64(36), ly0)
+    writeF32(ptr, bytes + U64(40), lx1)
+    writeF32(ptr, bytes + U64(44), ly1)
+    writeF32(ptr, bytes + U64(48), halfW)
+    writeF32(ptr, bytes + U64(52), halfH)
+    writeF32(ptr, bytes + U64(56), radius)
+    writeF32(ptr, bytes + U64(60), borderWidth)
+    writeF32(ptr, bytes + U64(64), mode)
+    writeF32(ptr, bytes + U64(68), edgeRefraction)
+    writeF32(ptr, bytes + U64(72), fr)
+    writeF32(ptr, bytes + U64(76), fg)
+    writeF32(ptr, bytes + U64(80), fb)
+    writeF32(ptr, bytes + U64(84), fa)
+    writeF32(ptr, bytes + U64(88), br)
+    writeF32(ptr, bytes + U64(92), bg)
+    writeF32(ptr, bytes + U64(96), bb)
+    writeF32(ptr, bytes + U64(100), ba)
+    writeF32(ptr, bytes + U64(104), clipMinX)
+    writeF32(ptr, bytes + U64(108), clipMinY)
+    writeF32(ptr, bytes + U64(112), clipMaxX)
+    writeF32(ptr, bytes + U64(116), clipMaxY)
     return
 }
 
@@ -111,7 +102,7 @@ function uiWriteQuadRecord(
 // itself with. Mode 3 is the only mode whose shader reads any of it, so it is the
 // only mode that writes it.
 @Native
-function uiWriteQuadMaterial(
+function writeQuadMaterial(
     ptr: RawPtr, baseFloats: U64,
     m0: Float, m1: Float, m2: Float, m3: Float,
     m4: Float, m5: Float, m6: Float, m7: Float,
@@ -121,47 +112,39 @@ function uiWriteQuadMaterial(
     m20: Float, m21: Float, m22: Float, m23: Float,
 ) {
     let bytes = (baseFloats + U64(30)) * U64(4)
-    uiMemWriteF32(ptr, bytes, m0)
-    uiMemWriteF32(ptr, bytes + U64(4), m1)
-    uiMemWriteF32(ptr, bytes + U64(8), m2)
-    uiMemWriteF32(ptr, bytes + U64(12), m3)
-    uiMemWriteF32(ptr, bytes + U64(16), m4)
-    uiMemWriteF32(ptr, bytes + U64(20), m5)
-    uiMemWriteF32(ptr, bytes + U64(24), m6)
-    uiMemWriteF32(ptr, bytes + U64(28), m7)
-    uiMemWriteF32(ptr, bytes + U64(32), m8)
-    uiMemWriteF32(ptr, bytes + U64(36), m9)
-    uiMemWriteF32(ptr, bytes + U64(40), m10)
-    uiMemWriteF32(ptr, bytes + U64(44), m11)
-    uiMemWriteF32(ptr, bytes + U64(48), m12)
-    uiMemWriteF32(ptr, bytes + U64(52), m13)
-    uiMemWriteF32(ptr, bytes + U64(56), m14)
-    uiMemWriteF32(ptr, bytes + U64(60), m15)
-    uiMemWriteF32(ptr, bytes + U64(64), m16)
-    uiMemWriteF32(ptr, bytes + U64(68), m17)
-    uiMemWriteF32(ptr, bytes + U64(72), m18)
-    uiMemWriteF32(ptr, bytes + U64(76), m19)
-    uiMemWriteF32(ptr, bytes + U64(80), m20)
-    uiMemWriteF32(ptr, bytes + U64(84), m21)
-    uiMemWriteF32(ptr, bytes + U64(88), m22)
-    uiMemWriteF32(ptr, bytes + U64(92), m23)
+    writeF32(ptr, bytes, m0)
+    writeF32(ptr, bytes + U64(4), m1)
+    writeF32(ptr, bytes + U64(8), m2)
+    writeF32(ptr, bytes + U64(12), m3)
+    writeF32(ptr, bytes + U64(16), m4)
+    writeF32(ptr, bytes + U64(20), m5)
+    writeF32(ptr, bytes + U64(24), m6)
+    writeF32(ptr, bytes + U64(28), m7)
+    writeF32(ptr, bytes + U64(32), m8)
+    writeF32(ptr, bytes + U64(36), m9)
+    writeF32(ptr, bytes + U64(40), m10)
+    writeF32(ptr, bytes + U64(44), m11)
+    writeF32(ptr, bytes + U64(48), m12)
+    writeF32(ptr, bytes + U64(52), m13)
+    writeF32(ptr, bytes + U64(56), m14)
+    writeF32(ptr, bytes + U64(60), m15)
+    writeF32(ptr, bytes + U64(64), m16)
+    writeF32(ptr, bytes + U64(68), m17)
+    writeF32(ptr, bytes + U64(72), m18)
+    writeF32(ptr, bytes + U64(76), m19)
+    writeF32(ptr, bytes + U64(80), m20)
+    writeF32(ptr, bytes + U64(84), m21)
+    writeF32(ptr, bytes + U64(88), m22)
+    writeF32(ptr, bytes + U64(92), m23)
     return
 }
 @Native
-function uiMemReadU32(ptr: RawPtr, offset: U64) -> U32 {
+function readU32(ptr: RawPtr, offset: U64) -> U32 {
     return metalMemReadU32(ptr, offset)
 }
 @Native
-function uiMemReadPtr(ptr: RawPtr, offset: U64) -> RawPtr {
+function readPointer(ptr: RawPtr, offset: U64) -> RawPtr {
     return metalMemReadPtr(ptr, offset)
-}
-@Native
-function uiNullPtr() -> RawPtr {
-    return metalNullPtr()
-}
-@Native
-function uiPtrIsNull(ptr: RawPtr) -> Bool {
-    return metalPtrIsNull(ptr)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,27 +153,33 @@ function uiPtrIsNull(ptr: RawPtr) -> Bool {
 // ---------------------------------------------------------------------------
 
 @FFI.Extern { library: kiratext; symbol: kira_text_engine_create; abi: c; }
-function uiTextEngineCreate(): RawPtr;
+function createTextEngine(): RawPtr;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_load; abi: c; }
-function uiTextFaceLoad(engine: RawPtr, path: CString, faceIndex: I32): RawPtr;
+function loadFace(engine: RawPtr, path: CString, faceIndex: I32): RawPtr;
+// The Figtree variable face compiled into libkiratext. The one face that exists
+// wherever the library is linked — including a browser, which has no filesystem
+// to name a system font in — so the retained atlas always has an outline source
+// and never has to ask whether text is possible on this platform.
+@FFI.Extern { library: kiratext; symbol: kira_text_face_load_bundled; abi: c; }
+function loadBundledFace(engine: RawPtr): RawPtr;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_set_pixel_size; abi: c; }
-function uiTextFaceSetPixelSize(face: RawPtr, pixelSize: F32): I32;
+function faceSetPixelSize(face: RawPtr, pixelSize: F32): I32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_glyph_index; abi: c; }
-function uiTextFaceGlyphIndex(face: RawPtr, codepoint: U32): U32;
+function faceGlyphIndex(face: RawPtr, codepoint: U32): U32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph; abi: c; }
-function uiTextFaceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
+function faceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
 // Subpixel-positioned rasterization: the outline is shifted by xOffset26_6 (64 to a
 // pixel) before it is scan-converted, so coverage is computed for where the glyph
 // actually lands rather than computed once and resampled. Both entry points render
 // UNHINTED, which is the other half of what makes macOS text look the way it does.
 @FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph_offset; abi: c; }
-function uiTextFaceRenderGlyphOffset(face: RawPtr, glyphIndex: U32, xOffset26_6: I32, out: RawPtr): I32;
+function faceRenderGlyphOffset(face: RawPtr, glyphIndex: U32, xOffset26_6: I32, out: RawPtr): I32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_vmetrics; abi: c; }
-function uiTextFaceVMetrics(face: RawPtr, out: RawPtr): Void;
+function faceVerticalMetrics(face: RawPtr, out: RawPtr): Void;
 @FFI.Extern { library: kiratext; symbol: kira_text_utf8_next; abi: c; }
-function uiTextUtf8Next(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32;
+function nextUtf8Scalar(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32;
 @FFI.Extern { library: kiratext; symbol: kira_text_decode_codepoints; abi: c; }
-function uiTextDecodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
+function decodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
 
 // ---------------------------------------------------------------------------
 // Icon engine (SVG-subset rasterizer, NativeLibs/Icon): coverage bitmaps packed
@@ -198,42 +187,36 @@ function uiTextDecodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
 // ---------------------------------------------------------------------------
 
 @FFI.Extern { library: kiraicon; symbol: kira_icon_hash; abi: c; }
-function uiIconHash(svg: CString): I64;
+function iconHash(svg: CString): Int;
 @FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize; abi: c; }
-function uiIconRasterize(svg: CString, px: I32, outBuffer: RawPtr): I32;
-// Immediate-mode icon draw for the legacy (non-Metal-batch) path — the icon
-// counterpart of kira_text_draw_run: rasterizes (cached per icon+size) and
-// blits the tinted coverage through kg_ui_blit_coverage. This is what draws
-// icons on the Sokol path, including WebGPU on wasm32-emscripten.
-@FFI.Extern { library: kiraicon; symbol: kira_icon_draw_run; abi: c; }
-function uiIconDrawRun(svg: CString, x: F64, y: F64, w: F64, h: F64, r: F64, g: F64, b: F64, a: F64): Void;
+function rasterizeIcon(svg: CString, px: I32, outBuffer: RawPtr): I32;
 
 // libc fread — the only raw-file symbol the linked program does not already bind
 // (fopen/fwrite/fclose live in the Metal backend's foreign surface and are reused
 // below through their Kira functions; a second @FFI.Extern binding of the same C
 // symbol would be dropped).
 @FFI.Extern { library: kiratext; symbol: fread; abi: c; }
-function uiFRead(ptr: RawPtr, size: U64, count: U64, stream: RawPtr): U64;
+function readFileBytes(ptr: RawPtr, size: U64, count: U64, stream: RawPtr): U64;
 
 // Copy a Kira string's UTF-8 bytes into a NUL-terminated C buffer (caller frees).
 // Needed because fopen's one program-wide binding takes a RawPtr path (the shape
 // the image-dump hook needed for getenv-returned paths).
 @Native
-function uiCPathAlloc(path: borrow String) -> RawPtr {
-    let buf = uiMemAlloc(U64(path.count * 4 + 1))
-    let indexSlot = uiMemAlloc(8)
-    let cpSlot = uiMemAlloc(8)
-    uiMemWriteU32(indexSlot, 0, 0)
-    uiMemWriteU32(cpSlot, 0, 0)
+function allocateCPath(path: borrow String) -> RawPtr {
+    let buf = allocateBytes(U64(path.count * 4 + 1))
+    let indexSlot = allocateBytes(8)
+    let cpSlot = allocateBytes(8)
+    writeU32(indexSlot, 0, 0)
+    writeU32(cpSlot, 0, 0)
     var at = 0
     var more = true
     var guard = 0
     while more && guard < 4096 {
-        let produced = uiTextUtf8Next(path, 1000000, indexSlot, cpSlot)
+        let produced = nextUtf8Scalar(path, 1000000, indexSlot, cpSlot)
         if produced == 0 {
             more = false
         } else {
-            let codepoint = Int(uiMemReadU32(cpSlot, 0))
+            let codepoint = Int(readU32(cpSlot, 0))
             if codepoint == 0 || codepoint > 127 {
                 // ASCII paths only — enough for the demo assets this serves.
                 more = codepoint > 127
@@ -249,116 +232,66 @@ function uiCPathAlloc(path: borrow String) -> RawPtr {
         guard = guard + 1
     }
     metalMemWriteU8(buf, at, 0)
-    uiMemFree(indexSlot)
-    uiMemFree(cpSlot)
+    freeBytes(indexSlot)
+    freeBytes(cpSlot)
     return buf
 }
 
-// Load a raw RGBA8 pixel blob (width*height*4 bytes, row-major, no header) from
-// `path`, upload it into a new registered sampled texture, and return the texture
-// id (0 on any failure). Metal path only — id 0 elsewhere. Intended for
-// demo/example backdrops shown through a TextureView.
-@Native
-function uiLoadRgbaTextureFile(graphics: borrow Graphics, path: borrow String, width: Int, height: Int) -> Int {
-    let ctx = graphics.metalContext
-    if uiPtrIsNull(ctx) {
-        return 0
-    }
-    let cPath = uiCPathAlloc(path)
-    let stream = metalFOpen(cPath, "rb")
-    uiMemFree(cPath)
-    if uiPtrIsNull(stream) {
-        return 0
-    }
+// Load a raw RGBA8 pixel blob into a sampled texture, returning the view a draw
+// call takes — or why there is none.
+//
+// `path` names `width * height * 4` bytes, row-major, no header. The file is
+// read through Foundation, which routes to `kira_rt_fs_*` on every backend, and
+// uploaded through the Kira Graphics texture API — so this works wherever a
+// Kira program runs rather than only where Metal did. Reaching into the Metal
+// backend's Objective-C surface directly is what made every non-Apple host
+// report the backdrop as missing whatever path it was handed.
+//
+// The reason travels with the failure. A file that is not there and a device
+// that refused the upload are different problems with different fixes, and
+// answering both with a zero is what hid the first one behind a message about
+// the second.
+function loadRgbaTexture(graphics: borrow Graphics, path: borrow String, width: Int, height: Int) -> Result<Int, ResourceFailure> {
     let total = width * height * 4
-    let buf = uiMemAlloc(U64(total))
-    let readCount = uiFRead(buf, 1, U64(total), stream)
-    metalFClose(stream)
-    if Int(readCount) != total {
-        uiMemFree(buf)
-        return 0
+    let pixels = readFileRange(path, 0, total)
+    if pixels.count != total {
+        return .Error(.AssetUnreadable)
     }
-    let textureId = metalCreateTexture(ctx, width, height)
-    let region = uiMemAlloc(48)
-    metalMemWriteU64(region, 0, 0)
-    metalMemWriteU64(region, 8, 0)
-    metalMemWriteU64(region, 16, 0)
-    metalMemWriteU64(region, 24, width)
-    metalMemWriteU64(region, 32, height)
-    metalMemWriteU64(region, 40, 1)
-    metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
-    uiMemFree(region)
-    uiMemFree(buf)
-    // A backdrop loads once and is then sampled every frame — by the fullscreen
-    // TextureView, the glass sharp taps, and the blur chain's source read — so
-    // trade one blit now for the GPU-optimal layout all of them sample.
-    metalOptimizeTextureForGpu(ctx, textureId)
-    return textureId
+    attempt {
+        let texture = try graphics.createTextureFromPixels(TextureDescriptor {
+            label: path
+            width: width
+            height: height
+            format: .Rgba8Unorm
+            usage: .Sampled
+            sampleCount: 1
+            storage: .Persistent
+        }, pixels)
+        return .Ok(Int(texture.viewId))
+    } handle {
+        DeviceRefused { return .Error(.DeviceRefused) }
+        AssetUnreadable { return .Error(.AssetUnreadable) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
 }
 
 // Is `name` present in the environment with an EMPTY value? Loading cannot report
 // this: a missing variable and a variable set to "" both fail to open a file and
 // both return 0. The difference is intent — an empty value is a run saying "no
 // image here", which callers use to skip their fallback paths entirely.
-function uiEnvValueIsEmpty(name: borrow String) -> Bool {
+function environmentValueIsEmpty(name: borrow String) -> Bool {
     return environmentIsSet(name) && environmentValue(name).count == 0
 }
 
 // As above, but the path is the VALUE of environment variable `envName` (the
 // image-dump-style hookup for scripted runs).
-@Native
-function uiLoadRgbaTextureFromEnv(graphics: borrow Graphics, envName: borrow String, width: Int, height: Int) -> Int {
-    let ctx = graphics.metalContext
-    if uiPtrIsNull(ctx) {
-        return 0
+function loadRgbaTextureFromEnvironment(graphics: borrow Graphics, envName: borrow String, width: Int, height: Int) -> Result<Int, ResourceFailure> {
+    if !environmentIsSet(envName) {
+        return .Error(.AssetUnreadable)
     }
-    let path = metalGetEnv(envName)
-    if uiPtrIsNull(path) {
-        return 0
-    }
-    let stream = metalFOpen(path, "rb")
-    if uiPtrIsNull(stream) {
-        return 0
-    }
-    let total = width * height * 4
-    let buf = uiMemAlloc(U64(total))
-    let readCount = uiFRead(buf, 1, U64(total), stream)
-    metalFClose(stream)
-    if Int(readCount) != total {
-        uiMemFree(buf)
-        return 0
-    }
-    let textureId = metalCreateTexture(ctx, width, height)
-    let region = uiMemAlloc(48)
-    metalMemWriteU64(region, 0, 0)
-    metalMemWriteU64(region, 8, 0)
-    metalMemWriteU64(region, 16, 0)
-    metalMemWriteU64(region, 24, width)
-    metalMemWriteU64(region, 32, height)
-    metalMemWriteU64(region, 40, 1)
-    metalMsgSendReplaceRegion(metalLookup(ctx, textureId), metalSel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, buf, U64(width * 4))
-    uiMemFree(region)
-    uiMemFree(buf)
-    // A backdrop loads once and is then sampled every frame — by the fullscreen
-    // TextureView, the glass sharp taps, and the blur chain's source read — so
-    // trade one blit now for the GPU-optimal layout all of them sample.
-    metalOptimizeTextureForGpu(ctx, textureId)
-    return textureId
+    return loadRgbaTexture(graphics, environmentValue(envName), width, height)
 }
 
-// @Native bridges so non-native code (app wiring, the render backend) can obtain a
-// null RawPtr and test pointers without using the FFI symbols directly.
-@Native
-function uiBatchNullPtr() -> RawPtr {
-    return uiNullPtr()
-}
-
-@Native
-function uiBatchPtrIsNull(ptr: RawPtr) -> Bool {
-    return uiPtrIsNull(ptr)
-}
-
-// kira_text_glyph_bitmap field offsets (C layout):
 //   0  int   width
 //   4  int   rows
 //   8  int   bearing_x
@@ -366,14 +299,14 @@ function uiBatchPtrIsNull(ptr: RawPtr) -> Bool {
 //  16  float advance
 //  20  int   pitch
 //  24  const uint8_t* buffer
-function uiGlyphBitmapSize() -> U64 { return 32 }
-function uiGlyphOffWidth() -> U64 { return 0 }
-function uiGlyphOffRows() -> U64 { return 4 }
-function uiGlyphOffBearingX() -> U64 { return 8 }
-function uiGlyphOffBearingY() -> U64 { return 12 }
-function uiGlyphOffAdvance() -> U64 { return 16 }
-function uiGlyphOffPitch() -> U64 { return 20 }
-function uiGlyphOffBuffer() -> U64 { return 24 }
+function glyphBitmapSize() -> U64 { return 32 }
+function glyphWidthOffset() -> U64 { return 0 }
+function glyphRowsOffset() -> U64 { return 4 }
+function glyphBearingXOffset() -> U64 { return 8 }
+function glyphBearingYOffset() -> U64 { return 12 }
+function glyphAdvanceOffset() -> U64 { return 16 }
+function glyphPitchOffset() -> U64 { return 20 }
+function glyphBufferOffset() -> U64 { return 24 }
 
 // kira_text_vmetrics: three floats (ascender, descender, line_height).
-function uiVMetricsSize() -> U64 { return 12 }
+function verticalMetricsSize() -> U64 { return 12 }

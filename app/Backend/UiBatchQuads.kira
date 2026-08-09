@@ -10,275 +10,258 @@ import KiraGraphics
 // Append one quad (4 vertices) to the stream. (px0,py0)-(px1,py1) is the pixel-space
 // rectangle; (lx0,ly0)-(lx1,ly1) is the per-corner local value (SDF offset, or uv for
 // glyphs). The other attributes are constant across the quad's vertices.
-@Native
-function uiBatchEmitQuad(
-    batchPtr: RawPtr,
-    px0: Float, py0: Float, px1: Float, py1: Float,
-    lx0: Float, ly0: Float, lx1: Float, ly1: Float,
-    halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
-    edgeRefraction: Float,
-    fr: Float, fg: Float, fb: Float, fa: Float,
-    br: Float, bg: Float, bb: Float, ba: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-    m0: Float = 0.0, m1: Float = 0.0, m2: Float = 0.0, m3: Float = 0.0,
-    m4: Float = 0.0, m5: Float = 0.0, m6: Float = 0.0, m7: Float = 0.0,
-    m8: Float = 0.0, m9: Float = 0.0, m10: Float = 0.0, m11: Float = 0.0,
-    m12: Float = 0.0, m13: Float = 0.0, m14: Float = 0.0, m15: Float = 0.0,
-    m16: Float = 0.0, m17: Float = 0.0, m18: Float = 0.0, m19: Float = 0.0,
-    m20: Float = 0.0, m21: Float = 0.0, m22: Float = 0.0, m23: Float = 0.0,
-) {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    if state.quadCount >= uiBatchCapacityQuads() {
-        return
-    }
-    let modeCode = Int(mode * 10.0)
-    if state.quadCount < state.streams[state.streamIndex].quadModes.count {
-        state.streams[state.streamIndex].quadModes[state.quadCount] = modeCode
-    } else {
-        state.streams[state.streamIndex].quadModes.append(modeCode)
-    }
-    if state.streamIndex == 0 && state.probeQuads {
-        print(636363)
-        print(Int(mode * 10.0))
-        print(Int(px0))
-        print(Int(py0))
-        print(Int(px1))
-        print(Int(py1))
-        print(Int(fr * 1000.0))
-        print(Int(fg * 1000.0))
-        print(Int(fb * 1000.0))
-        print(Int(fa * 1000.0))
-        print(Int(edgeRefraction * 1000.0))
-    }
-    if state.probeCost && (mode < 0.5 || mode > 1.5) {
-        print(656565)
-        print(state.streamIndex)
-        print(Int(mode * 10.0))
-        print(Int(px0))
-        print(Int(py0))
-        print(Int(px1 - px0))
-        print(Int(py1 - py0))
-    }
-    let contents = state.contentsPtr
-    if uiPtrIsNull(contents) {
-        return
-    }
-    // Mode 3 — liquid glass — is the only mode whose shader reads the material
-    // block; its region patches (3.0 full, 3.25 band, 3.45 core — see
-    // uiBatchPushGlass) all carry it. Mode 4 is above them numerically and
-    // reads none of it.
-    let writesMaterial = modeCode == 30 || modeCode == 31 || modeCode == 32 || modeCode == 33 || modeCode == 34
-    let vw = state.viewportW
-    let vh = state.viewportH
-    // Base float index of this quad's record, inside this frame's ring slot.
-    let base = state.frameBase + state.quadCount * uiBatchFloatsPerQuad()
-    uiWriteQuadRecord(
-        contents, U64(base),
-        px0, py0, px1, py1,
-        lx0, ly0, lx1, ly1,
-        vw, vh,
-        halfW, halfH, radius, borderWidth, mode, edgeRefraction,
-        fr, fg, fb, fa,
-        br, bg, bb, ba,
-        clipMinX, clipMinY, clipMaxX, clipMaxY,
-    )
-    // The material block belongs to liquid glass and is read by no other mode, in
-    // any backend's compiled shader, so only mode 3 writes it. The slot keeps
-    // whatever the last quad to occupy it wrote (a fresh Metal buffer arrives
-    // zeroed), which the modes that skip it never look at.
-    if writesMaterial {
-        uiWriteQuadMaterial(
+extend UiBatch {
+    function emitQuad(
+        px0: Float, py0: Float, px1: Float, py1: Float,
+        lx0: Float, ly0: Float, lx1: Float, ly1: Float,
+        halfW: Float, halfH: Float, radius: Float, borderWidth: Float, mode: Float,
+        edgeRefraction: Float,
+        fr: Float, fg: Float, fb: Float, fa: Float,
+        br: Float, bg: Float, bb: Float, ba: Float,
+        clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+        m0: Float = 0.0, m1: Float = 0.0, m2: Float = 0.0, m3: Float = 0.0,
+        m4: Float = 0.0, m5: Float = 0.0, m6: Float = 0.0, m7: Float = 0.0,
+        m8: Float = 0.0, m9: Float = 0.0, m10: Float = 0.0, m11: Float = 0.0,
+        m12: Float = 0.0, m13: Float = 0.0, m14: Float = 0.0, m15: Float = 0.0,
+        m16: Float = 0.0, m17: Float = 0.0, m18: Float = 0.0, m19: Float = 0.0,
+        m20: Float = 0.0, m21: Float = 0.0, m22: Float = 0.0, m23: Float = 0.0,
+    ) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        if state.quadCount >= maxQuadsPerBatch() {
+            return
+        }
+        let modeCode = Int(mode * 10.0)
+        if state.quadCount < state.streams[state.streamIndex].quadModes.count {
+            state.streams[state.streamIndex].quadModes[state.quadCount] = modeCode
+        } else {
+            state.streams[state.streamIndex].quadModes.append(modeCode)
+        }
+        if state.streamIndex == 0 && state.probeQuads {
+            print(636363)
+            print(Int(mode * 10.0))
+            print(Int(px0))
+            print(Int(py0))
+            print(Int(px1))
+            print(Int(py1))
+            print(Int(fr * 1000.0))
+            print(Int(fg * 1000.0))
+            print(Int(fb * 1000.0))
+            print(Int(fa * 1000.0))
+            print(Int(edgeRefraction * 1000.0))
+        }
+        if state.probeCost && (mode < 0.5 || mode > 1.5) {
+            print(656565)
+            print(state.streamIndex)
+            print(Int(mode * 10.0))
+            print(Int(px0))
+            print(Int(py0))
+            print(Int(px1 - px0))
+            print(Int(py1 - py0))
+        }
+        let contents = state.contentsPtr
+        if pointerIsNull(contents) {
+            return
+        }
+        // Mode 3 — liquid glass — is the only mode whose shader reads the material
+        // block; its region patches (3.0 full, 3.25 band, 3.45 core — see
+        // pushGlass) all carry it. Mode 4 is above them numerically and
+        // reads none of it.
+        let writesMaterial = modeCode == 30 || modeCode == 31 || modeCode == 32 || modeCode == 33 || modeCode == 34
+        let vw = state.viewportW
+        let vh = state.viewportH
+        // Base float index of this quad's record, inside this frame's ring slot.
+        let base = state.frameBase + state.quadCount * quadFloatCount()
+        writeQuadRecord(
             contents, U64(base),
-            m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11,
-            m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23,
+            px0, py0, px1, py1,
+            lx0, ly0, lx1, ly1,
+            vw, vh,
+            halfW, halfH, radius, borderWidth, mode, edgeRefraction,
+            fr, fg, fb, fa,
+            br, bg, bb, ba,
+            clipMinX, clipMinY, clipMaxX, clipMaxY,
         )
+        // The material block belongs to liquid glass and is read by no other mode, in
+        // any backend's compiled shader, so only mode 3 writes it. The slot keeps
+        // whatever the last quad to occupy it wrote (a fresh Metal buffer arrives
+        // zeroed), which the modes that skip it never look at.
+        if writesMaterial {
+            writeQuadMaterial(
+                contents, U64(base),
+                m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11,
+                m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23,
+            )
+        }
+        // With a glass layer open, remember the (clipped) footprint this quad covers:
+        // the next glass surface reads the grid to decide whether it is stacked over
+        // this layer and therefore needs a capture of its own. The HUD's stream is
+        // exempt: it is drawn after every glass decision of the frame has been taken,
+        // so no glass surface can ever read what it would record.
+        if state.streamIndex > 0 && state.streamIndex != hudStreamIndex() {
+            var mx0 = px0
+            if mx0 < clipMinX {
+                mx0 = clipMinX
+            }
+            var my0 = py0
+            if my0 < clipMinY {
+                my0 = clipMinY
+            }
+            var mx1 = px1
+            if mx1 > clipMaxX {
+                mx1 = clipMaxX
+            }
+            var my1 = py1
+            if my1 > clipMaxY {
+                my1 = clipMaxY
+            }
+            if mx1 > mx0 && my1 > my0 {
+                glassMarkRect(state, mx0, my0, mx1, my1)
+            }
+        }
+        state.quadCount = state.quadCount + 1
+        return
     }
-    // With a glass layer open, remember the (clipped) footprint this quad covers:
-    // the next glass surface reads the grid to decide whether it is stacked over
-    // this layer and therefore needs a capture of its own. The HUD's stream is
-    // exempt: it is drawn after every glass decision of the frame has been taken,
-    // so no glass surface can ever read what it would record.
-    if state.streamIndex > 0 && state.streamIndex != uiBatchHudStream() {
-        var mx0 = px0
-        if mx0 < clipMinX {
-            mx0 = clipMinX
-        }
-        var my0 = py0
-        if my0 < clipMinY {
-            my0 = clipMinY
-        }
-        var mx1 = px1
-        if mx1 > clipMaxX {
-            mx1 = clipMaxX
-        }
-        var my1 = py1
-        if my1 > clipMaxY {
-            my1 = clipMaxY
-        }
-        if mx1 > mx0 && my1 > my0 {
-            uiGlassMarkRect(state, mx0, my0, mx1, my1)
-        }
-    }
-    state.quadCount = state.quadCount + 1
-    return
 }
 
+
 // Push a rounded-rect / squircle surface with an optional border. The quad is padded
-// by 1px so the SDF anti-aliasing band at the edge is not clipped.
-@Native
-function uiBatchPushRect(
-    batchPtr: RawPtr,
-    x: Float, y: Float, w: Float, h: Float,
-    fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-) {
-    if w <= 0.0 || h <= 0.0 {
+// by 1px so the SDF anti-aliasing band at the edge is not clipped. `shapeMode` is
+// 0.0 for a circular rounded rectangle and 0.25 for a superellipse corner.
+extend UiBatch {
+    function pushRect(
+        x: Float, y: Float, w: Float, h: Float,
+        fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float,
+        clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+        shapeMode: Float = 0.0,
+    ) {
+        if w <= 0.0 || h <= 0.0 {
+            return
+        }
+        if fill.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) {
+            return
+        }
+        let pad = 1.0
+        let halfW = w / 2.0
+        let halfH = h / 2.0
+        let cx = x + halfW
+        let cy = y + halfH
+        let lhx = halfW + pad
+        let lhy = halfH + pad
+        var clampedRadius = radius
+        if clampedRadius > halfW {
+            clampedRadius = halfW
+        }
+        if clampedRadius > halfH {
+            clampedRadius = halfH
+        }
+        self.emitQuad(
+            cx - lhx, cy - lhy, cx + lhx, cy + lhy,
+            0.0 - lhx, 0.0 - lhy, lhx, lhy,
+            halfW, halfH, clampedRadius, borderWidth, shapeMode, 0.0,
+            fill.r, fill.g, fill.b, fill.a,
+            border.r, border.g, border.b, border.a,
+            clipMinX, clipMinY, clipMaxX, clipMaxY
+        )
         return
     }
-    if fill.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) {
-        return
-    }
-    let pad = 1.0
-    let halfW = w / 2.0
-    let halfH = h / 2.0
-    let cx = x + halfW
-    let cy = y + halfH
-    let lhx = halfW + pad
-    let lhy = halfH + pad
-    var clampedRadius = radius
-    if clampedRadius > halfW {
-        clampedRadius = halfW
-    }
-    if clampedRadius > halfH {
-        clampedRadius = halfH
-    }
-    uiBatchEmitQuad(
-        batchPtr,
-        cx - lhx, cy - lhy, cx + lhx, cy + lhy,
-        0.0 - lhx, 0.0 - lhy, lhx, lhy,
-        halfW, halfH, clampedRadius, borderWidth, 0.0, 0.0,
-        fill.r, fill.g, fill.b, fill.a,
-        border.r, border.g, border.b, border.a,
-        clipMinX, clipMinY, clipMaxX, clipMaxY
-    )
-    return
 }
+
 
 // Register the external texture TextureViews sample this frame (one per frame — the
 // editor viewport). The slot-1 bind group is cached per texture id, so a stable
 // render-target id costs one creation total.
-@Native
-function uiBatchSetExternalTextures(batchPtr: RawPtr, graphics: borrow Graphics, textureId: U32, secondaryTextureId: U32) {
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    let primaryMatches = state.externalBindReady && state.externalTextureId == textureId
-    let secondaryMatches =
-        (secondaryTextureId == 0 && !state.secondaryExternalBindReady) ||
-        (state.secondaryExternalBindReady && state.secondaryExternalTextureId == secondaryTextureId)
-    if primaryMatches && secondaryMatches {
+extend UiBatch {
+    function setExternalTextures(graphics: borrow Graphics, textureId: U32, secondaryTextureId: U32) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        let primaryMatches = state.externalBindReady && state.externalTextureId == textureId
+        let secondaryMatches =
+            (secondaryTextureId == 0 && !state.secondaryExternalBindReady) ||
+            (state.secondaryExternalBindReady && state.secondaryExternalTextureId == secondaryTextureId)
+        if primaryMatches && secondaryMatches {
+            return
+        }
+        if !primaryMatches {
+            if state.externalBindReady {
+                graphics.destroyBindGroup(state.externalGroup)
+            }
+            let texture = sampledTextureFromViewId(textureId)
+            let sampler = state.sampler
+            let bindGroup = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external"), "bind group")
+            graphics.bindGroupAddTexture(bindGroup, externalTextureSlot(), texture)
+            graphics.bindGroupAddSampler(bindGroup, externalSamplerSlot(), sampler)
+            state.externalTextureId = textureId
+            state.externalGroup = bindGroup
+            state.externalBindReady = true
+        }
+        if !secondaryMatches && state.secondaryExternalBindReady {
+            graphics.destroyBindGroup(state.secondaryExternalGroup)
+            graphics.destroyBindGroup(state.secondaryExternalSharpGroup)
+            state.secondaryExternalTextureId = 0
+            state.secondaryExternalGroup = emptyBindGroup()
+            state.secondaryExternalSharpGroup = emptyBindGroup()
+            state.secondaryExternalBindReady = false
+        }
+        if secondaryTextureId > 0 && !secondaryMatches {
+            let secondary = sampledTextureFromViewId(secondaryTextureId)
+            let sampler = state.sampler
+            let secondaryGroup = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-secondary"), "secondary group")
+            graphics.bindGroupAddTexture(secondaryGroup, backdropTextureSlot(), secondary)
+            graphics.bindGroupAddSampler(secondaryGroup, backdropSamplerSlot(), sampler)
+            graphics.bindGroupAddTexture(secondaryGroup, nearTextureSlot(), secondary)
+            graphics.bindGroupAddSampler(secondaryGroup, nearSamplerSlot(), sampler)
+            state.secondaryExternalTextureId = secondaryTextureId
+            state.secondaryExternalGroup = secondaryGroup
+            let secondarySharp = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-secondary-sharp"), "secondary sharp")
+            graphics.bindGroupAddTexture(secondarySharp, externalTextureSlot(), secondary)
+            graphics.bindGroupAddSampler(secondarySharp, externalSamplerSlot(), sampler)
+            state.secondaryExternalSharpGroup = secondarySharp
+            state.secondaryExternalBindReady = true
+        }
         return
     }
-    if !primaryMatches {
-        if state.externalBindReady {
-            graphics.destroyBindGroup(BindGroup {
-                handle: BackendBindGroupHandle { id: state.externalBindGroupId }
-                id: state.externalBindGroupId
-            })
-        }
-        let texture = GraphicsTexture {
-            handle: BackendTextureHandle {
-                id: textureId
-            }
-            id: textureId
-        }
-        let sampler = GraphicsSampler {
-            handle: BackendSamplerHandle {
-                id: state.samplerId
-            }
-            id: state.samplerId
-        }
-        let bindGroup = graphics.beginBindGroup("kira-ui-batch-external")
-        graphics.bindGroupAddTexture(bindGroup, uiSlotExternalTexture(), texture)
-        graphics.bindGroupAddSampler(bindGroup, uiSlotExternalSampler(), sampler)
-        state.externalTextureId = textureId
-        state.externalBindGroupId = bindGroup.id
-        state.externalBindReady = true
-    }
-    if !secondaryMatches && state.secondaryExternalBindReady {
-        graphics.destroyBindGroup(BindGroup {
-            handle: BackendBindGroupHandle { id: state.secondaryExternalBindGroupId }
-            id: state.secondaryExternalBindGroupId
-        })
-        graphics.destroyBindGroup(BindGroup {
-            handle: BackendBindGroupHandle { id: state.secondaryExternalSharpBindGroupId }
-            id: state.secondaryExternalSharpBindGroupId
-        })
-        state.secondaryExternalTextureId = 0
-        state.secondaryExternalBindGroupId = 0
-        state.secondaryExternalSharpBindGroupId = 0
-        state.secondaryExternalBindReady = false
-    }
-    if secondaryTextureId > 0 && !secondaryMatches {
-        let secondary = GraphicsTexture {
-            handle: BackendTextureHandle { id: secondaryTextureId }
-            id: secondaryTextureId
-        }
-        let sampler = GraphicsSampler {
-            handle: BackendSamplerHandle { id: state.samplerId }
-            id: state.samplerId
-        }
-        let secondaryGroup = graphics.beginBindGroup("kira-ui-batch-external-secondary")
-        graphics.bindGroupAddTexture(secondaryGroup, uiSlotBackdropTexture(), secondary)
-        graphics.bindGroupAddSampler(secondaryGroup, uiSlotBackdropSampler(), sampler)
-        graphics.bindGroupAddTexture(secondaryGroup, uiSlotNearTexture(), secondary)
-        graphics.bindGroupAddSampler(secondaryGroup, uiSlotNearSampler(), sampler)
-        state.secondaryExternalTextureId = secondaryTextureId
-        state.secondaryExternalBindGroupId = secondaryGroup.id
-        let secondarySharp = graphics.beginBindGroup("kira-ui-batch-external-secondary-sharp")
-        graphics.bindGroupAddTexture(secondarySharp, uiSlotExternalTexture(), secondary)
-        graphics.bindGroupAddSampler(secondarySharp, uiSlotExternalSampler(), sampler)
-        state.secondaryExternalSharpBindGroupId = secondarySharp.id
-        state.secondaryExternalBindReady = true
-    }
-    return
 }
 
-function uiBatchSetExternalTexture(batchPtr: RawPtr, graphics: borrow Graphics, textureId: U32) {
-    uiBatchSetExternalTextures(batchPtr, graphics, textureId, U32(0))
-    return
+
+extend UiBatch {
+    function setExternalTexture(graphics: borrow Graphics, textureId: U32) {
+        self.setExternalTextures(graphics, textureId, U32(0))
+        return
+    }
 }
+
 
 // Emit an external-texture quad (mode 2): `local` spans uv 0..1 across the rect.
-function uiBatchPushExternalRect(
-    batchPtr: RawPtr,
-    x: Float, y: Float, w: Float, h: Float,
-    alpha: Float,
-    transition: Float,
-    clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
-) {
-    if w <= 0.0 || h <= 0.0 || alpha <= 0.0 {
+extend UiBatch {
+    function pushExternalRect(
+        x: Float, y: Float, w: Float, h: Float,
+        alpha: Float,
+        transition: Float,
+        clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+    ) {
+        if w <= 0.0 || h <= 0.0 || alpha <= 0.0 {
+            return
+        }
+        var state = nativeRecover<UiBatchState>(self.storage)
+        let coversViewport =
+            x >= 0.0 - 0.01 && y >= 0.0 - 0.01 &&
+            x <= 0.01 && y <= 0.01 &&
+            w >= state.viewportW - 0.01 && h >= state.viewportH - 0.01 &&
+            clipMinX <= 0.01 && clipMinY <= 0.01 &&
+            clipMaxX >= state.viewportW - 0.01 && clipMaxY >= state.viewportH - 0.01
+        if state.backgroundPipeline.id != 0 && state.streamIndex == 0 && state.quadCount == 0 && alpha >= 0.999 && coversViewport {
+            state.backgroundActive = true
+            state.backgroundTransition = transition
+            return
+        }
+        self.emitQuad(
+            x, y, x + w, y + h,
+            0.0, 0.0, 1.0, 1.0,
+            w / 2.0, h / 2.0, 0.0, 0.0, 2.0, transition,
+            1.0, 1.0, 1.0, alpha,
+            0.0, 0.0, 0.0, 0.0,
+            clipMinX, clipMinY, clipMaxX, clipMaxY
+        )
         return
     }
-    var state = nativeRecover<UiBatchState>(batchPtr)
-    let coversViewport =
-        x >= 0.0 - 0.01 && y >= 0.0 - 0.01 &&
-        x <= 0.01 && y <= 0.01 &&
-        w >= state.viewportW - 0.01 && h >= state.viewportH - 0.01 &&
-        clipMinX <= 0.01 && clipMinY <= 0.01 &&
-        clipMaxX >= state.viewportW - 0.01 && clipMaxY >= state.viewportH - 0.01
-    if state.backgroundPipelineId != 0 && state.streamIndex == 0 && state.quadCount == 0 && alpha >= 0.999 && coversViewport {
-        state.backgroundActive = true
-        state.backgroundTransition = transition
-        return
-    }
-    uiBatchEmitQuad(
-        batchPtr,
-        x, y, x + w, y + h,
-        0.0, 0.0, 1.0, 1.0,
-        w / 2.0, h / 2.0, 0.0, 0.0, 2.0, transition,
-        1.0, 1.0, 1.0, alpha,
-        0.0, 0.0, 0.0, 0.0,
-        clipMinX, clipMinY, clipMaxX, clipMaxY
-    )
-    return
 }
 

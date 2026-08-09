@@ -17,27 +17,17 @@ import KiraGraphics
 // whatever the backend emitted. A pipeline looks its functions up BY NAME, and
 // a name written here that does not match leaves the descriptor with a nil
 // vertex function, which Metal rejects at validation.
-function uiCreateSpecializedPipeline(graphics: borrow Graphics, label: String, artifact: borrow KslArtifact) -> U32 {
-    let shader = graphics.createShaderFromKslArtifact(
-        label,
-        artifact.combinedMsl,
-        artifact.vertexWgsl,
-        artifact.fragmentWgsl,
-        artifact.vertexGlsl,
-        artifact.fragmentGlsl,
-        artifact.vertexEntry,
-        artifact.fragmentEntry,
-        artifact.uniformReflection
-    )
-    return graphics.createRenderPipeline(RenderPipelineDescriptor {
+function createSpecializedPipeline(graphics: borrow Graphics, label: String, artifact: borrow KslArtifact) -> RenderPipeline {
+    let shader = shaderOrReport(graphics.createShaderFromKslArtifact(label, artifact), "shader")
+    return pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
         label: label
         shader: shader
         vertexEntry: artifact.vertexEntry
         fragmentEntry: artifact.fragmentEntry
         vertexLayout: VertexLayout { stride: 0 attributes: [] }
-        colorTargets: [ColorTargetDescriptor { format: textureFormatSwapchain() blend: BlendState { enabled: true preset: blendPresetPremultipliedAlpha() } }]
-        depthStencil: DepthStencilDescriptor { depthEnabled: false depthWriteEnabled: false depthCompare: compareFunctionAlways() format: textureFormatDepth24Stencil8() }
-        rasterization: RasterizationDescriptor { cullMode: cullModeNone() frontFace: frontFaceCounterClockwise() }
-        primitive: PrimitiveDescriptor { topology: primitiveTopologyTriangleList() }
-    }).id
+        colorTargets: [ColorTargetDescriptor { format: .Swapchain blend: BlendState { enabled: true preset: .PremultipliedAlpha } }]
+        depthStencil: DepthStencilDescriptor { depthEnabled: false depthWriteEnabled: false depthCompare: .Always format: .None }
+        rasterization: RasterizationDescriptor { cullMode: .None frontFace: .CounterClockwise }
+        primitive: PrimitiveDescriptor { topology: .TriangleList }
+    }), "create render pipeline")
 }

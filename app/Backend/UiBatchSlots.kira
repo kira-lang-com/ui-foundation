@@ -14,29 +14,29 @@ import KiraGraphics
 // buffer 0 holds the attribute stream). `Shaders/UiBatch.ksl` declares
 // verts, atlas, atlasSmp, external, externalSmp, backdrop, backdropSmp,
 // nearBlur, nearSmp — so these are the numbers the host has to bind against.
-function uiSlotVerts() -> Int { return 0 }
-function uiSlotAtlasTexture() -> Int { return 1 }
-function uiSlotAtlasSampler() -> Int { return 2 }
-function uiSlotExternalTexture() -> Int { return 3 }
-function uiSlotExternalSampler() -> Int { return 4 }
-function uiSlotBackdropTexture() -> Int { return 5 }
-function uiSlotBackdropSampler() -> Int { return 6 }
-function uiSlotNearTexture() -> Int { return 7 }
-function uiSlotNearSampler() -> Int { return 8 }
+function vertexBufferSlot() -> Int { return 0 }
+function atlasTextureSlot() -> Int { return 1 }
+function atlasSamplerSlot() -> Int { return 2 }
+function externalTextureSlot() -> Int { return 3 }
+function externalSamplerSlot() -> Int { return 4 }
+function backdropTextureSlot() -> Int { return 5 }
+function backdropSamplerSlot() -> Int { return 6 }
+function nearTextureSlot() -> Int { return 7 }
+function nearSamplerSlot() -> Int { return 8 }
 
 // The blur chain is its own pipeline with its own group, so it numbers from
 // zero again: `Shaders/UiBlur.ksl` declares params, source, linear.
-function uiSlotBlurParams() -> Int { return 0 }
-function uiSlotBlurTexture() -> Int { return 1 }
-function uiSlotBlurSampler() -> Int { return 2 }
+function blurParamsSlot() -> Int { return 0 }
+function blurTextureSlot() -> Int { return 1 }
+function blurSamplerSlot() -> Int { return 2 }
 
 // The opaque background reads the photo through the compositor's own external
 // and backdrop groups, so `Shaders/UiBackground.ksl` writes those slots with
 // `@binding` and only its params slot is its own.
-function uiSlotBackgroundParams() -> Int { return 0 }
+function backgroundParamsSlot() -> Int { return 0 }
 
 // Which encoder group slot each of those is bound through (the encoder has four).
-function uiGroupVerts() -> Int { return 0 }
-function uiGroupAtlas() -> Int { return 1 }
-function uiGroupExternal() -> Int { return 2 }
-function uiGroupSoftNear() -> Int { return 3 }
+function vertexBindGroup() -> Int { return 0 }
+function atlasBindGroup() -> Int { return 1 }
+function externalBindGroup() -> Int { return 2 }
+function softNearBindGroup() -> Int { return 3 }
