@@ -91,7 +91,7 @@ extend UiBatch {
                 // A cache sized for a different drawable is not this frame's cache,
                 // whatever its key says: the key describes the blur inputs, and the
                 // dimensions are the other half of the proof.
-                let copySized = state.glassCacheW == Int(state.viewportW * state.scale) && state.glassCacheH == Int(state.viewportH * state.scale)
+                let copySized = state.glassCacheW == state.drawableW && state.glassCacheH == state.drawableH
                 let copyLive = state.glassCacheDisabled || !state.glassBackdropStatic || state.glassCacheTexture.id == 0 || !state.glassCacheCleared || !copySized || state.glassCacheRenderedKey != state.glassCacheKeyNow
                 if glassSplit {
                     if modeCode == 30 { runPipeline = state.glassFullPipeline }
@@ -182,7 +182,7 @@ function prepareBackground(state: borrow mut UiBatchState, graphics: borrow Grap
 }
 
 // Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see glassIterativeBlur).
+// representation, so a mutating call is always same-engine.
 @Native
 function drawBackground(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
     if !state.backgroundActive || state.backgroundPipeline.id == 0 || !state.externalBindReady {
@@ -214,8 +214,6 @@ function drawBackground(state: borrow mut UiBatchState, encoder: borrow mut Rend
 // that switches the HUD to a backdrop-reading quad shades against the same capture
 // the chrome beneath it does. Costs nothing when no HUD has ever been written —
 // drawStream returns on a zero quad count.
-// Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see glassIterativeBlur).
 extend UiBatch {
     function drawHud(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder) {
         let hud = hudStreamIndex()
@@ -255,6 +253,22 @@ extend UiBatch {
             a: bgA
         }
         prepareBackground(state, graphics)
+        // How far between the two backdrop photographs this frame stands, and
+        // whether that is a place it can rest. `UiBackground.ksl` settles onto
+        // one photo inside the same threshold, so a backdrop taken directly is
+        // the same image the capture would have held.
+        //
+        // Uploaded whatever this frame turns out to do, because it changes
+        // nothing for a group that stands over one image: those bind it at both
+        // of the sharp tap's slots, and mixing a texel with itself is that
+        // texel at any weight.
+        var backdropBlend = state.backgroundTransition
+        if backdropBlend < 0.0 { backdropBlend = 0.0 }
+        if backdropBlend > 1.0 { backdropBlend = 1.0 }
+        let backdropSettled = backdropBlend <= 0.001 || backdropBlend >= 0.999
+        if state.backdropBlend.id != 0 {
+            graphics.updateUniform(state.backdropBlend, [F32(backdropBlend), F32(0.0), F32(0.0), F32(0.0)])
+        }
         // Any glyph packed during this frame's walk reaches the atlas texture
         // here, before the first pass samples it.
         self.commitAtlas(graphics)
@@ -302,7 +316,6 @@ extend UiBatch {
                 probeStream = probeStream + 1
             }
         }
-        let blurPipeline = state.blurPipeline
         // Diagnostic bisection: isolates the full-resolution composite at native
         // drawable size. Never enabled by the application; the benchmark uses it to
         // distinguish 4K final-pass fill/shader cost from the backdrop preparation.
@@ -310,38 +323,46 @@ extend UiBatch {
 
         var layer = 0
         while layer < layers && !skipBackdropPrep {
-            let referenceBlur = state.referenceBlur
             var directSourceId: U32 = 0
+            var directSecondId: U32 = 0
             var directSharpGroup = emptyBindGroup()
-            // Liquid Glass commonly sits directly above one opaque fullscreen photo.
-            // At a steady transition endpoint, rendering that photo into an identical
-            // intermediate before compute blur is pure resampling work. Sample the
-            // original texture instead, but only when there are no stream-0 quads to
-            // preserve. Any crossfade, stacked content, reference run, or portable
-            // fallback retains the ordinary scene capture below.
+            // Liquid Glass commonly sits directly above one opaque fullscreen
+            // photo — or, mid-scheme-change, above a crossfade between two.
+            // Rendering that into an identical full-resolution intermediate
+            // before the blur is pure resampling work: the blur reads two
+            // sources and blends them itself, and the composite's sharp tap
+            // does the same, so there is nothing left for a capture to hold.
+            // Sample the originals instead, but only when there are no stream-0
+            // quads to preserve — stacked content still needs the capture below.
+            // Either way the blur that follows is the same two dispatches over
+            // the same grid: this chooses what they READ, not how.
             if layer == 0 &&
                 state.streams[0].quadCount == 0 &&
                 state.backgroundActive &&
-                state.externalBindReady &&
-                !referenceBlur &&
-                state.blurComputeHPipelineId != 0 &&
-                state.blurComputeVPipelineId != 0 {
-                if state.backgroundTransition <= 0.001 {
+                state.externalBindReady {
+                if state.secondaryExternalBindReady {
+                    directSourceId = state.externalTextureId
+                    directSecondId = state.secondaryExternalTextureId
+                    directSharpGroup = state.backdropSharpGroup
+                } else if backdropBlend <= 0.001 {
+                    // No second photo to fade to. The background pass then mixes
+                    // the primary against the atlas fallback, which is only the
+                    // primary while the transition is at rest, so that is the
+                    // only place this may take it directly.
                     directSourceId = state.externalTextureId
                     directSharpGroup = state.externalGroup
-                } else if state.backgroundTransition >= 0.999 && state.secondaryExternalBindReady {
-                    directSourceId = state.secondaryExternalTextureId
-                    directSharpGroup = state.secondaryExternalSharpGroup
                 }
             }
             if directSourceId != 0 && directSharpGroup.id != 0 {
                 state.directBackdropLayer0 = true
                 state.directBackdropSharpGroup = directSharpGroup
-                // The direct photo is the one backdrop the interior cache may
-                // trust: its blur inputs are static between transitions. Any
-                // capture-path layer leaves this false and every interior copy
-                // routes to the live band pipeline instead.
-                if layer == 0 {
+                // The interior cache may trust a backdrop that is standing
+                // still: a photo at rest has a blur at rest. A crossfade in
+                // flight moves every interior pixel every frame, so it keeps the
+                // direct backdrop and drops the cache — a capture-path layer
+                // drops both, and every interior copy routes to the live band
+                // pipeline instead.
+                if layer == 0 && backdropSettled {
                     state.glassBackdropStatic = true
                 }
             }
@@ -396,56 +417,51 @@ extend UiBatch {
                 frame.endPass()
             }
 
-            if !referenceBlur && state.blurComputeHPipelineId != 0 && state.blurComputeVPipelineId != 0 {
-                // The compute source is a texture rather than an id, because a
-                // backend that splits an image from its views binds a view: the
-                // capture carries its own, and the direct backdrop is a view id
-                // the widget tree carried here on its own.
-                var computeSource = state.glassLayers[layer].sceneTexture
-                if directSourceId != 0 {
-                    computeSource = sampledTextureFromViewId(directSourceId)
+            // The blur. Two dispatches, every glass layer, every frame — there is
+            // no second encoding of it and no condition under which it is skipped.
+            //
+            // The sources are textures rather than ids, because a backend that
+            // splits an image from its views binds a view: the capture carries its
+            // own, and the direct backdrop is a view id the widget tree carried
+            // here on its own. A capture holds one image and passes it as both,
+            // at weight 0; the direct backdrop passes the two photographs and the
+            // crossfade the horizontal half filters through.
+            var computeSource = state.glassLayers[layer].sceneTexture
+            var computeSecond = computeSource
+            var computeBlend = 0.0
+            if directSourceId != 0 {
+                computeSource = sampledTextureFromViewId(directSourceId)
+                computeSecond = computeSource
+                if directSecondId != 0 {
+                    computeSecond = sampledTextureFromViewId(directSecondId)
+                    computeBlend = backdropBlend
                 }
-                let computeSourceId = computeSource.viewId
-                // The direct path blurs a static photo, and a static input has a
-                // static blur: skip the dispatch while the source and extent match
-                // the frame that produced the cached textures. Any capture-path
-                // dispatch (redrawn scene content) drops the cache, so a layer
-                // stack that mixes both never reads a stale result.
-                let blurCached = directSourceId != 0 &&
-                    layer == 0 &&
-                    state.blurCacheSourceId == computeSourceId &&
-                    state.blurCacheW == state.glassBlurW &&
-                    state.blurCacheH == state.glassBlurH
-                if !blurCached {
-                    frame.dispatchTextureComputePair(
-                        state.blurComputeHPipelineId,
-                        state.blurComputeVPipelineId,
-                        computeSource,
-                        state.blurTextureA,
-                        state.blurTextureB,
-                        state.glassLayers[layer].nearTexture,
-                        state.glassLayers[layer].blurTexture,
-                        state.sampler,
-                        state.glassBlurW,
-                        state.glassBlurH,
-                    )
-                    // The compute writes leave both outputs in the uncompressed
-                    // shader-write layout, and every glass tap of every later
-                    // frame samples them. Re-tile once per (rare, cached)
-                    // recompute so the taps read the fast layout.
-                    frame.optimizeTexture(Int(state.glassLayers[layer].nearTexture.id))
-                    frame.optimizeTexture(Int(state.glassLayers[layer].blurTexture.id))
-                    if directSourceId != 0 && layer == 0 {
-                        state.blurCacheSourceId = computeSourceId
-                        state.blurCacheW = state.glassBlurW
-                        state.blurCacheH = state.glassBlurH
-                    } else {
-                        state.blurCacheSourceId = 0
-                    }
-                }
-            } else {
-                glassDrawnBlur(frame, state, layer, blurPipeline)
-                state.blurCacheSourceId = 0
+            }
+            frame.dispatchTextureComputePair(
+                state.blurComputeHPipelineId,
+                state.blurComputeVPipelineId,
+                computeSource,
+                computeSecond,
+                computeBlend,
+                state.blurTextureA,
+                state.blurTextureB,
+                state.glassLayers[layer].nearTexture,
+                state.glassLayers[layer].blurTexture,
+                state.sampler,
+                state.glassBlurW,
+                state.glassBlurH,
+            )
+            // The compute writes leave both outputs in the uncompressed
+            // shader-write layout, and every glass tap of the composite samples
+            // them. Re-tile so those taps read the fast layout.
+            frame.optimizeTexture(Int(state.glassLayers[layer].nearTexture.id))
+            frame.optimizeTexture(Int(state.glassLayers[layer].blurTexture.id))
+            // Which backdrop layer 0's blur was taken from. It is half of the
+            // interior cache's key: a cached interior shaded against one photo is
+            // not the interior of the same surface over another. Zero for the
+            // capture path, whose input is scene content nothing may assume static.
+            if layer == 0 {
+                state.glassBlurSourceId = directSourceId
             }
             layer = layer + 1
         }
@@ -456,7 +472,7 @@ extend UiBatch {
         // cache texture before the composite reads them back as copies. The pass
         // preserves previously cached surfaces (load) once the texture has been
         // cleared a first time.
-        state.glassCacheKeyNow = Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5
+        state.glassCacheKeyNow = Float(state.glassBlurSourceId) + state.backgroundTransition * 0.5
         if state.probeGlassLayers {
             print(696969)
             print(state.glassCacheRangeCount)

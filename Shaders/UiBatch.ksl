@@ -176,6 +176,11 @@ function surfaceDistance(point: Float2, halfSize: Float2, radius: Float, mode: F
     return GlassCommon.sdRound(point, halfSize, radius)
 }
 shader UiBatch {
+    // The first seven of the batch family's bindings, which are the ones this
+    // shader reads: a rect, a glyph, an external-texture quad and an adaptive
+    // text run need the atlas, the external photograph and the far backdrop.
+    // The near blur, the second photograph and the crossfade weight belong to
+    // the glass pipelines, and are declared by those.
     group Batch {
         storage read verts: [UiQuad]
         texture atlas: Texture2d
@@ -184,8 +189,6 @@ shader UiBatch {
         sampler externalSmp: Sampler
         texture backdrop: Texture2d
         sampler backdropSmp: Sampler
-        texture nearBlur: Texture2d
-        sampler nearSmp: Sampler
     }
 
     vertex {
@@ -277,223 +280,21 @@ shader UiBatch {
 
             // --- mode 3: liquid glass — LIVES IN ITS OWN PIPELINES ---
             // Glass region patches route to UiGlassFull / UiGlassBand /
-            // UiGlassCore in uiBatchDrawStream, so no glass quad reaches this
-            // shader; a stray one draws transparent. The branch body below is
-            // compiled out (`if false`) rather than deleted: it stays the
-            // reference copy of the math, while its static register allocation
-            // — which taxed every chrome fragment this pipeline shades — is
-            // released.
+            // UiGlassLens / UiGlassCore in uiBatchDrawStream, so no glass quad
+            // reaches this shader; a stray one draws transparent.
+            //
+            // The material's arithmetic is in those four and in
+            // `GlassCommon.ksl`, and it is not repeated here. It used to be —
+            // the whole branch sat below under `if false`, kept as a reference
+            // copy — and a copy nothing runs is not a reference, it is a second
+            // implementation that drifts from the four that do. It also left
+            // this shader DECLARING the near-blur tap and the second backdrop
+            // photograph it no longer read, which every GL driver eliminated
+            // and then reported missing at every link.
             if input.mode > 2.5 {
                 out.color = Float4(0.0, 0.0, 0.0, 0.0)
                 return out
             }
-            if false {
-                let distancePx = GlassCommon.sdRound(input.local, input.hsize, input.radius)
-
-                // The document's three enabled shadows (see the constants above).
-                //
-                // They are computed on both sides of the shape's hard boundary: a
-                // 0.5px band lives inside the
-                // anti-aliasing band of the edge. Deeper than that, coverage is
-                // exactly one and the shadow's `over` contribution is exactly zero,
-                // so avoid evaluating three SDFs and a texture sample over the
-                // entire glass interior while retaining every contributing pixel.
-                let shadowAlpha = 0.0
-                let shadowRgb = Float3(0.0, 0.0, 0.0)
-                if distancePx > -0.5 {
-                //
-                // Spread grows the silhouette AND its corner radius, which keeps a
-                // spread shadow's corners concentric with the shape's instead of
-                // squaring off as the spread rises.
-                let ringSpread = input.borderStack.x
-                let sideReach = input.borderStack.y
-                let ringHalf = input.hsize + Float2(ringSpread, ringSpread)
-                let ringDistance = GlassCommon.sdRound(input.local, ringHalf, max(input.radius + ringSpread, 0.0))
-                let ring = clamp(0.5 - ringDistance, 0.0, 1.0)
-                // The side band is the document's shadow: the silhouette SHRUNK by
-                // its spread in both axes, then offset left and right. Shrinking is
-                // what keeps it off the top and bottom — vertically it ends inside
-                // the shape — while the offset pushes it past the left and right
-                // edges. Expanding it instead put a dark band along the top, which
-                // the reference does not have.
-                let sideSpread = input.borderStack.z
-                let sideHalf = input.hsize - Float2(sideSpread, sideSpread)
-                let sideRadius = max(input.radius - sideSpread, 0.0)
-                let leftDistance = GlassCommon.sdRound(input.local + Float2(sideReach, 0.0), sideHalf, sideRadius)
-                let rightDistance = GlassCommon.sdRound(input.local - Float2(sideReach, 0.0), sideHalf, sideRadius)
-                // Three shadows, composited the way the design tool stacks them:
-                // MULTIPLIED, not painted over one another. It is the only thing
-                // that explains the reference — reconstructed from its alpha
-                // channel, its top edge is #DBDBDB (219) and its side is ~184, and
-                // no number of opaque #DBDBDB layers can go below 219. Multiplied,
-                // two of them give 219/255 * 219/255 -> 188, which is the side.
-                //
-                // So each silhouette contributes a MULTIPLIER, faded in by its own
-                // coverage, and the ink is their product: one layer at a top edge,
-                // two where the offset pair overlaps the ring at a side.
-                let leftBand = clamp(0.5 - leftDistance, 0.0, 1.0)
-                let rightBand = clamp(0.5 - rightDistance, 0.0, 1.0)
-                let stacked = 1.0 - (1.0 - ring) * (1.0 - leftBand) * (1.0 - rightBand)
-                let ringGrey = input.borderInk.x
-                // Where the layers actually overlap is what carries the second
-                // multiply, so the pixel is split by AREA rather than by fading the
-                // ink: the part only the ring covers, the part only the offset pair
-                // covers, and the part both do. The first two take the ink once, the
-                // third takes it squared. Fading the ink by coverage instead counts
-                // the alpha twice and washes a half-covered edge out to nothing.
-                let pairBand = max(leftBand, rightBand)
-                let onlyRing = ring * (1.0 - pairBand)
-                let onlyPair = pairBand * (1.0 - ring)
-                let bothBands = ring * pairBand
-                let inkOnce = ringGrey
-                let inkTwice = ringGrey * ringGrey
-                // The two are separate inks, so they composite rather than merge:
-                // the side pair sits over the ring, and where only the ring reaches
-                // (top and bottom) its own lighter grey is what shows.
-                let sideGrey = input.borderInk.y
-                let hairline = stacked
-                shadowAlpha = hairline
-                // One ink for all three: the document gives every enabled shadow the
-                // same #DBDBDB, and what separates the edges is how many of them
-                // reach a given pixel — multiplied together — not what colour each
-                // one is.
-                // The ink is a MULTIPLIER, so it has to multiply something: what is
-                // actually behind this fragment, sampled from the capture. Painting
-                // the ink as a colour instead only agrees with multiplying over a
-                // WHITE page — 0.859 * 255 is #DBDBDB either way — and over a photo
-                // it paints a light rim onto dark content instead of darkening it.
-                // That is the white rim that ringed every surface over a backdrop.
-                let coveredArea = max(stacked, 0.0001)
-                let inkLevel = (inkOnce * (onlyRing + onlyPair) + inkTwice * bothBands) / coveredArea
-                let gpOutside = input.local / input.hsize
-                let uvOutside = Float2(
-                    input.border.x + gpOutside.x * input.border.z,
-                    input.border.y + gpOutside.y * input.border.w
-                )
-                let behindEdge = sample(external, externalSmp, uvOutside)
-                shadowRgb = Float3(behindEdge.x, behindEdge.y, behindEdge.z) * inkLevel * stacked
-                }
-
-                if distancePx > 0.5 {
-                    if shadowAlpha <= 0.002 {
-                        out.color = Float4(0.0, 0.0, 0.0, 0.0)
-                        return out
-                    }
-                    out.color = Float4(shadowRgb.x, shadowRgb.y, shadowRgb.z, shadowAlpha)
-                    return out
-                }
-                let cov = clamp(0.5 - distancePx, 0.0, 1.0)
-                let minHalf = max(min(input.hsize.x, input.hsize.y), 1.0)
-                let inside = max(0.0 - distancePx, 0.0)
-
-                // The lens: displace the sample along the SDF's outward normal, by
-                // a curve of how deep into the surface the fragment is.
-                let gp = input.local / input.hsize
-                let uvFrag = Float2(
-                    input.border.x + gp.x * input.border.z,
-                    input.border.y + gp.y * input.border.w
-                )
-                let n = Float2(0.0, -1.0)
-                let coord = uvFrag
-                // At 72pt into the surface the authored exponential lens bends by
-                // less than 0.018pt (<0.04 physical pixels at 2x). Keep the exact
-                // curve in its visible rim and take its limiting value in the deep
-                // interior, avoiding a pow + SDF normal over most large glass.
-                if inside < 72.0 {
-                    let ref = GlassCommon.refractionCurve(inside / max(input.lens.z, 1.0))
-                    n = GlassCommon.sdRoundNormal(input.local, input.hsize, input.radius)
-                    let bend = (1.0 - ref) * min(minHalf, input.lens.y)
-                    let uvScale = Float2(input.border.z / input.hsize.x, input.border.w / input.hsize.y)
-                    coord = uvFrag - n * bend * uvScale
-                }
-
-                // Two real radii: the dial's lower part crosses sharp -> near, the
-                // rest near -> far. Cross-fading sharp against fully-soft would
-                // double-image the backdrop rather than blur it.
-                let dial = clamp(input.fill.w, 0.0, 1.0)
-                if inside < GlassCommon.blurEdgeEnd {
-                    dial = dial * smoothstep(GlassCommon.blurEdgeStart, GlassCommon.blurEdgeEnd, inside)
-                }
-                let split = clamp(input.lens.w, 0.01, 0.99)
-                let rgb = Float3(0.0, 0.0, 0.0)
-                // At the dial's exact endpoints the cross-fade weight is 0 or 1
-                // and the other arm's tap contributes nothing — skip it. Clear
-                // glass (dial 0) and full frost (dial 1) are the two states
-                // surfaces actually rest in, so most glass pixels take one tap;
-                // the edge fade and mid-dial pixels keep the exact two-tap mix.
-                if dial <= 0.0 {
-                    let sharpTap = sample(external, externalSmp, coord)
-                    rgb = Float3(sharpTap.x, sharpTap.y, sharpTap.z)
-                } else if dial >= 1.0 {
-                    let softTap = sample(backdrop, backdropSmp, coord)
-                    rgb = Float3(softTap.x, softTap.y, softTap.z)
-                } else if dial < split {
-                    let sharpTap = sample(external, externalSmp, coord)
-                    let nearTap = sample(nearBlur, nearSmp, coord)
-                    rgb = mix(
-                        Float3(sharpTap.x, sharpTap.y, sharpTap.z),
-                        Float3(nearTap.x, nearTap.y, nearTap.z),
-                        dial / split
-                    )
-                } else {
-                    let nearTap = sample(nearBlur, nearSmp, coord)
-                    let softTap = sample(backdrop, backdropSmp, coord)
-                    rgb = mix(
-                        Float3(nearTap.x, nearTap.y, nearTap.z),
-                        Float3(softTap.x, softTap.y, softTap.z),
-                        (dial - split) / (1.0 - split)
-                    )
-                }
-
-                // The wash: the material's fills, in the order and with the blend
-                // modes the platform authors them in (app/Core/Materials.kira).
-                // Applied as given — adapting it to the backdrop is the tint
-                // colour's job, and a named step has to mean what it says.
-                let washA = clamp(input.borderWidth, 0.0, GlassCommon.washCeiling)
-                rgb = GlassCommon.blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washBlend.x)
-                let washUpperA = clamp(input.wash.w, 0.0, 1.0)
-                rgb = GlassCommon.blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washBlend.y)
-
-                // The edge: a thin darkening stroke the whole way round, plus a
-                // sheen on the upper rim. Adding white here is what a lit rim looks
-                // like on a dark backdrop; on a light one the edge is a grey line.
-                let lighting = clamp(input.edgeRefraction, 0.0, 2.0)
-                let peak = input.edge.z
-                let stroke = 0.0
-                if inside < max(input.edge.w, peak + 0.01) {
-                    stroke = smoothstep(0.0, peak, inside) * (1.0 - smoothstep(peak, max(input.edge.w, peak + 0.01), inside)) * input.edge.x * lighting
-                }
-                let sheen = 0.0
-                if inside < GlassCommon.sheenEnd {
-                    sheen = (1.0 - smoothstep(GlassCommon.sheenStart, GlassCommon.sheenEnd, inside)) * input.lens.x * clamp(0.0 - n.y, 0.0, 1.0) * lighting
-                }
-                rgb = mix(rgb, rgb * input.edge.y, stroke)
-                rgb = rgb + Float3(sheen, sheen, sheen)
-
-                // The inner rim, in the side line's own ink: the border outside the
-                // shape stops at the boundary, and without this the edge goes from
-                // a full-strength line to the interior in one step. The reference
-                // carries one more pixel at roughly half strength.
-                let rimWidth = input.borderInk.w
-                let rimInk = input.borderInk.y
-                let rim = 0.0
-                if inside < rimWidth {
-                    rim = clamp(rimWidth - inside, 0.0, 1.0) * input.borderInk.z
-                }
-                rgb = mix(rgb, Float3(rimInk, rimInk, rimInk), rim)
-
-                // The glass over the shadow stack, in one premultiplied result: the
-                // edge's anti-aliasing band is exactly where the 0.5px borders
-                // live, so the two have to resolve in the same fragment rather than
-                // in two draws that each own part of the pixel.
-                let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
-                let over = 1.0 - cov
-                let outRgb = glassRgb * cov + shadowRgb * over
-                let outAlpha = cov + shadowAlpha * over
-                out.color = Float4(outRgb.x, outRgb.y, outRgb.z, outAlpha)
-                return out
-            }
-
             // --- mode 2: external texture ---
             if input.mode > 1.5 {
                 let transition = clamp(input.edgeRefraction, 0.0, 1.0)

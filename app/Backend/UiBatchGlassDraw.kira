@@ -1,68 +1,12 @@
 import Foundation
 import KiraGraphics
-// Liquid glass, the drawing side: the blur pyramid, and presenting a cached
-// interior.
+// Liquid glass, the drawing side: the stream bind groups the composite reads its
+// backdrop through, the capture replay, and presenting a cached interior.
 //
-// The blur is iterative rather than one wide kernel — a 3x3 gaussian run several
-// times reaches the same radius for a fraction of the taps, and the intermediate
-// levels are exactly the near/far the material wants anyway. The interior cache
-// is a second target the unchanged core of a surface is copied out of, so a frame
-// where nothing about a glass surface moved shades only its edges.
-
-// One fullscreen blur tap: bind the blur pipeline, the direction/resolution params
-// (vertex buffer 0) and the input texture (slot 0), and draw the vertex_id triangle.
-@Native
-function drawBlurPass(encoder: borrow mut RenderEncoder, pipeline: borrow RenderPipeline, params: borrow BindGroup, inputGroup: borrow BindGroup) {
-    encoder.setPipeline(pipeline)
-    encoder.setBindGroup(0, inputGroup)
-    encoder.setBindGroup(1, params)
-    encoder.draw(3)
-    return
-}
-
-// The blur pyramid drawn as render passes, for a backend that cannot encode a
-// compute dispatch — and, through KIRA_GLASS_REFERENCE, live even where one can,
-// so an effect comparison exercises this application and compositor rather than
-// a stale offline image.
-//
-// Four passes, the same four halves `dispatchTextureComputePair` runs: each
-// level filtered along x into its own intermediate, then along y into the level
-// the material samples. The compute pair writes both levels per dispatch because
-// a kernel may store to two images; a fragment stage writes one target, which is
-// the only difference between the two encodings. `Shaders/UiBlur.ksl` and
-// `Shaders/UiGlassBlur{H,V}.ksl` call the same two filters, so the images agree.
-//
-// Native like the pass it belongs to. `beginRenderPass` and `endPass` mutate the
-// frame, and a struct receiver has no seam representation, so a mutating call is
-// always same-engine: leaving this half on the VM put one across the seam and the
-// bytecode compiler refused the program (`MutCallAcrossSeam`). Its only caller is
-// the native presentBatch and its only callee the native drawBlurPass, so the
-// annotation is what the code already was everywhere except here.
-@Native
-function glassDrawnBlur(
-    frame: borrow mut RenderFrame,
-    state: borrow mut UiBatchState,
-    layer: Int,
-    blurPipeline: borrow RenderPipeline,
-) {
-    let sceneGroup = state.glassLayers[layer].sceneBlurInGroup
-    var nearH = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-near-h-pass", state.blurTextureA, 0.0, 0.0, 0.0, 1.0))
-    drawBlurPass(nearH, blurPipeline, state.blurParamsNearHGroup, sceneGroup)
-    frame.endPass()
-
-    var farH = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-far-h-pass", state.blurTextureB, 0.0, 0.0, 0.0, 1.0))
-    drawBlurPass(farH, blurPipeline, state.blurParamsFarHGroup, sceneGroup)
-    frame.endPass()
-
-    var nearV = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-near-v-pass", state.glassLayers[layer].nearTexture, 0.0, 0.0, 0.0, 1.0))
-    drawBlurPass(nearV, blurPipeline, state.blurParamsNearVGroup, state.blurInputAGroup)
-    frame.endPass()
-
-    var farV = frame.beginRenderPass(glassTexturePass("kira-ui-glass-blur-far-v-pass", state.glassLayers[layer].blurTexture, 0.0, 0.0, 0.0, 1.0))
-    drawBlurPass(farV, blurPipeline, state.blurParamsFarVGroup, state.blurInputBGroup)
-    frame.endPass()
-    return
-}
+// The blur itself is not here — it is two compute dispatches
+// (`Shaders/UiGlassBlur{H,V}.ksl`), encoded by presentBatch — and the interior
+// cache is a second target the unchanged core of a surface is copied out of, so
+// a frame where nothing about a glass surface moved shades only its edges.
 
 // The sharp tap (slot 1) and blurred backdrop (slot 2) stream `stream` draws with:
 // stream 0 sits under all glass and takes the frame's defaults, and stream j
@@ -89,8 +33,6 @@ function glassSoftNearStreamGroup(state: borrow mut UiBatchState, stream: Int) -
 // Draw everything below `layer + 1` once. Capture callers may invoke this under
 // several scissors; the opaque background draw resets an overlapping region before
 // the same premultiplied UI is replayed, so overlapping padded bounds remain exact.
-// Native: it mutates the encoder, and a struct receiver has no seam
-// representation, so the call is always same-engine (see glassIterativeBlur).
 extend UiBatch {
     function glassDrawCaptureContents(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder, layer: Int) {
         drawBackground(state, encoder)
@@ -147,21 +89,17 @@ function glassMergeCaptureBound(state: borrow mut UiBatchState, x0: Float, y0: F
     return
 }
 
-// Present the frame. With no glass this is the classic single swapchain pass. With
-// glass it runs one liquid-glass chain PER LAYER — the streams under layer k into
-// layer k's capture (points-sized, feeding the blur pyramid), separable half-res
-// blur, and then one swapchain pass drawing every stream in order at FULL
-// resolution, each glass layer refracting its own blurred capture. Stacked glass
-// therefore refracts the glass beneath it, and the streams below each layer are the
-// only content its capture holds — no layer ever refracts itself.
 // Create (or re-create after a resize) the interior-cache texture, its
 // nearest-texel sampler and the bind group that rides the atlas slot around
 // copy runs. A fresh texture invalidates every key: nothing cached yet.
 function glassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borrow Graphics) {
-    // Drawable pixels, not logical points: the cache must hold one texel per
-    // device pixel or the copies re-present an upscale.
-    let cacheW = Int(state.viewportW * state.scale)
-    let cacheH = Int(state.viewportH * state.scale)
+    // Exactly the drawable, from the backend. The cache pass rasterizes the same
+    // quads as the composite and the copy quads read the result back at their own
+    // device position, so one texel per swapchain pixel is not an optimization —
+    // a cache even one row shorter rasterizes at a different vertical scale, and
+    // the bottom row of every glass surface lands on a texel nothing wrote.
+    let cacheW = state.drawableW
+    let cacheH = state.drawableH
     if state.glassCacheTexture.id != 0 && state.glassCacheW == cacheW && state.glassCacheH == cacheH {
         return
     }

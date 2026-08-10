@@ -429,12 +429,23 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
     graphics.bindGroupAddSampler(bindGroup, atlasSamplerSlot(), sampler)
     state.atlasGroup = bindGroup
 
+    // How far the frame stands between the two backdrop photographs. One number
+    // for the whole screen and the same one every glass pipeline's sharp tap
+    // reads, so it is a uniform rather than a field on 54 floats of vertex —
+    // and it rides the sharp tap's own group, because it is what says which of
+    // that group's two images to believe. Four floats: `std140` rounds the
+    // block to 16 bytes and the upload has to be that size.
+    state.backdropBlend = uniformOrReport(graphics.createUniform(UniformDescriptor {
+        label: "kira-ui-batch-backdrop-blend"
+        expectedFloatCount: 4
+        data: [F32(0.0), F32(0.0), F32(0.0), F32(0.0)]
+    }), "backdrop blend")
+
     // The external-texture fallback: the shader always declares that slot, and
     // until a TextureView registers a real texture the atlas satisfies it (mode-2
     // quads are only emitted once one has).
     let fallbackExternal = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-fallback"), "fallback external")
-    graphics.bindGroupAddTexture(fallbackExternal, externalTextureSlot(), atlas)
-    graphics.bindGroupAddSampler(fallbackExternal, externalSamplerSlot(), sampler)
+    glassAddSharpBackdrop(graphics, fallbackExternal, atlas, atlas, sampler, state.backdropBlend)
     state.fallbackExternalGroup = fallbackExternal
 
     // Same discipline for the two blurred levels, which share one group: a frame
@@ -466,7 +477,6 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
     state.benchBackgroundOnly = environmentIsSet("KIRA_GLASS_BENCH_BACKGROUND_ONLY")
     state.benchNoBackground = environmentIsSet("KIRA_GLASS_BENCH_NO_BACKGROUND")
     state.glassCacheDisabled = environmentIsSet("KIRA_GLASS_CACHE_OFF")
-    state.referenceBlur = environmentIsSet("KIRA_GLASS_REFERENCE")
 
     loadBatchFont(state)
 
