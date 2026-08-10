@@ -105,7 +105,13 @@ class KiraGraphicsFoundationBackend {
         self.clipMaxX = intAsFloat(value: width)
         self.clipMaxY = intAsFloat(value: height)
 
-        self.batch.beginBatch(intAsFloat(value: width), intAsFloat(value: height), self.graphics.backingScale())
+        self.batch.beginBatch(
+            intAsFloat(value: width),
+            intAsFloat(value: height),
+            self.graphics.backingScale(),
+            self.graphics.contextWidth(),
+            self.graphics.contextHeight()
+        )
         // Claim this frame's slot in each vertex stream before anything emits into
         // one; the frames still on the GPU keep theirs.
         self.batch.beginFrameSlots(self.graphics)

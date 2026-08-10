@@ -68,10 +68,9 @@ function createDrawStream(state: borrow mut UiBatchState, graphics: borrow Graph
 // the first time a frame stacks that deep (glassEnsureLayerScene).
 struct UiGlassLayer {
     // Capture of everything under layer k+1. `sceneSharpGroup` is how mode 3
-    // reads it (the sharp tap), `sceneBlurInGroup` how the blur chain does.
+    // reads it (the sharp tap); the blur dispatch binds the texture directly.
     var sceneTexture: GraphicsTexture = emptyGraphicsTexture()
     var sceneSharpGroup: BindGroup = emptyBindGroup()
-    var sceneBlurInGroup: BindGroup = emptyBindGroup()
     // The blurred capture at TWO radii, so a blur step grows the radius instead of
     // cross-fading sharp against fully-soft — that mix double-images rather than
     // blurs, which is why a low step used to read as edge refraction and nothing
@@ -180,20 +179,24 @@ struct UiBatchState {
     // only for stream 0; glass streams replace that group with their own blur pair.
     var secondaryExternalTextureId: U32 = 0
     var secondaryExternalGroup: BindGroup = emptyBindGroup()
-    var secondaryExternalSharpGroup: BindGroup = emptyBindGroup()
     var secondaryExternalBindReady: Bool = false
+    // The sharp tap over a DIRECT backdrop: both photographs, at the slots every
+    // glass pipeline reads them from, with `backdropBlend` saying where between
+    // them the frame stands. A run with one photo binds it as both.
+    var backdropSharpGroup: BindGroup = emptyBindGroup()
+    // That weight. One number for the whole screen, rewritten once a frame, and
+    // read by every glass pipeline's sharp tap and by nothing else.
+    var backdropBlend: Uniform = emptyUniform()
     // Per-present direct-source specialization for layer 0. Set only when the
-    // captured stream contains no quads and the opaque photo is at a steady
-    // transition endpoint; every other frame uses the normal capture.
+    // captured stream contains no quads over an opaque photo; every other frame
+    // uses the normal capture.
     var directBackdropLayer0: Bool = false
     var directBackdropSharpGroup: BindGroup = emptyBindGroup()
-    // Blur-chain cache for the direct-backdrop path: the blur of a static photo
-    // is itself static, so the compute pair re-runs only when the source texture
-    // or the blur extent changes. Zero means no cached result. The capture path
-    // never caches — its input is scene content that can change every frame.
-    var blurCacheSourceId: U32 = 0
-    var blurCacheW: Int = 0
-    var blurCacheH: Int = 0
+    // Which texture layer 0's blur was taken from this frame: the direct
+    // backdrop's view id, or zero for the scene capture. Half of the interior
+    // cache's key — an interior shaded against one photo is not the interior of
+    // the same surface over another, and a capture-path frame is never static.
+    var glassBlurSourceId: U32 = 0
 
     var atlasW: Int = 0
     var atlasH: Int = 0
@@ -263,7 +266,6 @@ struct UiBatchState {
     var benchFinalOnly: Bool = false
     var benchBackgroundOnly: Bool = false
     var benchNoBackground: Bool = false
-    var referenceBlur: Bool = false
     // Which cells of the viewport the CURRENT layer has drawn into, stamped with
     // `gridStamp` so starting a layer clears the grid by bumping a counter. Only
     // maintained once a glass layer is open (nothing below the first glass surface
@@ -285,42 +287,35 @@ struct UiBatchState {
     var glassReady: Bool = false
     var glassTexW: Int = 0
     var glassTexH: Int = 0
+    // The blur's two horizontal intermediates: the horizontal dispatch writes
+    // the near level into A and the far level into B, and the vertical one reads
+    // each back into the layer's own output. Shared by every layer, because a
+    // layer's chain runs to completion before the next one starts.
     var blurTextureA: GraphicsTexture = emptyGraphicsTexture()
     var blurTextureB: GraphicsTexture = emptyGraphicsTexture()
-    var blurPipeline: RenderPipeline = emptyRenderPipeline()
     var blurComputeHPipelineId: Int = 0
     var blurComputeVPipelineId: Int = 0
-    // One uniform per pass of the drawn blur ladder: the texel step along the
-    // axis that pass filters, and which level it writes. Four passes, four
-    // uniforms — a uniform is applied at the draw that reads it, so the ladder
-    // cannot rewrite one between two draws of the same frame and still be
-    // encodable by a backend that records them. They reach the shader through a
-    // bind group rather than the encoder's vertex buffer, because the vertex
-    // buffer is Metal's buffer 0 and a KSL uniform at group slot 0 emits at
-    // buffer 1 (slot + 1, the stream occupies 0). Binding it as a group is what
-    // makes the two agree.
-    var blurParamsNearH: Uniform = emptyUniform()
-    var blurParamsFarH: Uniform = emptyUniform()
-    var blurParamsNearV: Uniform = emptyUniform()
-    var blurParamsFarV: Uniform = emptyUniform()
-    var blurParamsNearHGroup: BindGroup = emptyBindGroup()
-    var blurParamsFarHGroup: BindGroup = emptyBindGroup()
-    var blurParamsNearVGroup: BindGroup = emptyBindGroup()
-    var blurParamsFarVGroup: BindGroup = emptyBindGroup()
     // Capture + blurred backdrop per glass layer (see UiGlassLayer).
     var glassLayers: [UiGlassLayer] = []
-    // The blur's two horizontal intermediates at slot 0 — the near half writes
-    // texture A and the far half texture B, and each vertical pass reads the one
-    // its own half wrote — and the slot-2 atlas fallback that keeps
-    // texture(2)/sampler(2) satisfied on streams with no glass. The compute pair
-    // writes the same two textures.
-    var blurInputAGroup: BindGroup = emptyBindGroup()
-    var blurInputBGroup: BindGroup = emptyBindGroup()
+    // The slot-2 atlas fallback that keeps texture(2)/sampler(2) satisfied on
+    // streams with no glass.
     var fallbackBackdropGroup: BindGroup = emptyBindGroup()
     var glassBlurW: Int = 0
     var glassBlurH: Int = 0
     var viewportW: Float = 1.0
     var viewportH: Float = 1.0
+    // The drawable, in PHYSICAL pixels, as the backend reports it — not points
+    // times the backing scale. Those two disagree whenever the drawable is not a
+    // whole number of points: a 991-pixel drawable at 1.25 is 792.8 points, the
+    // layout gets 792, and 792 x 1.25 is 990. Anything that has to land on the
+    // same pixel grid as the swapchain (the interior cache and every copy quad
+    // that reads it) measures itself against these, because a cache one row
+    // short of the drawable rasterizes its bottom row of glass into the row
+    // above and leaves the row the composite reads cleared — a black line along
+    // the bottom edge of every glass surface far enough down the window for the
+    // scale difference to exceed half a pixel.
+    var drawableW: Int = 1
+    var drawableH: Int = 1
     // Retina backing scale (physical pixels per point). Glyphs are rasterized at
     // point-size x scale and positioned in points, so text is crisp at native
     // resolution; surfaces are SDF-shaded per physical pixel and need no extra scale.

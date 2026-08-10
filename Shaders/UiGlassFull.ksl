@@ -102,6 +102,12 @@ type FragmentOut {
     let color: Float4
 }
 
+// How far the frame stands between the two backdrop photographs. One number for
+// the whole screen, so it rides a uniform rather than every vertex.
+type BackdropBlend {
+    let blend: Float
+}
+
 shader UiGlassFull {
     group Batch {
         storage read verts: [UiQuad]
@@ -113,6 +119,9 @@ shader UiGlassFull {
         sampler backdropSmp: Sampler
         texture nearBlur: Texture2d
         sampler nearSmp: Sampler
+        texture externalSecond: Texture2d
+        sampler externalSecondSmp: Sampler
+        uniform backdropBlend: BackdropBlend
     }
 
     vertex {
@@ -209,7 +218,7 @@ shader UiGlassFull {
                 input.border.x + gpOutside.x * input.border.z,
                 input.border.y + gpOutside.y * input.border.w
             )
-            let behindEdge = sample(external, externalSmp, uvOutside)
+            let behindEdge = GlassCommon.backdropTap(external, externalSmp, externalSecond, externalSecondSmp, uvOutside, backdropBlend.blend)
             shadowRgb = Float3(behindEdge.x, behindEdge.y, behindEdge.z) * inkLevel * stacked
             }
 
@@ -247,13 +256,13 @@ shader UiGlassFull {
             let split = clamp(input.lens.w, 0.01, 0.99)
             let rgb = Float3(0.0, 0.0, 0.0)
             if dial <= 0.0 {
-                let sharpTap = sample(external, externalSmp, coord)
+                let sharpTap = GlassCommon.backdropTap(external, externalSmp, externalSecond, externalSecondSmp, coord, backdropBlend.blend)
                 rgb = Float3(sharpTap.x, sharpTap.y, sharpTap.z)
             } else if dial >= 1.0 {
                 let softTap = sample(backdrop, backdropSmp, coord)
                 rgb = Float3(softTap.x, softTap.y, softTap.z)
             } else if dial < split {
-                let sharpTap = sample(external, externalSmp, coord)
+                let sharpTap = GlassCommon.backdropTap(external, externalSmp, externalSecond, externalSecondSmp, coord, backdropBlend.blend)
                 let nearTap = sample(nearBlur, nearSmp, coord)
                 rgb = mix(
                     Float3(sharpTap.x, sharpTap.y, sharpTap.z),

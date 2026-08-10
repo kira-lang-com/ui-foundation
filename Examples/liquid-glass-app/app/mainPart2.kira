@@ -411,10 +411,24 @@ function main() {
         height: 1080,
         rootBuilder: { ui in
             var demo = nativeRecover<GlassDemoState>(demoUser)
+            demo.schemeShown = demo.schemeAt
             return rootView(ui, demoUser, demo.textureId, demo.darkTextureId, demo.backdropOff, demo.selected, demo.frostLevel, demo.query, demo.notePinned, demo.schemeAt)
         },
         engineFrame: { frame in
             var demo = nativeRecover<GlassDemoState>(demoUser)
+            // The automatic appearance cycle: the same move the sidebar's toggle
+            // starts, asked for on a clock so a run can be measured over many of
+            // them instead of one.
+            if demo.cycleScheme {
+                demo.cycleElapsed = demo.cycleElapsed + foundationFrameDuration(frame)
+                if demo.cycleElapsed >= schemeCycleSeconds() {
+                    demo.cycleElapsed = 0.0
+                    demo.schemeFrom = demo.schemeAt
+                    demo.schemeProgress = 0.0
+                    demo.dark = !demo.dark
+                    printLine("liquid-glass: scheme toggled")
+                }
+            }
             // Walk the scheme position toward whichever mode was asked for. A step
             // per frame, and it lands exactly on the end rather than approaching it
             // forever, so "arrived" is a state the app actually reaches.
@@ -450,6 +464,9 @@ function main() {
                 // `KIRA_GLASS_BG` overrides for a scripted run; otherwise the
                 // asset is beside the package, which is where `kira run` starts.
                 demo.backdropOff = environmentValueIsEmpty("KIRA_GLASS_BG")
+                // Set and non-empty, so clearing the variable turns the cycle
+                // off rather than leaving it on with nothing to say.
+                demo.cycleScheme = environmentIsSet("KIRA_GLASS_SCHEME_CYCLE") && !environmentValueIsEmpty("KIRA_GLASS_SCHEME_CYCLE")
                 var id = 0
                 var darkId = 0
                 if !demo.backdropOff {
@@ -474,7 +491,7 @@ function main() {
         },
         needsRebuild: { in
             var demo = nativeRecover<GlassDemoState>(demoUser)
-            return demo.schemeProgress < 1.0
+            return demo.schemeShown != demo.schemeAt
         },
         showFpsOverlay: true,
         showGraphicsHud: true

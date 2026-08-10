@@ -180,30 +180,26 @@ extend UiBatch {
         if primaryMatches && secondaryMatches {
             return
         }
+        let sampler = state.sampler
         if !primaryMatches {
             if state.externalBindReady {
                 graphics.destroyBindGroup(state.externalGroup)
             }
             let texture = sampledTextureFromViewId(textureId)
-            let sampler = state.sampler
             let bindGroup = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external"), "bind group")
-            graphics.bindGroupAddTexture(bindGroup, externalTextureSlot(), texture)
-            graphics.bindGroupAddSampler(bindGroup, externalSamplerSlot(), sampler)
+            glassAddSharpBackdrop(graphics, bindGroup, texture, texture, sampler, state.backdropBlend)
             state.externalTextureId = textureId
             state.externalGroup = bindGroup
             state.externalBindReady = true
         }
         if !secondaryMatches && state.secondaryExternalBindReady {
             graphics.destroyBindGroup(state.secondaryExternalGroup)
-            graphics.destroyBindGroup(state.secondaryExternalSharpGroup)
             state.secondaryExternalTextureId = 0
             state.secondaryExternalGroup = emptyBindGroup()
-            state.secondaryExternalSharpGroup = emptyBindGroup()
             state.secondaryExternalBindReady = false
         }
         if secondaryTextureId > 0 && !secondaryMatches {
             let secondary = sampledTextureFromViewId(secondaryTextureId)
-            let sampler = state.sampler
             let secondaryGroup = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-secondary"), "secondary group")
             graphics.bindGroupAddTexture(secondaryGroup, backdropTextureSlot(), secondary)
             graphics.bindGroupAddSampler(secondaryGroup, backdropSamplerSlot(), sampler)
@@ -211,12 +207,23 @@ extend UiBatch {
             graphics.bindGroupAddSampler(secondaryGroup, nearSamplerSlot(), sampler)
             state.secondaryExternalTextureId = secondaryTextureId
             state.secondaryExternalGroup = secondaryGroup
-            let secondarySharp = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-secondary-sharp"), "secondary sharp")
-            graphics.bindGroupAddTexture(secondarySharp, externalTextureSlot(), secondary)
-            graphics.bindGroupAddSampler(secondarySharp, externalSamplerSlot(), sampler)
-            state.secondaryExternalSharpGroup = secondarySharp
             state.secondaryExternalBindReady = true
         }
+        // The sharp tap the composite reads a DIRECT backdrop through: both
+        // photographs at once, so a glass surface over a scheme change shades
+        // against the crossfade without the compositor ever rendering that
+        // crossfade into a full-resolution capture for it to read back.
+        if state.backdropSharpGroup.id != 0 {
+            graphics.destroyBindGroup(state.backdropSharpGroup)
+        }
+        let primary = sampledTextureFromViewId(state.externalTextureId)
+        var second = primary
+        if state.secondaryExternalBindReady {
+            second = sampledTextureFromViewId(state.secondaryExternalTextureId)
+        }
+        let sharp = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-backdrop-sharp"), "backdrop sharp")
+        glassAddSharpBackdrop(graphics, sharp, primary, second, sampler, state.backdropBlend)
+        state.backdropSharpGroup = sharp
         return
     }
 }

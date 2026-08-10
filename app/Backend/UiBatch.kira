@@ -166,6 +166,11 @@ function glassHairline(devicePixels: Float, scale: Float) -> Float {
 // is emitted from shared edge values, so neighbours snap to the same place and
 // the region split stays gapless. The move is under half a device pixel, well
 // inside the guard each region keeps from the effects it drops.
+//
+// `scale` is pixels per point ON THE AXIS BEING SNAPPED — drawable over
+// viewport, which is what the vertex stage's point-to-clip mapping works out to
+// and is not the backing scale on a drawable that is not a whole number of
+// points.
 function glassSnapToDevicePixel(value: Float, scale: Float) -> Float {
     if scale <= 0.0 {
         return value
@@ -337,9 +342,10 @@ extend UiBatch {
 
 
 // Start a frame: rewind to stream 0 (the layer boundaries are re-discovered as this
-// frame's glass surfaces arrive) and record the viewport (pixel) size.
+// frame's glass surfaces arrive) and record the viewport size in points, the
+// backing scale, and the drawable's extent in physical pixels.
 extend UiBatch {
-    function beginBatch(viewportW: Float, viewportH: Float, scale: Float) {
+    function beginBatch(viewportW: Float, viewportH: Float, scale: Float, drawableW: Int, drawableH: Int) {
         var state = nativeRecover<UiBatchState>(self.storage)
         var i = 0
         // Everything but the HUD: its stream is rewritten only when the HUD itself
@@ -369,6 +375,14 @@ extend UiBatch {
         state.scale = scale
         if scale <= 0.0 {
             state.scale = 1.0
+        }
+        state.drawableW = drawableW
+        if drawableW <= 0 {
+            state.drawableW = 1
+        }
+        state.drawableH = drawableH
+        if drawableH <= 0 {
+            state.drawableH = 1
         }
         // Interior cache: keys are matched by push order, so the cursor restarts
         // with the frame; ranges list this frame's dirty interiors only.

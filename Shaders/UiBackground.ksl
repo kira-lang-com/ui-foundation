@@ -21,12 +21,13 @@ type FragmentOut {
     let color: Float4
 }
 
+// One member, not four. `std140` rounds a block up to 16 bytes on its own, and
+// the host uploads that many — writing the pad out as three named members
+// instead declares three uniforms no stage reads, which GL eliminates and then
+// reports missing at every link.
 type BackgroundParams {
     // 0 shows the primary alone, 1 the secondary alone.
     let transition: Float
-    let padding0: Float
-    let padding1: Float
-    let padding2: Float
 }
 
 // Near enough to an endpoint that the cross-fade is invisible — and skipping it

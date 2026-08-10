@@ -246,7 +246,7 @@ extend UiBatch {
                     refractionReach: material.refractionReach
                     viewportWidth: vw
                     viewportHeight: vh
-                    backdrop: Float(state.blurCacheSourceId) + state.backgroundTransition * 0.5 + Float(state.glassCacheEpochValue) * 16384.0
+                    backdrop: Float(state.glassBlurSourceId) + state.backgroundTransition * 0.5 + Float(state.glassCacheEpochValue) * 16384.0
                 })
             }
             // Streams are retained: what is emitted here is replayed every frame
@@ -263,8 +263,14 @@ extend UiBatch {
                 interiorMode = 3.15
                 interiorLensMode = 3.15
                 interiorCoreMode = 3.15
-                interiorSpare0 = 1.0 / (vw * state.scale)
-                interiorSpare1 = 1.0 / (vh * state.scale)
+                // The copy quad turns its device position into a cache texel with
+                // these, so they are 1 / the DRAWABLE — the same extent the cache
+                // texture is created at. Points times the backing scale is a
+                // different number whenever the drawable is not a whole number of
+                // points, and the difference is a black row along the surface's
+                // bottom edge.
+                interiorSpare0 = 1.0 / Float(state.drawableW)
+                interiorSpare1 = 1.0 / Float(state.drawableH)
             }
             let interiorStart = state.quadCount
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorMode, 0.0 - bx, 0.0 - syE, bx, 0.0 - ly, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
@@ -456,12 +462,19 @@ extend UiBatch {
         // it truncates a patch, and the shader tests fragments against the same
         // numbers — so it lands on the grid too, and a patch clamped to it is
         // still snapped.
+        //
+        // The grid is the DRAWABLE's, per axis: a quad's clip position is its
+        // point position over the viewport in points, so what one point is worth
+        // in pixels is drawable over viewport and not the backing scale — those
+        // two differ whenever the drawable is not a whole number of points, and
+        // snapping to the wrong grid snaps to no grid at all.
         var state = nativeRecover<UiBatchState>(self.storage)
-        let scale = state.scale
-        let clipX0 = glassSnapToDevicePixel(clipMinX, scale)
-        let clipY0 = glassSnapToDevicePixel(clipMinY, scale)
-        let clipX1 = glassSnapToDevicePixel(clipMaxX, scale)
-        let clipY1 = glassSnapToDevicePixel(clipMaxY, scale)
+        let scaleX = Float(state.drawableW) / state.viewportW
+        let scaleY = Float(state.drawableH) / state.viewportH
+        let clipX0 = glassSnapToDevicePixel(clipMinX, scaleX)
+        let clipY0 = glassSnapToDevicePixel(clipMinY, scaleY)
+        let clipX1 = glassSnapToDevicePixel(clipMaxX, scaleX)
+        let clipY1 = glassSnapToDevicePixel(clipMaxY, scaleY)
         // Clip the patch geometrically. The interior pipelines write with blending
         // off (an opaque interior replaces its pixel), so a fragment cannot opt
         // out by returning transparent the way the blended path could — a patch
@@ -472,10 +485,10 @@ extend UiBatch {
         var py0 = cy + ly0
         var px1 = cx + lx1
         var py1 = cy + ly1
-        if lx0 > 0.0 - halfW { px0 = glassSnapToDevicePixel(px0, scale) }
-        if ly0 > 0.0 - halfH { py0 = glassSnapToDevicePixel(py0, scale) }
-        if lx1 < halfW { px1 = glassSnapToDevicePixel(px1, scale) }
-        if ly1 < halfH { py1 = glassSnapToDevicePixel(py1, scale) }
+        if lx0 > 0.0 - halfW { px0 = glassSnapToDevicePixel(px0, scaleX) }
+        if ly0 > 0.0 - halfH { py0 = glassSnapToDevicePixel(py0, scaleY) }
+        if lx1 < halfW { px1 = glassSnapToDevicePixel(px1, scaleX) }
+        if ly1 < halfH { py1 = glassSnapToDevicePixel(py1, scaleY) }
         if px0 < clipX0 { px0 = clipX0 }
         if py0 < clipY0 { py0 = clipY0 }
         if px1 > clipX1 { px1 = clipX1 }

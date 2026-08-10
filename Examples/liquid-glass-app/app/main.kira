@@ -53,6 +53,29 @@ struct GlassDemoState {
     // curve reversed is a stall followed by a snap.
     var schemeFrom: Float = 0.0
     var schemeProgress: Float = 1.0
+    // The position the tree on screen was actually BUILT from, written by the
+    // root builder. What asks for a rebuild is this disagreeing with `schemeAt`,
+    // not the move being unfinished: the step that lands on the endpoint also
+    // completes the move, so a run that asked "is it still moving?" stopped one
+    // frame short and left the app resting at 0.998 of dark forever — every
+    // label, every wash and every backdrop tap a fraction off the scheme the
+    // sidebar says it is in, and the crossfade's second photograph sampled at
+    // idle for a difference nobody can see.
+    var schemeShown: Float = 0.0 - 1.0
+    // `KIRA_GLASS_SCHEME_CYCLE`: flip the appearance every second, for as long
+    // as the run lasts. A scheme change is the most expensive thing this app
+    // does — it rebuilds every frame while the crossfade is in flight and every
+    // glass surface shades against a moving backdrop — so it is the frame worth
+    // measuring, and a measurement of it has to be repeatable rather than
+    // someone holding a stopwatch over a button. Unset, the app behaves exactly
+    // as it does for a person using it.
+    var cycleScheme: Bool = false
+    var cycleElapsed: Float = 0.0
+}
+
+// How long the automatic appearance cycle rests at each end.
+function schemeCycleSeconds() -> Float {
+    return 1.0
 }
 
 // The scheme a run is in. Every glass surface, every label and the root fill read

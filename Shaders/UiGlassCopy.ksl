@@ -8,10 +8,12 @@
 // byte-identical to a live one at a fraction of the shading cost.
 //
 // The cache texture rides the ATLAS bind slot: the draw loop swaps the
-// atlas group for the cache group around copy runs, so this shader's group
-// layout matches the batch family's and no new slot exists anywhere else.
-// `materialSpare0/1` carry 1/drawable-size; the fragment turns its own
-// device position into the cache texel through them.
+// atlas group for the cache group around copy runs, so this shader's first
+// three bindings are the batch family's first three and no new slot exists
+// anywhere else. It declares only those three — a copy reads one texture, and a
+// declared binding no stage uses is a `sampler2D` GL then eliminates and
+// reports missing at every link. `materialSpare0/1` carry 1/drawable-size; the
+// fragment turns its own device position into the cache texel through them.
 
 type UiQuad {
     let posX0: Float
@@ -94,12 +96,6 @@ shader UiGlassCopy {
         storage read verts: [UiQuad]
         texture atlas: Texture2d
         sampler atlasSmp: Sampler
-        texture external: Texture2d
-        sampler externalSmp: Sampler
-        texture backdrop: Texture2d
-        sampler backdropSmp: Sampler
-        texture nearBlur: Texture2d
-        sampler nearSmp: Sampler
     }
 
     vertex {

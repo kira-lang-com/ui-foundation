@@ -104,6 +104,12 @@ type FragmentOut {
     let color: Float4
 }
 
+// How far the frame stands between the two backdrop photographs. One number for
+// the whole screen, so it rides a uniform rather than every vertex.
+type BackdropBlend {
+    let blend: Float
+}
+
 shader UiGlassLens {
     group Batch {
         storage read verts: [UiQuad]
@@ -115,6 +121,9 @@ shader UiGlassLens {
         sampler backdropSmp: Sampler
         texture nearBlur: Texture2d
         sampler nearSmp: Sampler
+        texture externalSecond: Texture2d
+        sampler externalSecondSmp: Sampler
+        uniform backdropBlend: BackdropBlend
     }
 
     vertex {
@@ -204,7 +213,7 @@ shader UiGlassLens {
             // non-uniform control flow costs far more than the extra fetch,
             // and the selection arithmetic below reproduces each branch's
             // expression exactly for that branch's dial range.
-            let sharpTap = sample(external, externalSmp, coord)
+            let sharpTap = GlassCommon.backdropTap(external, externalSmp, externalSecond, externalSecondSmp, coord, backdropBlend.blend)
             let nearTap = sample(nearBlur, nearSmp, coord)
             let softTap = sample(backdrop, backdropSmp, coord)
             let rgb = Float3(0.0, 0.0, 0.0)
