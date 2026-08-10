@@ -82,6 +82,7 @@ extend UiBatch {
         if state.streamIndex == 0 {
             return
         }
+        state.glassStatSurfaces = state.glassStatSurfaces + 1
         let vw = state.viewportW
         let vh = state.viewportH
         // The anti-aliasing band, and every hairline the border stack draws, in
@@ -286,6 +287,11 @@ extend UiBatch {
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorLensMode, kx, 0.0 - ky, lx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
             let interiorLensEnd = state.quadCount
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, interiorCoreMode, 0.0 - kx, 0.0 - ky, kx, ky, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand, interiorSpare0, interiorSpare1)
+            if cachedInterior {
+                state.glassStatCachedInteriors = state.glassStatCachedInteriors + 1
+            } else {
+                state.glassStatLiveInteriors = state.glassStatLiveInteriors + 1
+            }
             if cacheEligible && !cachedInterior {
                 glassCacheRecordRange(
                     state,
@@ -301,6 +307,9 @@ extend UiBatch {
         if lx > 4.0 && ly > 4.0 {
             // Nine patches: full ring, band ring, lens-shaded center (the lens
             // shader is exact for everything past the effect bands, however deep).
+            // No interior cache below the nineteen-patch split: these interiors
+            // always shade live.
+            state.glassStatLiveInteriors = state.glassStatLiveInteriors + 1
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
@@ -314,6 +323,7 @@ extend UiBatch {
         }
         if bx > 4.0 && by > 4.0 {
             // Five patches: outer ring plus a band-shaded center (too small for a core).
+            state.glassStatLiveInteriors = state.glassStatLiveInteriors + 1
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, 0.0 - by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, by, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - by, 0.0 - bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
@@ -321,6 +331,7 @@ extend UiBatch {
             self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.25, 0.0 - bx, 0.0 - by, bx, by, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
             return
         }
+        state.glassStatLiveInteriors = state.glassStatLiveInteriors + 1
         self.glassEmitPatch(cx, cy, vw, vh, halfW, halfH, clampedRadius, 3.0, 0.0 - lhx, 0.0 - lhy, lhx, lhy, tint, glowIntensity, edgeRefraction, clipMinX, clipMinY, clipMaxX, clipMaxY, material, borderSpread, borderSideOffset, borderSideSpread, rimWidth, edgeBand)
         return
     }
@@ -496,6 +507,7 @@ extend UiBatch {
         if px1 <= px0 || py1 <= py0 {
             return
         }
+        state.glassStatPatchQuads = state.glassStatPatchQuads + 1
         self.emitQuad(
             px0, py0, px1, py1,
             px0 - cx, py0 - cy, px1 - cx, py1 - cy,

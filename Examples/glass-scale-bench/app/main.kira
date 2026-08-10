@@ -1,0 +1,256 @@
+import Foundation
+import KiraLayout
+import KiraUIFoundation
+import KiraGraphics
+
+// glass-scale-bench — what the Nth Liquid Glass surface costs.
+//
+// A grid of non-overlapping glass surfaces over one fullscreen photograph, at a
+// count and a motion the environment picks. Non-overlapping is the point: they
+// share one glass layer, so every difference between one surface and forty is
+// the compositor's own scaling and not a deeper stack of captures.
+//
+//   KIRA_GLASS_BENCH_SURFACES  how many surfaces (default 10)
+//   KIRA_GLASS_BENCH_MOTION    static | move | morph (default static)
+//   KIRA_GLASS_BG              the 1600x900 RGBA8 backdrop; defaults to the one
+//                              beside liquid-glass-app
+//
+// Read the numbers with KIRA_UI_FRAME_PROFILE=1, which prints mean phase times
+// and the frame's glass workload once its sample window is full.
+//
+//   static  the surfaces never move, so the runner's re-present fast path holds
+//           and the frame is capture + blur + composite only
+//   move    every surface translates each frame: the tree rebuilds, geometry is
+//           re-expanded, and nothing about the shapes themselves changed
+//   morph   every surface changes radius and size each frame: the case where
+//           re-expanding geometry is genuinely required
+
+struct BenchState {
+    var textureId: Int = 0
+    var attempted: Bool = false
+}
+
+function benchViewportWidth() -> Float { return 1600.0 }
+function benchViewportHeight() -> Float { return 900.0 }
+
+// Surfaces per row. Eight keeps a cell close to square on a 16:9 window at the
+// counts this benchmark reports (1, 10, 20, 40).
+function benchColumns(count: Int) -> Int {
+    if count < 8 {
+        return count
+    }
+    return 8
+}
+
+function benchRows(count: Int) -> Int {
+    let columns = benchColumns(count)
+    if columns <= 0 {
+        return 1
+    }
+    return (count + columns - 1) / columns
+}
+
+// The margin between a cell's edge and its surface. Wide enough that a moving
+// surface stays inside its own cell — surfaces that overlap would open a second
+// glass layer and the run would stop measuring what it says it measures.
+function benchCellMargin() -> Float { return 24.0 }
+
+// A triangle wave over `period` frames, in -1.0 .. 1.0. Not a sine: this
+// benchmark has no need of trigonometry and every backend agrees on integer
+// arithmetic.
+function benchWave(frame: Int, period: Int) -> Float {
+    if period <= 0 {
+        return 0.0
+    }
+    let phase = frame % period
+    let half = period / 2
+    if phase < half {
+        return Float(phase) / Float(half) * 2.0 - 1.0
+    }
+    return 1.0 - Float(phase - half) / Float(half) * 2.0
+}
+
+function benchMotionIsMove(motion: borrow String) -> Bool {
+    return motion == "move"
+}
+
+function benchMotionIsMorph(motion: borrow String) -> Bool {
+    return motion == "morph"
+}
+
+// One surface, sized and rounded as the motion mode asks.
+//
+// `glass` picks the material: Liquid Glass is what the benchmark is about, and
+// the flat surface is the control — same tree, same layout, same quad count per
+// surface, none of the glass emission path. The difference between two runs is
+// what Liquid Glass costs on top of drawing a rounded rectangle.
+function benchGlassSurface(width: Float, height: Float, radius: Float, glass: Bool) -> FoundationView {
+    var material = FoundationMaterial.Flat
+    if glass {
+        material = FoundationMaterial.LiquidGlass
+    }
+    return Surface(
+        children: [],
+        width: SizeMode.Fixed(width),
+        height: SizeMode.Fixed(height),
+        flex: 0,
+        fill: Color { r: 1.0 g: 0.99215686 b: 0.9764706 a: 0.28 },
+        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        borderWidth: 1.0,
+        radius: radius,
+        shape: FoundationShape.RegularRoundedRect,
+        material: move material,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: true
+    )
+}
+
+// Place a fixed-size child at absolute (x, y) from the top-left of the window.
+function benchPlaced(child: FoundationView, x: Float, y: Float) -> FoundationView {
+    return Frame(
+        child: move child,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        alignment: Alignment.TopLeading,
+        padding: EdgeInsets {
+            top: y
+            trailing: 0.0
+            bottom: 0.0
+            leading: x
+        }
+    )
+}
+
+function benchRootView(textureId: Int, count: Int, moving: Bool, morphing: Bool, glass: Bool, frameCount: Int) -> FoundationView {
+    var layers: [FoundationView] = []
+    if textureId > 0 {
+        layers.append(TextureView(
+            texture: textureId,
+            width: SizeMode.Fill,
+            height: SizeMode.Fill,
+            flex: 0,
+            opacity: 1.0,
+            radius: 0.0
+        ))
+    }
+    let columns = benchColumns(count)
+    let rows = benchRows(count)
+    let cellWidth = benchViewportWidth() / Float(columns)
+    let cellHeight = benchViewportHeight() / Float(rows)
+    let margin = benchCellMargin()
+    var index = 0
+    while index < count {
+        let column = index % columns
+        let row = index / columns
+        // Each surface rides its own phase of the wave, so a moving run is not
+        // one rigid grid sliding as a block.
+        let wave = benchWave(frameCount + index * 7, 120)
+        var width = cellWidth - margin * 2.0
+        var height = cellHeight - margin * 2.0
+        var radius = 32.0
+        if morphing {
+            width = width + wave * 8.0
+            height = height + wave * 8.0
+            radius = 32.0 + wave * 16.0
+        }
+        var x = Float(column) * cellWidth + margin
+        var y = Float(row) * cellHeight + margin
+        if moving {
+            x = x + wave * (margin * 0.5)
+            y = y + wave * (margin * 0.5)
+        }
+        layers.append(benchPlaced(benchGlassSurface(width, height, radius, glass), x, y))
+        index = index + 1
+    }
+    return Surface(
+        children: move layers,
+        width: SizeMode.Fill,
+        height: SizeMode.Fill,
+        flex: 0,
+        fill: Color { r: 0.91 g: 0.894 b: 0.874 a: 1.0 },
+        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        borderWidth: 0.0,
+        radius: 0.0,
+        shape: FoundationShape.RegularRoundedRect,
+        material: FoundationMaterial.Flat,
+        effects: [],
+        padding: EdgeInsets {},
+        clipContent: false
+    )
+}
+
+// The backdrop's view id, or 0 with the reason on the log. The environment
+// override first, then the asset that ships with liquid-glass-app.
+function benchBackdropView(graphics: borrow Graphics) -> Int {
+    attempt {
+        let view = try benchBackdropOutcome(graphics)
+        return view
+    } handle {
+        AssetUnreadable {
+            printLine("glass-scale-bench: no backdrop — set KIRA_GLASS_BG to a 1600x900 RGBA8 blob")
+            return 0
+        }
+        DeviceRefused { return benchReportBackdrop(.DeviceRefused) }
+        ShaderRejected { return benchReportBackdrop(.ShaderRejected) }
+    }
+}
+
+function benchBackdropOutcome(graphics: borrow Graphics) -> Result<Int, ResourceFailure> {
+    attempt {
+        let overridden = try loadRgbaTextureFromEnvironment(graphics, "KIRA_GLASS_BG", 1600, 900)
+        return .Ok(overridden)
+    } handle {
+        AssetUnreadable {
+            return loadRgbaTexture(graphics, "../liquid-glass-app/assets/background-cubes-cool.rgba", 1600, 900)
+        }
+        DeviceRefused { return .Error(.DeviceRefused) }
+        ShaderRejected { return .Error(.ShaderRejected) }
+    }
+}
+
+function benchReportBackdrop(failure: ResourceFailure) -> Int {
+    printLine("glass-scale-bench: backdrop upload failed — " + resourceFailureReason(move failure))
+    return 0
+}
+
+@Main
+function main() {
+    let surfaces = environmentInt("KIRA_GLASS_BENCH_SURFACES", 10)
+    let motion = environmentValue("KIRA_GLASS_BENCH_MOTION")
+    let moving = benchMotionIsMove(motion)
+    let morphing = benchMotionIsMorph(motion)
+    let animated = moving || morphing
+    // The control run: KIRA_GLASS_BENCH_MATERIAL=flat draws the same grid with
+    // no glass at all.
+    let glass = environmentValue("KIRA_GLASS_BENCH_MATERIAL") != "flat"
+    let storage = nativeState(BenchState {})
+    let benchUser = nativeUserData(storage)
+    printLine(
+        "glass-scale-bench surfaces " + foundationIntToString(surfaces) +
+        " motion " + motion
+    )
+    RunFoundationInteractiveApp(
+        title: "Glass Scale Bench",
+        width: 1600,
+        height: 900,
+        rootBuilder: { ui in
+            var bench = nativeRecover<BenchState>(benchUser)
+            return benchRootView(bench.textureId, surfaces, moving, morphing, glass, ui.frameCount)
+        },
+        engineFrame: { frame in
+            var bench = nativeRecover<BenchState>(benchUser)
+            if !bench.attempted {
+                bench.attempted = true
+                bench.textureId = benchBackdropView(foundationFrameGraphics(frame))
+            }
+            return
+        },
+        needsRebuild: { in
+            return animated
+        },
+        showFpsOverlay: false
+    )
+    return
+}

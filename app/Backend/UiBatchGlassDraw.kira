@@ -35,6 +35,7 @@ function glassSoftNearStreamGroup(state: borrow mut UiBatchState, stream: Int) -
 // the same premultiplied UI is replayed, so overlapping padded bounds remain exact.
 extend UiBatch {
     function glassDrawCaptureContents(state: borrow mut UiBatchState, encoder: borrow mut RenderEncoder, layer: Int) {
+        state.glassStatCaptureReplays = state.glassStatCaptureReplays + 1
         drawBackground(state, encoder)
         var captured = 0
         while captured <= layer {

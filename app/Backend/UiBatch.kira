@@ -388,6 +388,7 @@ extend UiBatch {
         // with the frame; ranges list this frame's dirty interiors only.
         state.glassSurfaceCursor = 0
         state.glassCacheRangeCount = 0
+        uiGlassStatsResetEmission(state)
         return
     }
 }
