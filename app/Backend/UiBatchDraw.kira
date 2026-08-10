@@ -236,7 +236,13 @@ extend UiBatch {
 
 extend UiBatch {
     function presentBatch(frame: borrow mut RenderFrame, graphics: borrow Graphics, bgR: Float, bgG: Float, bgB: Float, bgA: Float) {
+        // Rolling boundary between present phases (see UiBatchStats.kira). Read
+        // before anything else this function does, and every path out of it
+        // charges the time since the last boundary to exactly one phase, so the
+        // four sum to the call.
+        var phaseMark = Int(frame.monotonicNanoseconds())
         var state = nativeRecover<UiBatchState>(self.storage)
+        uiGlassStatsResetPresentation(state)
         // Never let the endpoint-only direct source escape the present that proved
         // its preconditions. Crossfades and later frames must re-evaluate it.
         state.directBackdropLayer0 = false
@@ -246,6 +252,7 @@ extend UiBatch {
         // the mirrored hot field.
         state.streams[state.streamIndex].quadCount = state.quadCount
         let layers = state.streamIndex
+        state.glassStatLayers = layers
         let bg = Color {
             r: bgR
             g: bgG
@@ -280,6 +287,9 @@ extend UiBatch {
             self.commitStream(graphics, commitStream)
             commitStream = commitStream + 1
         }
+        let uploadsDone = Int(frame.monotonicNanoseconds())
+        state.presentUploadNs = uploadsDone - phaseMark
+        phaseMark = uploadsDone
         // The swapchain pass CLEARS rather than discarding, even though an opaque
         // fullscreen photo covers every pixel it clears. Discarding instead was
         // measured at 2.80/2.88/2.85 ms against 2.97/2.83/2.72 — no change, because a
@@ -294,6 +304,7 @@ extend UiBatch {
             self.drawHud(state, encoder)
             frame.endPass()
             announceVisibleContent(state)
+            state.presentCompositeNs = Int(frame.monotonicNanoseconds()) - phaseMark
             return
         }
 
@@ -402,6 +413,7 @@ extend UiBatch {
                         if x1 > state.glassTexW { x1 = state.glassTexW }
                         if y1 > state.glassTexH { y1 = state.glassTexH }
                         if x1 > x0 && y1 > y0 {
+                            state.glassStatCaptureRegions = state.glassStatCaptureRegions + 1
                             sceneEncoder.setScissorRect(x0, y0, x1 - x0, y1 - y0)
                             self.glassDrawCaptureContents(state, sceneEncoder, layer)
                         }
@@ -416,6 +428,9 @@ extend UiBatch {
                 }
                 frame.endPass()
             }
+            let captureDone = Int(frame.monotonicNanoseconds())
+            state.presentCaptureNs = state.presentCaptureNs + captureDone - phaseMark
+            phaseMark = captureDone
 
             // The blur. Two dispatches, every glass layer, every frame — there is
             // no second encoding of it and no condition under which it is skipped.
@@ -437,6 +452,8 @@ extend UiBatch {
                     computeBlend = backdropBlend
                 }
             }
+            // Two dispatches, one per axis, for this layer.
+            state.glassStatBlurDispatches = state.glassStatBlurDispatches + 2
             frame.dispatchTextureComputePair(
                 state.blurComputeHPipelineId,
                 state.blurComputeVPipelineId,
@@ -463,6 +480,9 @@ extend UiBatch {
             if layer == 0 {
                 state.glassBlurSourceId = directSourceId
             }
+            let blurDone = Int(frame.monotonicNanoseconds())
+            state.presentBlurNs = state.presentBlurNs + blurDone - phaseMark
+            phaseMark = blurDone
             layer = layer + 1
         }
 
@@ -524,6 +544,7 @@ extend UiBatch {
         self.drawHud(state, mainEncoder)
         frame.endPass()
         announceVisibleContent(state)
+        state.presentCompositeNs = Int(frame.monotonicNanoseconds()) - phaseMark
         return
     }
 }

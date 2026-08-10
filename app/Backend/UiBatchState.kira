@@ -141,6 +141,26 @@ struct UiBatchState {
     var glassCacheRenderedKey: Float = -1.0
     var glassCacheKeyNow: Float = -2.0
     var glassSurfaceCursor: Int = 0
+    // This frame's Liquid Glass workload (see UiBatchStats.kira). Counted on
+    // every frame rather than behind a switch: each one is a single increment
+    // on a path that already writes a quad or encodes a pass, and a counter
+    // that only exists while a probe is on is a counter a benchmark cannot ask
+    // an ordinary build for.
+    var glassStatSurfaces: Int = 0
+    var glassStatPatchQuads: Int = 0
+    var glassStatLayers: Int = 0
+    var glassStatCaptureReplays: Int = 0
+    var glassStatCaptureRegions: Int = 0
+    var glassStatBlurDispatches: Int = 0
+    var glassStatCachedInteriors: Int = 0
+    var glassStatLiveInteriors: Int = 0
+    // Where `presentBatch` spent its own time this frame, in nanoseconds. The
+    // frame's monotonic clock, read at the boundaries between uploading,
+    // capturing the scene under the glass, blurring it and compositing.
+    var presentUploadNs: Int = 0
+    var presentCaptureNs: Int = 0
+    var presentBlurNs: Int = 0
+    var presentCompositeNs: Int = 0
     // Dirty-surface interior ranges to re-render into the cache this frame:
     // per entry, the stream index, the first band quad, and the band/lens/core
     // quad counts (contiguous by construction of pushGlass).

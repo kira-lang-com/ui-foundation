@@ -1,0 +1,301 @@
+import Foundation
+import KiraGraphics
+// Where a frame's CPU time went, phase by phase, on the frame's own monotonic
+// clock.
+//
+// `RenderFrame.statistics()` reports one CPU number for the whole frame, which
+// cannot say whether an expensive frame built widgets, laid them out, expanded
+// glass geometry or encoded passes. A benchmark comparing two architectures
+// needs those apart, so the runner marks the clock between phases and this
+// accumulates them.
+//
+// Off unless `KIRA_UI_FRAME_PROFILE` is set: the marks themselves are two clock
+// reads per phase, which is nothing against a frame, but the report is printed
+// output and an application that did not ask for it should not get it.
+
+// One frame's phase timings, as the runner measured them.
+//
+// `frameNs` is the whole callback, so it is not the sum of the other four:
+// what it holds beyond them is the frame's own setup, the overlay's glyphs, and
+// the gaps between phases. The report names that remainder `other` rather than
+// leaving a reader to subtract.
+struct FoundationFramePhases {
+    var buildNs: Int = 0
+    var layoutNs: Int = 0
+    var renderNs: Int = 0
+    var presentNs: Int = 0
+    var frameNs: Int = 0
+    // A frame that took the re-present fast path, whose build, layout and walk
+    // did not run.
+    var represented: Bool = false
+}
+
+// A run's accumulated phase timings, in nanoseconds, plus the glass workload of
+// the last sampled frame.
+struct FoundationFrameProfile {
+    var enabled: Bool = false
+    // Frames discarded before sampling starts: the first frames of a run build
+    // pipelines, upload the atlas and allocate targets, and none of that is
+    // what a steady-state reading is about.
+    var warmupFrames: Int = 60
+    // Frames sampled before the report is printed. The report is printed once.
+    var sampleFrames: Int = 180
+    var seen: Int = 0
+    var samples: Int = 0
+    var buildNs: Int = 0
+    var layoutNs: Int = 0
+    var renderNs: Int = 0
+    var presentNs: Int = 0
+    var otherNs: Int = 0
+    var frameNs: Int = 0
+    var worstFrameNs: Int = 0
+    // The present phase, as the compositor itself divided it.
+    var uploadNs: Int = 0
+    var captureNs: Int = 0
+    var blurNs: Int = 0
+    var compositeNs: Int = 0
+    // Frames that took the re-present fast path (no build, no layout, no walk).
+    var represents: Int = 0
+    var glass: UiGlassFrameStats = UiGlassFrameStats {}
+    var reported: Bool = false
+}
+
+// The profile this process was started with.
+function foundationFrameProfileFromEnvironment() -> FoundationFrameProfile {
+    var sampleFrames = environmentInt("KIRA_UI_FRAME_PROFILE_FRAMES", 180)
+    // A window of nothing would report means over no frames at all.
+    if sampleFrames < 1 {
+        sampleFrames = 1
+    }
+    var warmupFrames = environmentInt("KIRA_UI_FRAME_PROFILE_WARMUP", 60)
+    if warmupFrames < 0 {
+        warmupFrames = 0
+    }
+    return FoundationFrameProfile {
+        enabled: environmentIsSet("KIRA_UI_FRAME_PROFILE")
+        warmupFrames: warmupFrames
+        sampleFrames: sampleFrames
+    }
+}
+
+// The frame's monotonic clock, in nanoseconds. Zero when the profile is off, so
+// a disabled run pays no clock reads at all.
+@Native
+function foundationProfileNow(profile: borrow FoundationFrameProfile, frame: borrow RenderFrame) -> Int {
+    if !profile.enabled {
+        return 0
+    }
+    return Int(frame.monotonicNanoseconds())
+}
+
+// What a frame spent outside the four measured phases, never below zero: a
+// disabled run reports every phase as zero, and a clock that steps backwards
+// across a core must not turn into a vast positive remainder.
+function foundationProfileOtherNs(phases: borrow FoundationFramePhases) -> Int {
+    let measured = phases.buildNs + phases.layoutNs + phases.renderNs + phases.presentNs
+    if phases.frameNs <= measured {
+        return 0
+    }
+    return phases.frameNs - measured
+}
+
+// Add one frame's timings.
+function foundationProfileSample(
+    profile: borrow mut FoundationFrameProfile,
+    phases: borrow FoundationFramePhases,
+    present: borrow UiBatchPhaseTimes,
+    glass: borrow UiGlassFrameStats,
+) {
+    if !profile.enabled {
+        return
+    }
+    profile.seen = profile.seen + 1
+    if profile.seen <= profile.warmupFrames {
+        return
+    }
+    if profile.samples >= profile.sampleFrames {
+        return
+    }
+    profile.samples = profile.samples + 1
+    profile.buildNs = profile.buildNs + phases.buildNs
+    profile.layoutNs = profile.layoutNs + phases.layoutNs
+    profile.renderNs = profile.renderNs + phases.renderNs
+    profile.presentNs = profile.presentNs + phases.presentNs
+    profile.otherNs = profile.otherNs + foundationProfileOtherNs(phases)
+    profile.frameNs = profile.frameNs + phases.frameNs
+    profile.uploadNs = profile.uploadNs + present.uploadNs
+    profile.captureNs = profile.captureNs + present.captureNs
+    profile.blurNs = profile.blurNs + present.blurNs
+    profile.compositeNs = profile.compositeNs + present.compositeNs
+    if phases.frameNs > profile.worstFrameNs {
+        profile.worstFrameNs = phases.frameNs
+    }
+    if phases.represented {
+        profile.represents = profile.represents + 1
+    }
+    profile.glass = clone_UiGlassFrameStats(glass)
+    return
+}
+
+// Whether the sample window is full and the report has not been printed yet.
+function foundationProfileShouldReport(profile: borrow FoundationFrameProfile) -> Bool {
+    return profile.enabled && !profile.reported && profile.samples >= profile.sampleFrames
+}
+
+// A mean in microseconds, from a nanosecond total over `samples` frames.
+function foundationProfileMeanUs(totalNs: Int, samples: Int) -> Int {
+    if samples < 1 {
+        return 0
+    }
+    return totalNs / samples / 1000
+}
+
+// The report, as the lines it prints.
+//
+// Machine-readable on purpose: every line starts `kira-ui-profile` and is a flat
+// sequence of name/value pairs, so a benchmark script reads it without knowing
+// which fields this version happens to carry.
+function foundationProfileReportLines(profile: borrow FoundationFrameProfile) -> [String] {
+    let n = profile.samples
+    return [
+        "kira-ui-profile frames " + foundationIntToString(n) +
+        " represents " + foundationIntToString(profile.represents),
+
+        "kira-ui-profile us frame " + foundationIntToString(foundationProfileMeanUs(profile.frameNs, n)) +
+        " build " + foundationIntToString(foundationProfileMeanUs(profile.buildNs, n)) +
+        " layout " + foundationIntToString(foundationProfileMeanUs(profile.layoutNs, n)) +
+        " render " + foundationIntToString(foundationProfileMeanUs(profile.renderNs, n)) +
+        " present " + foundationIntToString(foundationProfileMeanUs(profile.presentNs, n)) +
+        " other " + foundationIntToString(foundationProfileMeanUs(profile.otherNs, n)) +
+        " worstframe " + foundationIntToString(profile.worstFrameNs / 1000),
+
+        "kira-ui-profile us present upload " + foundationIntToString(foundationProfileMeanUs(profile.uploadNs, n)) +
+        " capture " + foundationIntToString(foundationProfileMeanUs(profile.captureNs, n)) +
+        " blur " + foundationIntToString(foundationProfileMeanUs(profile.blurNs, n)) +
+        " composite " + foundationIntToString(foundationProfileMeanUs(profile.compositeNs, n)),
+
+        "kira-ui-profile glass surfaces " + foundationIntToString(profile.glass.surfaces) +
+        " quads " + foundationIntToString(profile.glass.patchQuads) +
+        " layers " + foundationIntToString(profile.glass.layers) +
+        " captures " + foundationIntToString(profile.glass.captureReplays) +
+        " regions " + foundationIntToString(profile.glass.captureRegions) +
+        " blur " + foundationIntToString(profile.glass.blurDispatches) +
+        " cached " + foundationIntToString(profile.glass.cachedInteriors) +
+        " live " + foundationIntToString(profile.glass.liveInteriors),
+    ]
+}
+
+// Print the report, once, as soon as the sample window is full.
+function foundationProfileReportWhenFull(profile: borrow mut FoundationFrameProfile) {
+    if !foundationProfileShouldReport(profile) {
+        return
+    }
+    profile.reported = true
+    let lines = foundationProfileReportLines(profile)
+    for index in 0..lines.count {
+        printLine(lines[index])
+    }
+    return
+}
+
+// Cross-backend guard for the profile's accumulation and its report format.
+// Every case is a rule a benchmark script depends on: that a disabled run
+// records nothing, that warm-up frames never reach the means, that the window
+// closes at its size, that the remainder is named rather than left to a
+// subtraction, and that the printed lines carry the fields under the names this
+// version documents.
+function FoundationFrameProfileSmoke() -> Int {
+    var passed = 0
+
+    let steady = FoundationFramePhases {
+        buildNs: 1000000
+        layoutNs: 500000
+        renderNs: 500000
+        presentNs: 1500000
+        frameNs: 4000000
+    }
+    let present = UiBatchPhaseTimes {
+        uploadNs: 100000
+        captureNs: 200000
+        blurNs: 900000
+        compositeNs: 300000
+    }
+    let glass = UiGlassFrameStats {
+        surfaces: 10
+        patchQuads: 89
+        layers: 1
+        captureReplays: 1
+        captureRegions: 1
+        blurDispatches: 2
+        cachedInteriors: 0
+        liveInteriors: 10
+    }
+
+    // Disabled: a frame is not even counted as seen.
+    var off = FoundationFrameProfile {}
+    foundationProfileSample(off, steady, present, glass)
+    passed = passed + smokePass(off.seen == 0 && off.samples == 0)
+    passed = passed + smokePass(!foundationProfileShouldReport(off))
+
+    // Warm-up frames are seen and discarded; the window then takes exactly its
+    // own size and stops.
+    var profile = FoundationFrameProfile {
+        enabled: true
+        warmupFrames: 1
+        sampleFrames: 2
+    }
+    var frame = 0
+    while frame < 5 {
+        foundationProfileSample(profile, steady, present, glass)
+        frame = frame + 1
+    }
+    passed = passed + smokePass(profile.seen == 5)
+    passed = passed + smokePass(profile.samples == 2)
+    passed = passed + smokePass(profile.frameNs == 8000000)
+    passed = passed + smokePass(profile.blurNs == 1800000)
+    passed = passed + smokePass(profile.represents == 0)
+    passed = passed + smokePass(profile.worstFrameNs == 4000000)
+
+    // The remainder the four phases do not account for.
+    passed = passed + smokePass(profile.otherNs == 1000000)
+    passed = passed + smokePass(foundationProfileOtherNs(FoundationFramePhases {
+        buildNs: 3000
+        frameNs: 1000
+    }) == 0)
+
+    // A re-presented frame reports no build, no layout and no walk, and is
+    // counted apart so a mean can be read as the fast path's own.
+    var fast = FoundationFrameProfile {
+        enabled: true
+        warmupFrames: 0
+        sampleFrames: 1
+    }
+    foundationProfileSample(fast, FoundationFramePhases {
+        presentNs: 2000000
+        frameNs: 2000000
+        represented: true
+    }, present, glass)
+    passed = passed + smokePass(fast.represents == 1)
+    passed = passed + smokePass(fast.buildNs == 0 && fast.otherNs == 0)
+
+    // The window is full: the report is owed once, and not again.
+    passed = passed + smokePass(foundationProfileShouldReport(profile))
+    let lines = foundationProfileReportLines(profile)
+    passed = passed + smokePass(lines.count == 4)
+    passed = passed + smokePass(lines[0] == "kira-ui-profile frames 2 represents 0")
+    passed = passed + smokePass(lines[1] == "kira-ui-profile us frame 4000 build 1000 layout 500 render 500 present 1500 other 500 worstframe 4000")
+    passed = passed + smokePass(lines[2] == "kira-ui-profile us present upload 100 capture 200 blur 900 composite 300")
+    passed = passed + smokePass(lines[3] == "kira-ui-profile glass surfaces 10 quads 89 layers 1 captures 1 regions 1 blur 2 cached 0 live 10")
+    profile.reported = true
+    passed = passed + smokePass(!foundationProfileShouldReport(profile))
+
+    // A window that never filled reports nothing rather than dividing by no
+    // frames at all.
+    let empty = FoundationFrameProfile {
+        enabled: true
+    }
+    passed = passed + smokePass(!foundationProfileShouldReport(empty))
+    passed = passed + smokePass(foundationProfileMeanUs(4000000, 0) == 0)
+
+    return passed
+}

@@ -127,6 +127,9 @@ struct FoundationAppState {
     // HUD text is human telemetry, not animation. Accumulate real frame time and
     // rebuild its glyphs at 10 Hz; retained presentation handles intervening frames.
     var hudRefreshElapsed: Float = 1.0
+    // Phase timings for a profiled run (KIRA_UI_FRAME_PROFILE). Off by default,
+    // and off costs one boolean test per phase boundary.
+    var profile: FoundationFrameProfile = FoundationFrameProfile {}
 }
 
 // Decide whether the current frame can re-present the retained UiBatch instead of

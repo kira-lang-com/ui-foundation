@@ -42,6 +42,7 @@ function RunFoundationInteractiveApp(
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
         batch: UiBatch { storage: nullPointer() }
+        profile: foundationFrameProfileFromEnvironment()
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -70,6 +71,7 @@ function RunFoundationInteractiveApp(
         hostFrame(frame)
         let hostNeedsRebuild: borrow () -> Bool = needsRebuild
         var state = nativeRecover<FoundationAppState>(frame.userData)
+        let profileFrameStart = foundationProfileNow(state.profile, frame)
         state.ui.frameCount = state.frameCount
         // The live window, in points, so an interactive resize reflows. Asked of
         // the frame rather than branched on the backend: Metal keeps it on its
@@ -147,7 +149,20 @@ function RunFoundationInteractiveApp(
             // Re-runs the retained streams — including the liquid-glass
             // capture/blur passes on a split frame, so glass stays live over an
             // engine viewport that re-renders beneath it.
+            let profilePresentStart = foundationProfileNow(state.profile, frame)
             state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            let profilePresentEnd = foundationProfileNow(state.profile, frame)
+            foundationProfileSample(
+                state.profile,
+                FoundationFramePhases {
+                    presentNs: profilePresentEnd - profilePresentStart
+                    frameNs: profilePresentEnd - profileFrameStart
+                    represented: true
+                },
+                state.batch.presentPhaseTimes(),
+                state.batch.glassFrameStats(),
+            )
+            foundationProfileReportWhenFull(state.profile)
             state.frameCount = state.frameCount + 1
             state.ui.clickedKey = 0
             state.ui.scrollX = 0.0
@@ -168,6 +183,7 @@ function RunFoundationInteractiveApp(
             state.hasCachedRoot &&
             state.ui.eventCount == state.lastPresentedEventCount
 
+        let profileBuildStart = foundationProfileNow(state.profile, frame)
         var root = FoundationView {
             kind: .Spacer
         }
@@ -177,6 +193,7 @@ function RunFoundationInteractiveApp(
             let buildRoot: borrow (borrow FoundationUiContext) -> FoundationView = rootBuilder
             root = buildRoot(state.ui)
         }
+        let profileBuildEnd = foundationProfileNow(state.profile, frame)
 
         // The walk only ACCUMULATES quads, so the swapchain pass must not begin
         // yet — a liquid-glass frame runs its capture/blur passes first, and
@@ -188,6 +205,7 @@ function RunFoundationInteractiveApp(
         let viewport = state.ui.viewport
         // A resize-only frame reuses the cached tree, so the retained structure
         // cannot have changed — skip the reconcile as well.
+        let profileLayoutStart = foundationProfileNow(state.profile, frame)
         if state.frameCount == 0 {
             state.retainedTree = foundationRetainedMount(root)
         } else {
@@ -236,14 +254,17 @@ function RunFoundationInteractiveApp(
             laidOut = FoundationLayoutPass().runIncremental(root: root, available: viewport, cached: state.cachedLayoutTree)
         }
         state.cachedLayoutTree = laidOut
+        let profileLayoutEnd = foundationProfileNow(state.profile, frame)
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
             kiraGraphicsLiveUiFoundationLayoutNonEmpty()
             state.announcedLayout = true
         }
 
+        let profileRenderStart = foundationProfileNow(state.profile, frame)
         backend.beginFrame(Int(viewport.width), Int(viewport.height))
         let renderCount = foundationRender(root, laidOut, backend)
+        let profileRenderEnd = foundationProfileNow(state.profile, frame)
         state.hitRegions = backend.hitRegions
         foundationReconcileFocus(state.ui, state.hitRegions)
         if renderCount > 0 && !state.announcedRenderCommands {
@@ -261,7 +282,22 @@ function RunFoundationInteractiveApp(
             let hudLayout = FoundationLayoutPass().run(root: hudOverlay, available: viewport)
             foundationEmitHud(graphics, state.batch, hudOverlay, hudLayout, Int(viewport.width), Int(viewport.height))
         }
+        let profilePresentStart = foundationProfileNow(state.profile, frame)
         state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+        let profilePresentEnd = foundationProfileNow(state.profile, frame)
+        foundationProfileSample(
+            state.profile,
+            FoundationFramePhases {
+                buildNs: profileBuildEnd - profileBuildStart
+                layoutNs: profileLayoutEnd - profileLayoutStart
+                renderNs: profileRenderEnd - profileRenderStart
+                presentNs: profilePresentEnd - profilePresentStart
+                frameNs: profilePresentEnd - profileFrameStart
+            },
+            state.batch.presentPhaseTimes(),
+            state.batch.glassFrameStats(),
+        )
+        foundationProfileReportWhenFull(state.profile)
         // Record what this full frame presented; the re-present gate above
         // compares against these next frame.
         state.hasPresentedFrame = true
