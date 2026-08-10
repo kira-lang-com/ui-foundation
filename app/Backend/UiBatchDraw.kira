@@ -80,6 +80,7 @@ extend UiBatch {
             var runCount = 0
             while firstQuad < quadCount {
                 let modeCode = state.streams[modeStream].quadModes[firstQuad]
+                let runUsesExternalTexture = modeCode == 20 && state.externalBindReady
                 var runPipeline = state.pipeline
                 if fastRuns {
                     if modeCode == 0 { runPipeline = state.rectPipeline }
@@ -122,13 +123,24 @@ extend UiBatch {
                         if nextMode == 33 { nextPipeline = state.glassLensPipeline }
                         if nextMode == 34 { nextPipeline = state.glassCorePipeline }
                     }
-                    if nextPipeline.id == runPipeline.id {
+                    let nextUsesExternalTexture = nextMode == 20 && state.externalBindReady
+                    if nextPipeline.id == runPipeline.id && nextUsesExternalTexture == runUsesExternalTexture {
                         endQuad = endQuad + 1
                     } else {
                         samePipeline = false
                     }
                 }
                 encoder.setPipeline(runPipeline)
+                // A stream may contain both Liquid Glass quads and a live
+                // TextureView. Glass runs read the stream's capture group;
+                // mode 2 must read the host-published engine target instead.
+                // Bind at the run boundary rather than once per stream so the
+                // two resources can share the same ordered stream safely.
+                var runExternalGroup = externalGroup
+                if runUsesExternalTexture {
+                    runExternalGroup = state.externalGroup
+                }
+                encoder.setBindGroup(externalBindGroup(), runExternalGroup)
                 // Copy runs read the cache through the atlas slot; swap the group
                 // in for the run and restore the stream's atlas after it.
                 let copyRun = runPipeline.id == state.glassCopyPipeline.id && state.glassCacheGroup.id != 0
@@ -569,5 +581,3 @@ function announceVisibleContent(state: borrow mut UiBatchState) {
     }
     return
 }
-
-

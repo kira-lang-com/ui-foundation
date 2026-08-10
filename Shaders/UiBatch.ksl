@@ -298,26 +298,33 @@ shader UiBatch {
             // --- mode 2: external texture ---
             if input.mode > 1.5 {
                 let transition = clamp(input.edgeRefraction, 0.0, 1.0)
+                // TextureView's local coordinates are UVs, while the shared SDF
+                // expects point-space offsets from the quad centre. Keep the
+                // engine target's corners inside the same self-contained mask as
+                // every other Foundation surface.
+                let textureLocal = (input.local - Float2(0.5, 0.5)) * Float2(input.hsize.x * 2.0, input.hsize.y * 2.0)
+                let textureDistance = surfaceDistance(textureLocal, input.hsize, input.radius, 0.0)
+                let textureCoverage = clamp(0.5 - textureDistance, 0.0, 1.0)
                 // Steady light/dark mode samples exactly one 4K source. Sampling
                 // both and mixing by a compile-time-unknown 0 or 1 doubled the
                 // dominant fullscreen bandwidth forever after the 350ms crossfade.
                 if transition <= 0.001 {
                     let texel = sample(external, externalSmp, input.local)
-                    let alpha = texel.w * input.fill.w
-                    out.color = Float4(texel.x * input.fill.w, texel.y * input.fill.w, texel.z * input.fill.w, alpha)
+                    let alpha = texel.w * input.fill.w * textureCoverage
+                    out.color = Float4(texel.x * input.fill.w * textureCoverage, texel.y * input.fill.w * textureCoverage, texel.z * input.fill.w * textureCoverage, alpha)
                     return out
                 }
                 if transition >= 0.999 {
                     let texel = sample(backdrop, backdropSmp, input.local)
-                    let alpha = texel.w * input.fill.w
-                    out.color = Float4(texel.x * input.fill.w, texel.y * input.fill.w, texel.z * input.fill.w, alpha)
+                    let alpha = texel.w * input.fill.w * textureCoverage
+                    out.color = Float4(texel.x * input.fill.w * textureCoverage, texel.y * input.fill.w * textureCoverage, texel.z * input.fill.w * textureCoverage, alpha)
                     return out
                 }
                 let primary = sample(external, externalSmp, input.local)
                 let secondary = sample(backdrop, backdropSmp, input.local)
                 let texel = mix(primary, secondary, transition)
-                let alpha = texel.w * input.fill.w
-                out.color = Float4(texel.x * input.fill.w, texel.y * input.fill.w, texel.z * input.fill.w, alpha)
+                let alpha = texel.w * input.fill.w * textureCoverage
+                out.color = Float4(texel.x * input.fill.w * textureCoverage, texel.y * input.fill.w * textureCoverage, texel.z * input.fill.w * textureCoverage, alpha)
                 return out
             }
 
