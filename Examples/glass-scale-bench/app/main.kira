@@ -12,6 +12,9 @@ import KiraGraphics
 //
 //   KIRA_GLASS_BENCH_SURFACES  how many surfaces (default 10)
 //   KIRA_GLASS_BENCH_MOTION    static | move | morph (default static)
+//   KIRA_GLASS_BENCH_FROST     translucent | light | medium | high | xhigh | max
+//                              (default high, the platform's Regular material)
+//   KIRA_GLASS_BENCH_MATERIAL  flat draws the same grid with no glass at all
 //   KIRA_GLASS_BG              the 1600x900 RGBA8 backdrop; defaults to the one
 //                              beside liquid-glass-app
 //
@@ -30,8 +33,49 @@ struct BenchState {
     var attempted: Bool = false
 }
 
-function benchViewportWidth() -> Float { return 1600.0 }
-function benchViewportHeight() -> Float { return 900.0 }
+// The material step the grid is drawn at, as the ladder's own index: the run
+// carries the step as a number so every surface builds its own frost value, and
+// reads the material out of the platform's table through `LiquidGlassSurface` —
+// the wash, its blend modes and the blur the step asks for. That is what an
+// application surface pays, and what a fill with an alpha on a bare `Surface`
+// does not.
+function benchFrostStep(name: borrow String) -> Int {
+    if name == "translucent" {
+        return 0
+    }
+    if name == "light" {
+        return 1
+    }
+    if name == "medium" {
+        return 2
+    }
+    if name == "xhigh" {
+        return 4
+    }
+    if name == "max" {
+        return 5
+    }
+    return 3
+}
+
+function benchFrost(step: Int) -> FoundationFrost {
+    if step == 0 {
+        return .Translucent
+    }
+    if step == 1 {
+        return .Light
+    }
+    if step == 2 {
+        return .Medium
+    }
+    if step == 4 {
+        return .XHigh
+    }
+    if step == 5 {
+        return .Max
+    }
+    return .High
+}
 
 // Surfaces per row. Eight keeps a cell close to square on a 16:9 window at the
 // counts this benchmark reports (1, 10, 20, 40).
@@ -80,14 +124,21 @@ function benchMotionIsMorph(motion: borrow String) -> Bool {
 
 // One surface, sized and rounded as the motion mode asks.
 //
-// `glass` picks the material: Liquid Glass is what the benchmark is about, and
-// the flat surface is the control — same tree, same layout, same quad count per
-// surface, none of the glass emission path. The difference between two runs is
-// what Liquid Glass costs on top of drawing a rounded rectangle.
-function benchGlassSurface(width: Float, height: Float, radius: Float, glass: Bool) -> FoundationView {
-    var material = FoundationMaterial.Flat
+// `glass` picks the material: a real Liquid Glass surface at the frost step the
+// run names — the same call an application makes, so the wash, the edge lighting
+// and the step's blur are all in the measurement — against a flat control with
+// the same tree, the same layout and none of the glass emission path. The
+// difference between two runs is what Liquid Glass costs on top of drawing a
+// rounded rectangle.
+function benchGlassSurface(width: Float, height: Float, radius: Float, glass: Bool, frostStep: Int) -> FoundationView {
     if glass {
-        material = FoundationMaterial.LiquidGlass
+        return LiquidGlassSurface(
+            children: [],
+            width: SizeMode.Fixed(width),
+            height: SizeMode.Fixed(height),
+            radius: radius,
+            frost: benchFrost(frostStep)
+        )
     }
     return Surface(
         children: [],
@@ -99,7 +150,7 @@ function benchGlassSurface(width: Float, height: Float, radius: Float, glass: Bo
         borderWidth: 1.0,
         radius: radius,
         shape: FoundationShape.RegularRoundedRect,
-        material: move material,
+        material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {},
         clipContent: true
@@ -123,7 +174,22 @@ function benchPlaced(child: FoundationView, x: Float, y: Float) -> FoundationVie
     )
 }
 
-function benchRootView(textureId: Int, count: Int, moving: Bool, morphing: Bool, glass: Bool, frameCount: Int) -> FoundationView {
+// The grid is laid out against the LIVE viewport, not the size the window was
+// asked to open at: a display that hands back a different drawable would
+// otherwise tile a window that is not there, and surfaces spilling past the
+// bottom edge or overlapping each other stop the run measuring the one thing it
+// claims to — non-overlapping surfaces sharing a single glass layer.
+function benchRootView(
+    textureId: Int,
+    count: Int,
+    moving: Bool,
+    morphing: Bool,
+    glass: Bool,
+    frostStep: Int,
+    frameCount: Int,
+    viewportW: Float,
+    viewportH: Float,
+) -> FoundationView {
     var layers: [FoundationView] = []
     if textureId > 0 {
         layers.append(TextureView(
@@ -137,8 +203,8 @@ function benchRootView(textureId: Int, count: Int, moving: Bool, morphing: Bool,
     }
     let columns = benchColumns(count)
     let rows = benchRows(count)
-    let cellWidth = benchViewportWidth() / Float(columns)
-    let cellHeight = benchViewportHeight() / Float(rows)
+    let cellWidth = viewportW / Float(columns)
+    let cellHeight = viewportH / Float(rows)
     let margin = benchCellMargin()
     var index = 0
     while index < count {
@@ -161,7 +227,7 @@ function benchRootView(textureId: Int, count: Int, moving: Bool, morphing: Bool,
             x = x + wave * (margin * 0.5)
             y = y + wave * (margin * 0.5)
         }
-        layers.append(benchPlaced(benchGlassSurface(width, height, radius, glass), x, y))
+        layers.append(benchPlaced(benchGlassSurface(width, height, radius, glass, frostStep), x, y))
         index = index + 1
     }
     return Surface(
@@ -225,11 +291,14 @@ function main() {
     // The control run: KIRA_GLASS_BENCH_MATERIAL=flat draws the same grid with
     // no glass at all.
     let glass = environmentValue("KIRA_GLASS_BENCH_MATERIAL") != "flat"
+    let frostName = environmentValue("KIRA_GLASS_BENCH_FROST")
+    let frostStep = benchFrostStep(frostName)
     let storage = nativeState(BenchState {})
     let benchUser = nativeUserData(storage)
     printLine(
         "glass-scale-bench surfaces " + foundationIntToString(surfaces) +
-        " motion " + motion
+        " motion " + motion +
+        " frost " + frostName
     )
     RunFoundationInteractiveApp(
         title: "Glass Scale Bench",
@@ -237,7 +306,17 @@ function main() {
         height: 900,
         rootBuilder: { ui in
             var bench = nativeRecover<BenchState>(benchUser)
-            return benchRootView(bench.textureId, surfaces, moving, morphing, glass, ui.frameCount)
+            return benchRootView(
+                bench.textureId,
+                surfaces,
+                moving,
+                morphing,
+                glass,
+                frostStep,
+                ui.frameCount,
+                ui.viewport.width,
+                ui.viewport.height,
+            )
         },
         engineFrame: { frame in
             var bench = nativeRecover<BenchState>(benchUser)
