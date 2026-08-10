@@ -15,6 +15,7 @@ import KiraGraphics
 //   KIRA_GLASS_BENCH_FROST     translucent | light | medium | high | xhigh | max
 //                              (default high, the platform's Regular material)
 //   KIRA_GLASS_BENCH_MATERIAL  flat draws the same grid with no glass at all
+//   KIRA_GLASS_BENCH_SCALE     percent of its cell each surface fills (default 100)
 //   KIRA_GLASS_BG              the 1600x900 RGBA8 backdrop; defaults to the one
 //                              beside liquid-glass-app
 //
@@ -186,6 +187,7 @@ function benchRootView(
     morphing: Bool,
     glass: Bool,
     frostStep: Int,
+    scalePercent: Int,
     frameCount: Int,
     viewportW: Float,
     viewportH: Float,
@@ -213,9 +215,14 @@ function benchRootView(
         // Each surface rides its own phase of the wave, so a moving run is not
         // one rigid grid sliding as a block.
         let wave = benchWave(frameCount + index * 7, 120)
-        var width = cellWidth - margin * 2.0
-        var height = cellHeight - margin * 2.0
-        var radius = 32.0
+        // Percent of the cell the surface fills. A glass surface expands into a
+        // patch count its own SIZE decides — nineteen when there is room for
+        // bands, a lens and a core, and one when there is not — so the same grid
+        // at two scales separates what a surface costs from what its patches do.
+        let span = Float(scalePercent) / 100.0
+        var width = (cellWidth - margin * 2.0) * span
+        var height = (cellHeight - margin * 2.0) * span
+        var radius = 32.0 * span
         if morphing {
             width = width + wave * 8.0
             height = height + wave * 8.0
@@ -293,6 +300,7 @@ function main() {
     let glass = environmentValue("KIRA_GLASS_BENCH_MATERIAL") != "flat"
     let frostName = environmentValue("KIRA_GLASS_BENCH_FROST")
     let frostStep = benchFrostStep(frostName)
+    let scalePercent = environmentInt("KIRA_GLASS_BENCH_SCALE", 100)
     let storage = nativeState(BenchState {})
     let benchUser = nativeUserData(storage)
     printLine(
@@ -313,6 +321,7 @@ function main() {
                 morphing,
                 glass,
                 frostStep,
+                scalePercent,
                 ui.frameCount,
                 ui.viewport.width,
                 ui.viewport.height,
