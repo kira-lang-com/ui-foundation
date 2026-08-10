@@ -243,6 +243,7 @@ extend UiBatch {
         x: Float, y: Float, w: Float, h: Float,
         alpha: Float,
         transition: Float,
+        radius: Float,
         clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
     ) {
         if w <= 0.0 || h <= 0.0 || alpha <= 0.0 {
@@ -253,6 +254,7 @@ extend UiBatch {
             x >= 0.0 - 0.01 && y >= 0.0 - 0.01 &&
             x <= 0.01 && y <= 0.01 &&
             w >= state.viewportW - 0.01 && h >= state.viewportH - 0.01 &&
+            radius <= 0.0 &&
             clipMinX <= 0.01 && clipMinY <= 0.01 &&
             clipMaxX >= state.viewportW - 0.01 && clipMaxY >= state.viewportH - 0.01
         if state.backgroundPipeline.id != 0 && state.streamIndex == 0 && state.quadCount == 0 && alpha >= 0.999 && coversViewport {
@@ -263,7 +265,7 @@ extend UiBatch {
         self.emitQuad(
             x, y, x + w, y + h,
             0.0, 0.0, 1.0, 1.0,
-            w / 2.0, h / 2.0, 0.0, 0.0, 2.0, transition,
+            w / 2.0, h / 2.0, radius, 0.0, 2.0, transition,
             1.0, 1.0, 1.0, alpha,
             0.0, 0.0, 0.0, 0.0,
             clipMinX, clipMinY, clipMaxX, clipMaxY
@@ -271,4 +273,3 @@ extend UiBatch {
         return
     }
 }
-

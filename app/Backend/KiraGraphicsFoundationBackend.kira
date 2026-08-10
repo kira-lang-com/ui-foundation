@@ -238,17 +238,15 @@ class KiraGraphicsFoundationBackend {
     // TextureView: register the external texture with the batch (slot-1 bind group,
     // cached per id) and emit its mode-2 quad.
     //
-    // `radius` is not applied: the mode-2 quad carries no rounded-rect coverage
-    // mask yet, so the viewport composites square-cornered. Rounding it is a
-    // change to `Shaders/UiBatch.ksl`'s mode-2 branch, which both backends run.
+    // TextureView carries its own rounded mask so an engine target remains a
+    // self-contained editor viewport instead of leaking through its corners.
     function drawTextureFields(bounds: borrow Rect, texture: Int, secondaryTexture: Int, transition: Float, opacity: Float, radius: Float) {
         self.drewVisibleUi = true
         if texture <= 0 {
             return
         }
-        let ignoredRadius = radius
         self.batch.setExternalTextures(self.graphics, U32(texture), U32(secondaryTexture))
-        self.batch.pushExternalRect(bounds.x, bounds.y, bounds.width, bounds.height, opacity, transition, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+        self.batch.pushExternalRect(bounds.x, bounds.y, bounds.width, bounds.height, opacity, transition, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
         return
     }
 
