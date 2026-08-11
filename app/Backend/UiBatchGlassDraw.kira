@@ -14,7 +14,7 @@ import KiraGraphics
 // drawStream takes.
 function glassSharpStreamGroup(state: borrow mut UiBatchState, stream: Int) -> BindGroup {
     if stream <= 0 {
-        return emptyBindGroup()
+        return state.emptyGroup
     }
     if stream == 1 && state.directBackdropLayer0 {
         return state.directBackdropSharpGroup
@@ -25,7 +25,7 @@ function glassSharpStreamGroup(state: borrow mut UiBatchState, stream: Int) -> B
 // Both blurred levels, in the one group they share.
 function glassSoftNearStreamGroup(state: borrow mut UiBatchState, stream: Int) -> BindGroup {
     if stream <= 0 {
-        return emptyBindGroup()
+        return state.emptyGroup
     }
     return state.glassLayers[stream - 1].softNearGroup
 }
@@ -45,7 +45,7 @@ extend UiBatch {
                 state.streams[captured].quadCount,
                 glassSharpStreamGroup(state, captured),
                 glassSoftNearStreamGroup(state, captured),
-                emptyBindGroup()
+                state.emptyGroup
             )
             captured = captured + 1
         }
@@ -215,4 +215,3 @@ function glassDrawCacheRanges(state: borrow mut UiBatchState, encoder: borrow mu
     }
     return
 }
-
