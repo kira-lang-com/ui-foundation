@@ -134,8 +134,8 @@ extend UiBatch {
                 // A stream may contain both Liquid Glass quads and a live
                 // TextureView. Glass runs read the stream's capture group;
                 // mode 2 must read the host-published engine target instead.
-                // Bind at the run boundary rather than once per stream so the
-                // two resources can share the same ordered stream safely.
+                // Bind at the run boundary rather than once per stream so
+                // the two resources can share the same ordered stream safely.
                 var runExternalGroup = externalGroup
                 if runUsesExternalTexture {
                     runExternalGroup = state.externalGroup
@@ -178,7 +178,7 @@ extend UiBatch {
         var state = nativeRecover<UiBatchState>(self.storage)
         let quadCount = state.quadCount
         var target = encoder
-        let none = emptyBindGroup()
+        let none = state.emptyGroup
         self.drawStream(target, state.streamIndex, quadCount, none, none, none)
         return
     }
@@ -239,7 +239,7 @@ extend UiBatch {
             state.streams[hud].quadCount,
             glassSharpStreamGroup(state, top),
             glassSoftNearStreamGroup(state, top),
-            emptyBindGroup()
+            state.emptyGroup
         )
         return
     }
@@ -259,7 +259,7 @@ extend UiBatch {
         // its preconditions. Crossfades and later frames must re-evaluate it.
         state.directBackdropLayer0 = false
         state.glassBackdropStatic = false
-        state.directBackdropSharpGroup = emptyBindGroup()
+        state.directBackdropSharpGroup = state.emptyGroup
         // The active stream's count only reaches its entry here: emitting keeps it in
         // the mirrored hot field.
         state.streams[state.streamIndex].quadCount = state.quadCount
@@ -348,7 +348,7 @@ extend UiBatch {
         while layer < layers && !skipBackdropPrep {
             var directSourceId: U32 = 0
             var directSecondId: U32 = 0
-            var directSharpGroup = emptyBindGroup()
+            var directSharpGroup = state.emptyGroup
             // Liquid Glass commonly sits directly above one opaque fullscreen
             // photo — or, mid-scheme-change, above a crossfade between two.
             // Rendering that into an identical full-resolution intermediate
@@ -549,7 +549,7 @@ extend UiBatch {
                 state.streams[stream].quadCount,
                 glassSharpStreamGroup(state, stream),
                 glassSoftNearStreamGroup(state, stream),
-                emptyBindGroup()
+                state.emptyGroup
             )
             stream = stream + 1
         }

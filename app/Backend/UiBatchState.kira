@@ -97,6 +97,10 @@ struct UiGlyphSlot {
 }
 
 struct UiBatchState {
+    // One reusable empty bind group for draw slots that have no resource. Creating
+    // an empty group is not free: it allocates a native state object, and the
+    // compositor needs this sentinel on every stream and every glass pass.
+    var emptyGroup: BindGroup = emptyBindGroup()
     var pipeline: RenderPipeline = emptyRenderPipeline()
     var rectPipeline: RenderPipeline = emptyRenderPipeline()
     var glyphPipeline: RenderPipeline = emptyRenderPipeline()
