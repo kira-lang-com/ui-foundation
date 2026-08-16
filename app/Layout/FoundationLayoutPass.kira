@@ -70,6 +70,28 @@ function foundationLayoutAppendDescendants(view: borrow FoundationView, nodeInde
     return
 }
 
+// Every node's resolved rectangle, in tree order, when
+// `KIRA_UI_DUMP_LAYOUT` is set. A frame that overlaps its sibling is a
+// question about numbers, and this is where the numbers are.
+function foundationDumpLayout(tree: borrow LayoutTree) {
+    if !environmentIsSet("KIRA_UI_DUMP_LAYOUT") {
+        return
+    }
+    var index = 0
+    while index < tree.nodes.count {
+        let frame = layoutFrame(tree, index)
+        printLine(
+            "layout " + String(index)
+                + " first=" + String(tree.nodes[index].firstChild)
+                + " count=" + String(tree.nodes[index].childCount)
+                + " x=" + String(frame.x) + " y=" + String(frame.y)
+                + " w=" + String(frame.width) + " h=" + String(frame.height)
+        )
+        index = index + 1
+    }
+    return
+}
+
 class FoundationLayoutPass {
     let engine: LayoutEngine = LayoutEngine {}
 
@@ -78,10 +100,18 @@ class FoundationLayoutPass {
         tree = layoutResetCounters(move tree)
         engine.measure(tree: tree, index: 0, available: available)
         engine.place(tree: tree, index: 0, origin: Point {})
+        // Guides read resolved geometry, so they are answered once placement has
+        // produced it — and they only move what a view PAINTS, so answering them
+        // after the fact needs no second measure or place.
+        foundationResolveGuides(root, tree)
+        // Scrolling moves placed content and nothing else, so it lands after
+        // placement for the same reason guides do.
+        foundationApplyScroll(root, tree)
         // The cached measure/place state is now valid for every node, so a later
         // retained re-layout (relayout) can reuse the geometry of any subtree whose
         // offer and origin are unchanged instead of recomputing the whole tree.
         layoutMarkAllClean(tree)
+        foundationDumpLayout(tree)
         return tree
     }
 
@@ -98,6 +128,8 @@ class FoundationLayoutPass {
             fresh = layoutResetCounters(move fresh)
             engine.measure(tree: fresh, index: 0, available: available)
             engine.place(tree: fresh, index: 0, origin: Point {})
+            foundationResolveGuides(root, fresh)
+            foundationApplyScroll(root, fresh)
             return fresh
         }
 
@@ -115,6 +147,9 @@ class FoundationLayoutPass {
         result = layoutResetCounters(move result)
         engine.measure(tree: result, index: 0, available: available)
         engine.place(tree: result, index: 0, origin: Point {})
+        foundationResolveGuides(root, result)
+        foundationApplyScroll(root, result)
+        foundationDumpLayout(result)
         return result
     }
 
@@ -138,7 +173,7 @@ class FoundationLayoutPass {
     // `run` at the same viewport (guarded by FoundationResizeLayoutSmoke); the win
     // is avoiding the full fresh `[LayoutNode]` allocation and the tree copy every
     // resize frame.
-    function relayout(tree: borrow mut LayoutTree, available: borrow Size) {
+    function relayout(root: borrow FoundationView, tree: borrow mut LayoutTree, available: borrow Size) {
         // Mutate the retained tree in place. Taking it by `borrow mut` (rather than
         // by value) avoids deep-copying the entire `nodes` + `descriptors` arrays —
         // hundreds of LayoutNode/LayoutDescriptor clones — on every resize frame.
@@ -149,6 +184,11 @@ class FoundationLayoutPass {
         t.placeSkips = 0
         engine.measure(tree: t, index: 0, available: available)
         engine.place(tree: t, index: 0, origin: Point {})
+        // A resize moves the geometry a guide is measured against, so the answers
+        // are recomputed with it. Skipping this is how a separator ends up inset
+        // to where a label used to be.
+        foundationResolveGuides(root, t)
+        foundationApplyScroll(root, t)
         return
     }
 

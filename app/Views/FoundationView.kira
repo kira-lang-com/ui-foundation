@@ -55,9 +55,38 @@ struct FoundationInteraction {
     let imeEnabled: Bool = false
 }
 
+function foundationNoopGuide(width: Float, height: Float) -> Float {
+    let ignored = width + height
+    return 0.0
+}
+
+// An alignment guide a view PUBLISHES: which guide it answers, and how it
+// answers against its own resolved size.
+//
+// The answer is a closure rather than a number because a guide is a position in
+// the publisher's own coordinates and those do not exist until the view has been
+// measured. Resolving it after placement is what lets a guide be written as
+// "twenty points in from my leading edge" and stay true when the view resizes.
+struct FoundationGuidePublication {
+    // The guide's identity. Zero is no guide.
+    let tag: Int = 0
+    let resolve: (Float, Float) -> Float = foundationNoopGuide
+}
+
 struct FoundationView {
     let kind: FoundationViewKind
     let key: Int = 0
+    // Guides this view answers for whatever encloses it.
+    let guides: [FoundationGuidePublication] = []
+    // Guides this view's own painted extent is taken FROM: a separator whose ink
+    // begins where the row above it says its content begins. Zero is none, and
+    // then the view keeps the extent layout gave it.
+    //
+    // A consumer is adjusted after placement rather than before, because a
+    // separator's inset changes what it paints and not what it occupies — so
+    // nothing it is stacked with has to be laid out a second time.
+    let guideLeading: Int = 0
+    let guideTrailing: Int = 0
     let children: [FoundationView] = []
     let width: SizeMode = .Hug
     let height: SizeMode = .Hug
@@ -127,6 +156,14 @@ struct FoundationView {
     // which have their own callbacks. Lets a text field move its caret.
     let onKey: (Int) -> Void = foundationNoopTextCodepoint
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
+    // Whether this view is a window onto content taller than itself. The offset
+    // is held per `key` and applied after placement — see FoundationScroll.kira.
+    let scrolls: Bool = false
+    // Whether a wheel turn over this region belongs to it. A row inside a list
+    // is under the pointer too, and the list is what a wheel over the row
+    // moves, so a region says whether the turn is its own rather than the
+    // topmost region taking every one.
+    let wheel: Bool = false
     let minLength: Float = 0.0
     let interaction: FoundationInteraction = FoundationInteraction {}
     // TextureView: the external KiraGraphics texture id to show (0 = none), and its
@@ -250,6 +287,24 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         Surface -> {
+            // A surface fills itself with its content — except a SCROLLING one,
+            // which is a window onto content measured at its own height. Filling
+            // that content to the window is what would stop it ever overflowing,
+            // and content that never overflows never scrolls.
+            if view.scrolls {
+                return LayoutDescriptor {
+                    width: view.width
+                    height: view.height
+                    flex: view.flex
+                    arrange: .Overlay
+                    axis: .Vertical
+                    alignment: .Stretch
+                    overlayAlignment: .TopLeading
+                    padding: view.padding
+                    margin: EdgeInsets {}
+                    clipContent: view.clipContent
+                }
+            }
             return LayoutDescriptor {
                 width: view.width
                 height: view.height
@@ -264,7 +319,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         Text -> {
-            let measured = foundationTextMeasure(content: view.content, size: view.size)
+            let measured = foundationTextMeasure(content: view.content, size: view.size, weight: view.weight)
             var hasInk = false
             if view.inkRight > view.inkLeft && view.inkTop > 0.0 && view.inkBottom >= 0.0 {
                 hasInk = true

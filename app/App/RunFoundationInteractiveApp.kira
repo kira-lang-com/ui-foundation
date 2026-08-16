@@ -85,6 +85,16 @@ function RunFoundationInteractiveApp(
         if mvH <= 0.0 {
             mvH = intAsFloat(value: height)
         }
+        // A forced render scale changes how many points the drawable holds, and
+        // LAYOUT has to agree with the batch about that. Laying out against the
+        // window's own point size while drawing at a different scale renders a
+        // tree wider than the surface and clips whatever sits at the trailing
+        // edge — which is the whole right-hand panel.
+        let renderScale = foundationRenderScale(frame.backingScale())
+        if renderScale > 0.0 {
+            mvW = intAsFloat(value: frame.drawableWidth()) / renderScale
+            mvH = intAsFloat(value: frame.drawableHeight()) / renderScale
+        }
         state.ui.viewport = Size {
             width: mvW
             height: mvH

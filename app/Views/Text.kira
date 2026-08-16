@@ -18,37 +18,43 @@ function foundationTextIntrinsicHeight(size: Float) -> Float {
 // Real measurement from the FreeType engine, using the same (path,size) face
 // cache as rasterization so measured advances match what gets drawn. Falls back
 // to the proportional estimate if the engine is unavailable (e.g. no font found).
+// Measured at the oversampled face size the rasterizer draws from, and divided
+// back into points. Hinting is nonlinear: a face at 15px reports advances that
+// disagree with the same face at the raster size by whole pixels, and a layout
+// box built from the small answer is narrower than the glyph that lands in it.
+// One face size for measuring and drawing is what makes the box and the ink the
+// same width.
 @Native
-function foundationTextRunWidth(content: borrow String, size: Float) -> Float {
-    return kira_text_measure_run("", content, size)
+function foundationTextRunWidth(content: borrow String, size: Float, weight: Float) -> Float {
+    return kira_text_measure_run("", content, size * textOversample(), weight) / textOversample()
 }
 
 @Native
-function foundationTextRunLineHeight(size: Float) -> Float {
-    return kira_text_line_height("", size)
+function foundationTextRunLineHeight(size: Float, weight: Float) -> Float {
+    return kira_text_line_height("", size * textOversample(), weight) / textOversample()
 }
 
 // Visible glyph bounds relative to the baseline. These are deliberately kept
 // separate from line height: layout must not reserve the font's invisible
 // leading when a text leaf is placed inside a padded card or stack.
 @Native
-function foundationTextRunInkTop(content: borrow String, size: Float) -> Float {
-    return kira_text_run_ink_top("", content, size)
+function foundationTextRunInkTop(content: borrow String, size: Float, weight: Float) -> Float {
+    return kira_text_run_ink_top("", content, size * textOversample(), weight) / textOversample()
 }
 
 @Native
-function foundationTextRunInkBottom(content: borrow String, size: Float) -> Float {
-    return kira_text_run_ink_bottom("", content, size)
+function foundationTextRunInkBottom(content: borrow String, size: Float, weight: Float) -> Float {
+    return kira_text_run_ink_bottom("", content, size * textOversample(), weight) / textOversample()
 }
 
 @Native
-function foundationTextRunInkLeft(content: borrow String, size: Float) -> Float {
-    return kira_text_run_ink_left("", content, size)
+function foundationTextRunInkLeft(content: borrow String, size: Float, weight: Float) -> Float {
+    return kira_text_run_ink_left("", content, size * textOversample(), weight) / textOversample()
 }
 
 @Native
-function foundationTextRunInkRight(content: borrow String, size: Float) -> Float {
-    return kira_text_run_ink_right("", content, size)
+function foundationTextRunInkRight(content: borrow String, size: Float, weight: Float) -> Float {
+    return kira_text_run_ink_right("", content, size * textOversample(), weight) / textOversample()
 }
 
 // Decode an opaque String into its Unicode codepoints (up to 512), so an editable
@@ -85,7 +91,7 @@ function foundationStringFromCodepoints(codes: borrow [Int], start: Int, end: In
     return s
 }
 
-function foundationTextMeasure(content: borrow String, size: Float) -> Size {
+function foundationTextMeasure(content: borrow String, size: Float, weight: Float) -> Size {
     if content.count <= 0 {
         return Size {
             width: 0.0
@@ -93,12 +99,12 @@ function foundationTextMeasure(content: borrow String, size: Float) -> Size {
         }
     }
 
-    var width = foundationTextRunWidth(content: content, size: size)
+    var width = foundationTextRunWidth(content: content, size: size, weight: weight)
     if width <= 0.0 {
         width = foundationTextIntrinsicWidth(size: size, characterCount: content.count)
     }
 
-    var height = foundationTextRunLineHeight(size: size)
+    var height = foundationTextRunLineHeight(size: size, weight: weight)
     if height <= 0.0 {
         height = foundationTextIntrinsicHeight(size: size)
     }
@@ -118,8 +124,8 @@ class FoundationTextMeasurer {
         return foundationTextIntrinsicHeight(size: size)
     }
 
-    function measure(content: borrow String, size: Float) -> Size {
-        return foundationTextMeasure(content: content, size: size)
+    function measure(content: borrow String, size: Float, weight: Float) -> Size {
+        return foundationTextMeasure(content: content, size: size, weight: weight)
     }
 }
 
@@ -129,10 +135,10 @@ function Text(content: String, color: Color, size: Float, weight: Float) -> Foun
         content: content
         color: color
         size: size
-        inkLeft: foundationTextRunInkLeft(content: content, size: size)
-        inkRight: foundationTextRunInkRight(content: content, size: size)
-        inkTop: foundationTextRunInkTop(content: content, size: size)
-        inkBottom: foundationTextRunInkBottom(content: content, size: size)
+        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight)
+        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight)
+        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight)
+        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight)
         weight: weight
     }
 }
@@ -146,10 +152,10 @@ function AdaptiveText(content: String, fallback: Color, size: Float, weight: Flo
         content: content
         color: fallback
         size: size
-        inkLeft: foundationTextRunInkLeft(content: content, size: size)
-        inkRight: foundationTextRunInkRight(content: content, size: size)
-        inkTop: foundationTextRunInkTop(content: content, size: size)
-        inkBottom: foundationTextRunInkBottom(content: content, size: size)
+        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight)
+        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight)
+        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight)
+        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight)
         weight: weight
         adaptiveInk: true
     }

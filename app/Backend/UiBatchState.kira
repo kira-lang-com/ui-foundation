@@ -251,6 +251,10 @@ struct UiBatchState {
     var face: RawPtr
     var fontReady: Bool = false
     var fontSizeSet: Int = 0
+    // The weight the face is currently set to. Paired with `fontSizeSet`: a face
+    // carries size and weight as one variation state, so a run that changes
+    // either must re-set both.
+    var fontWeightSet: Int = 0
     var ascender: Float = 0.0
     var descender: Float = 0.0
 

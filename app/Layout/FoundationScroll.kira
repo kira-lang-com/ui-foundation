@@ -1,0 +1,136 @@
+import Foundation
+import KiraLayout
+
+// Scrolling: a window onto content taller than itself.
+//
+// The offset is applied AFTER placement, by moving the content subtree up. The
+// engine measures and places a scrolling view's content exactly as it would
+// anywhere else — what scrolling changes is only where that content sits, and
+// teaching the engine about it would put a second meaning on every origin it
+// computes. Drawing and hit-testing both read the placed origins, so a region
+// scrolled out from under the pointer stops being clickable without either of
+// them knowing that scrolling exists.
+//
+// The offset a view asks for is CLAMPED here, and the clamped value is what is
+// stored: the two numbers that bound it — how tall the content came out, how
+// tall the window is — exist only once layout has run. Clamping at the wheel
+// instead is how a list keeps counting past its own end and then needs the same
+// number of turns back before it moves.
+
+// Where a scrolling region is held.
+function foundationScrollSlotKey(key: Int) -> String {
+    return "kirauifoundation.scroll." + String(key)
+}
+
+struct FoundationScrollState {
+    var offset: Float = 0.0
+}
+
+function foundationScrollEnsure(key: Int) {
+    if stateSlotHas(foundationScrollSlotKey(key)) == false {
+        stateSlotPut(foundationScrollSlotKey(key), nativeUserData(nativeState(FoundationScrollState {})))
+    }
+    return
+}
+
+// How far the region under `key` is scrolled.
+function foundationScrollOffset(key: Int) -> Float {
+    foundationScrollEnsure(key)
+    let state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    return state.offset
+}
+
+// Scrolls the region by a wheel delta. Positive moves the content up, which is
+// what turning the wheel away from you does to a list.
+//
+// The write recovers the stored value rather than a reader's copy of it: a
+// recovered value handed back by a function is a copy, and a wheel that writes
+// to one turns nothing.
+function foundationScrollBy(key: Int, delta: Float) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    var next = state.offset + delta
+    if next < 0.0 {
+        next = 0.0
+    }
+    state.offset = next
+    return
+}
+
+function foundationScrollSet(key: Int, offset: Float) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    state.offset = offset
+    return
+}
+
+// Applies every scrolling view's offset to the tree it was laid out into.
+function foundationApplyScroll(root: borrow FoundationView, tree: borrow mut LayoutTree) {
+    foundationApplyScrollIn(root, tree, 0)
+    return
+}
+
+function foundationApplyScrollIn(view: borrow FoundationView, tree: borrow mut LayoutTree, nodeIndex: Int) {
+    var t = tree
+    if view.scrolls {
+        foundationScrollNode(view, t, nodeIndex)
+    }
+    let firstChild = t.nodes[nodeIndex].firstChild
+    let childCount = t.nodes[nodeIndex].childCount
+    var childOffset = 0
+    while childOffset < childCount && childOffset < view.children.count {
+        foundationApplyScrollIn(view.children[childOffset], t, firstChild + childOffset)
+        childOffset = childOffset + 1
+    }
+    return
+}
+
+// One scrolling view: what it holds, how far that can move, and the move.
+function foundationScrollNode(view: borrow FoundationView, tree: borrow mut LayoutTree, nodeIndex: Int) {
+    var t = tree
+    let frame = layoutFrame(t, nodeIndex)
+    let firstChild = t.nodes[nodeIndex].firstChild
+    let childCount = t.nodes[nodeIndex].childCount
+    var content = 0.0
+    var childOffset = 0
+    while childOffset < childCount {
+        let childFrame = layoutFrame(t, firstChild + childOffset)
+        let bottom = childFrame.y + childFrame.height - frame.y
+        if bottom > content {
+            content = bottom
+        }
+        childOffset = childOffset + 1
+    }
+    var limit = content - frame.height
+    if limit < 0.0 {
+        limit = 0.0
+    }
+    var offset = foundationScrollOffset(view.key)
+    if offset > limit {
+        offset = limit
+    }
+    if offset < 0.0 {
+        offset = 0.0
+    }
+    foundationScrollSet(view.key, offset)
+    if offset > 0.0 {
+        foundationScrollShift(t, nodeIndex, 0.0 - offset)
+    }
+    return
+}
+
+// Moves everything under `nodeIndex` by `dy`, leaving the node itself — the
+// window stays where layout put it and its content slides inside it.
+function foundationScrollShift(tree: borrow mut LayoutTree, nodeIndex: Int, dy: Float) {
+    var t = tree
+    let firstChild = t.nodes[nodeIndex].firstChild
+    let childCount = t.nodes[nodeIndex].childCount
+    var childOffset = 0
+    while childOffset < childCount {
+        let child = firstChild + childOffset
+        t.nodes[child].originY = t.nodes[child].originY + dy
+        foundationScrollShift(t, child, dy)
+        childOffset = childOffset + 1
+    }
+    return
+}

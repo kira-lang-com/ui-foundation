@@ -85,7 +85,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         Text -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextFields(frame, view.content, view.color, view.size, view.adaptiveInk, view.inkLeft, view.inkRight, view.inkTop, view.inkBottom)
+            current.drawTextFields(frame, view.content, view.color, view.size, view.weight, view.adaptiveInk, view.inkLeft, view.inkRight, view.inkTop, view.inkBottom)
             return 1
         }
         HitArea -> {
@@ -95,7 +95,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             if view.backgroundFill.a > 0.0 {
                 current.drawSurfaceFields(frame, view.backgroundFill, view.border, view.borderWidth, view.radius)
             }
-            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.autofocus, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onKey, view.onScroll, view.interaction)
+            current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.autofocus, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onKey, view.onScroll, view.wheel, view.interaction)
             return foundationRenderChildren(view, tree, nodeIndex, current)
         }
         TextureView -> {
