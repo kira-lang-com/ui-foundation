@@ -26,15 +26,31 @@ extend UiBatch {
             scale = 1.0
         }
         let sizePts = w < h ? w : h
+        let devPx = sizePts * scale
         // Rasterized at the same oversample as text, and for the same reason: an icon is
         // coverage in the same atlas, drawn through the same sampler. Left at one sample
         // per device pixel it was the softest thing on screen once the glyphs were
         // fixed — a hairline stroke at 19pt has nothing to spare.
-        let overs = textOversample()
-        let px = Int(sizePts * scale * overs + 0.5)
-        if px <= 0 || px > 512 {
+        //
+        // An entry has to fit the atlas, so a large icon gives up the oversample first
+        // and is then rasterized at the largest entry that fits, scaled up by its quad.
+        // It is a vector: reading it a little softer is a loss of sharpness, whereas the
+        // size ceiling this replaces DROPPED the draw — an icon asked for above it left
+        // nothing on screen at all.
+        let maxPx = glyphAtlasSize() - 2 * atlasGutter()
+        var px = Int(devPx * textOversample() + 0.5)
+        if px > maxPx {
+            px = Int(devPx + 0.5)
+        }
+        if px > maxPx {
+            px = maxPx
+        }
+        if px <= 0 {
             return
         }
+        // The oversample the entry ACTUALLY carries, which is what the quad and its uv
+        // slack are measured in below.
+        let overs = Float(px) / devPx
         let hash64 = iconHash(svg)
         let iconHash = Int(hash64)
         let key = 0 - ((iconHash % 4294967291) * 1024 + px)
@@ -179,7 +195,7 @@ extend UiBatch {
         graphics: borrow Graphics,
         content: borrow String,
         x: Float, y: Float, w: Float, h: Float,
-        color: borrow Color, sizePx: Float,
+        color: borrow Color, sizePx: Float, weightAxis: Float,
         clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
         adaptive: Bool = false,
         wash: Float = 0.0,
@@ -213,9 +229,10 @@ extend UiBatch {
         // `rasterScale` (not `scale`) on the way back into points.
         let rasterScale = scale * textOversample()
         let sizeKey = glyphSizeKey(sizePx * rasterScale)
+        let weightKey = glyphWeightKey(weightAxis)
         // Inline of setGlyphSize: switch the face's working size + cache vertical metrics.
-        if state.fontSizeSet != sizeKey {
-            let applied = faceSetPixelSize(state.face, Float(sizeKey))
+        if state.fontSizeSet != sizeKey || state.fontWeightSet != weightKey {
+            let applied = faceSetPixelSize(state.face, Float(sizeKey), weightAxis)
             if applied == 0 {
                 return
             }
@@ -225,6 +242,7 @@ extend UiBatch {
             state.descender = readFloat(mv, 4)
             freeBytes(mv)
             state.fontSizeSet = sizeKey
+            state.fontWeightSet = weightKey
         }
         let ascender = state.ascender / rasterScale
         let descender = state.descender / rasterScale
@@ -317,7 +335,7 @@ extend UiBatch {
                     // softer and unevenly spaced — the thing this is here to avoid.
                     let devicePen = penX * scale
                     let phase = glyphPhaseOf(devicePen)
-                    let key = glyphCacheKey(codepoint, sizeKey, phase)
+                    let key = glyphCacheKey(codepoint, sizeKey, weightKey, phase)
                     var slotIdx = -1
                     var homeSlot = -1
                     var probing = cap > 0

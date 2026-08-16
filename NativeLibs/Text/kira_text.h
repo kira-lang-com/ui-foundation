@@ -53,7 +53,7 @@ void kira_text_face_destroy(kira_text_face* face);
 
 /* Select the working pixel size for metrics and rasterization.
  * Returns 1 on success, 0 on failure. */
-int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size);
+int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size, float weight);
 
 /* Vertical line metrics in pixels at the current size. */
 typedef struct {
@@ -124,12 +124,12 @@ const char* kira_text_probe_report(const char* font_path);
 /* Layout helpers over a (path,size) face cache of their own, so measured
  * advances match what the caller later rasterizes. `font_path` may be
  * NULL/empty to auto-discover. Both return 0 if no face is available. */
-double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size);
-double kira_text_line_height(const char* font_path, double pixel_size);
-double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size);
-double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size);
-double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size);
-double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size);
+double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size, double weight);
+double kira_text_line_height(const char* font_path, double pixel_size, double weight);
+double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size, double weight);
+double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size, double weight);
+double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size, double weight);
+double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size, double weight);
 
 #ifdef __cplusplus
 }

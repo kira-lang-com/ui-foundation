@@ -12,6 +12,7 @@
 #include FT_FREETYPE_H
 #include FT_MODULE_H
 #include FT_OUTLINE_H
+#include FT_MULTIPLE_MASTERS_H
 
 #include <hb.h>
 #include <hb-ft.h>
@@ -20,12 +21,12 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Bundled Figtree variable font data. */
-#include "kira_figtree_font.h"
+/* Bundled Inter variable font data (opsz 14..32, wght 100..900). */
+#include "kira_inter_font.h"
 
-/* Forward declaration: embedded Figtree face loaded from the byte array above.
+/* Forward declaration: embedded Inter face loaded from the byte array above.
  * Defined further below alongside the draw-cache infrastructure. */
-static kira_text_face* kira_text_embedded_face(float pixel_size);
+static kira_text_face* kira_text_embedded_face(float pixel_size, float weight);
 
 struct kira_text_engine {
     FT_Library library;
@@ -35,6 +36,7 @@ struct kira_text_face {
     FT_Face        face;
     unsigned char* owned_blob; /* non-NULL when loaded from memory */
     float          pixel_size;
+    float          weight;
     int            has_kerning;
     hb_font_t*     hb_font;    /* lazily created HarfBuzz font over `face` */
 };
@@ -317,9 +319,79 @@ kira_text_face* kira_text_face_load_memory(kira_text_engine* engine,
 
 kira_text_face* kira_text_face_load_bundled(kira_text_engine* engine) {
     return kira_text_face_load_memory(engine,
-                                      kira_figtree_font_data,
-                                      (long)KIRA_FIGTREE_FONT_SIZE,
+                                      kira_inter_font_data,
+                                      (long)KIRA_INTER_FONT_SIZE,
                                       0);
+}
+
+/* Drive a variable font's optical size from the size being rendered.
+ *
+ * This is what `opsz` is FOR, and it is the whole reason Inter ships a Display
+ * cut: a face drawn at 11 points wants open counters and sturdy stems, and the
+ * same outlines scaled up to 28 look coarse and loose. Leaving the axis at its
+ * default renders every size with the 14-point design, which is exactly the
+ * flat, slightly-wrong look that separates a bundled webfont from a system one.
+ *
+ * The axis is found by TAG rather than by position: a font is free to order its
+ * axes however it likes, and Inter happens to put `opsz` first while most put
+ * `wght` there. Anything without the axis is left alone. */
+static void kira_text_face_apply_variations(kira_text_face* face, float pixel_size, float weight) {
+    if (face == NULL || face->face == NULL) {
+        return;
+    }
+    if ((face->face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS) == 0) {
+        return;
+    }
+
+    FT_MM_Var* mm = NULL;
+    if (FT_Get_MM_Var(face->face, &mm) != 0 || mm == NULL) {
+        return;
+    }
+
+    FT_Fixed coords[16];
+    FT_UInt count = mm->num_axis;
+    if (count > 16) {
+        count = 16;
+    }
+    if (FT_Get_Var_Design_Coordinates(face->face, count, coords) != 0) {
+        FT_Done_MM_Var(face->face->glyph->library, mm);
+        return;
+    }
+
+    int changed = 0;
+    for (FT_UInt axis = 0; axis < count; axis += 1) {
+        FT_ULong tag = mm->axis[axis].tag;
+        FT_Fixed wanted;
+        if (tag == FT_MAKE_TAG('o', 'p', 's', 'z')) {
+            /* The axis is stated in points, and this is asked in pixels — the
+             * same number at 1x and the honest reading of "the size it is set
+             * at". */
+            wanted = (FT_Fixed)(pixel_size * 65536.0f);
+        } else if (tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+            wanted = (FT_Fixed)(weight * 65536.0f);
+        } else {
+            continue;
+        }
+        /* Both axes are set in ONE pass on purpose. An optical size shifts stem
+         * contrast, so a face asked for a heavier weight and a larger optical
+         * size in two separate calls spends the interval drawn at a combination
+         * neither caller asked for. */
+        if (wanted < mm->axis[axis].minimum) {
+            wanted = mm->axis[axis].minimum;
+        }
+        if (wanted > mm->axis[axis].maximum) {
+            wanted = mm->axis[axis].maximum;
+        }
+        if (coords[axis] != wanted) {
+            coords[axis] = wanted;
+            changed = 1;
+        }
+    }
+
+    if (changed) {
+        FT_Set_Var_Design_Coordinates(face->face, count, coords);
+    }
+    FT_Done_MM_Var(face->face->glyph->library, mm);
 }
 
 void kira_text_face_destroy(kira_text_face* face) {
@@ -331,7 +403,7 @@ void kira_text_face_destroy(kira_text_face* face) {
     kira_text_face_dispose(face);
 }
 
-int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size) {
+int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size, float weight) {
     if (face == NULL || face->face == NULL || pixel_size <= 0.0f) {
         return 0;
     }
@@ -341,7 +413,13 @@ int kira_text_face_set_pixel_size(kira_text_face* face, float pixel_size) {
     if (FT_Set_Char_Size(face->face, 0, size_26dot6, 0, 0) != 0) {
         return 0;
     }
+    /* Size and weight are one setting, not two. A face carries both as design
+     * axes, and every caller that knows one knows the other — so they arrive
+     * together and there is no window in which a face is sized but not yet
+     * weighted. */
+    kira_text_face_apply_variations(face, pixel_size, weight);
     face->pixel_size = pixel_size;
+    face->weight = weight;
     return 1;
 }
 
@@ -511,10 +589,10 @@ static const char* kira_text_probe_font(void) {
     }
 #endif
 
-    /* Prefer the bundled Figtree font file shipped alongside the library. */
+    /* Prefer the bundled Inter file shipped alongside the library. */
     static const char* const bundled_candidates[] = {
-        "fonts/Figtree-VariableFont_wght.ttf",
-        "../fonts/Figtree-VariableFont_wght.ttf",
+        "fonts/InterVariable.ttf",
+        "../fonts/InterVariable.ttf",
     };
     for (size_t i = 0; i < sizeof(bundled_candidates) / sizeof(bundled_candidates[0]); i += 1) {
         FILE* probe = fopen(bundled_candidates[i], "rb");
@@ -524,26 +602,35 @@ static const char* kira_text_probe_font(void) {
         }
     }
 
-    /* Figtree may be installed as a system font. */
-    static const char* const figtree_candidates[] = {
-        "C:/Windows/Fonts/Figtree-VariableFont_wght.ttf",
-        "/System/Library/Fonts/Figtree-VariableFont_wght.ttf",
-        "/usr/share/fonts/truetype/figtree/Figtree-VariableFont_wght.ttf",
-        "/usr/share/fonts/opentype/figtree/Figtree-VariableFont_wght.ttf",
-        "~/.fonts/Figtree-VariableFont_wght.ttf",
+    /* Inter may be installed as a system font. */
+    static const char* const inter_candidates[] = {
+        "C:/Windows/Fonts/InterVariable.ttf",
+        "/System/Library/Fonts/InterVariable.ttf",
+        "/usr/share/fonts/truetype/inter/InterVariable.ttf",
+        "/usr/share/fonts/opentype/inter/InterVariable.ttf",
+        "~/.fonts/InterVariable.ttf",
     };
-    for (size_t i = 0; i < sizeof(figtree_candidates) / sizeof(figtree_candidates[0]); i += 1) {
-        FILE* probe = fopen(figtree_candidates[i], "rb");
+    for (size_t i = 0; i < sizeof(inter_candidates) / sizeof(inter_candidates[0]); i += 1) {
+        FILE* probe = fopen(inter_candidates[i], "rb");
         if (probe != NULL) {
             fclose(probe);
-            return figtree_candidates[i];
+            return inter_candidates[i];
         }
     }
 
+#if defined(_WIN32)
+    /* Windows stops here, at the embedded Inter, rather than falling through
+     * to Segoe UI.
+     *
+     * This has to agree with `windowsFontCandidates()` on the Kira side, which
+     * names no system face for the same reason: measurement and rasterization
+     * read the face through two different entry points, and a build where one
+     * of them resolves Segoe while the other resolves Inter lays text out to
+     * one font's advances and then draws it in another's. */
+    return "<builtin>";
+#else
     /* Common system fonts across the host platforms this engine targets. */
     static const char* const sys_candidates[] = {
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -556,8 +643,9 @@ static const char* kira_text_probe_font(void) {
             return sys_candidates[i];
         }
     }
+#endif
 
-    /* No system font is available — use the embedded Figtree variable font.
+    /* No system font is available — use the embedded Inter variable font.
      * The sentinel value "<builtin>" is handled by kira_text_cached_face(). */
     return "<builtin>";
 }
@@ -580,7 +668,7 @@ static const char* kira_text_discover_font(void) {
     return cached;
 }
 
-/* Locate a CJK-capable system font. The bundled Figtree face (and Segoe/Arial)
+/* Locate a CJK-capable system font. The bundled Inter face (and Segoe/Arial)
  * have no CJK coverage, so committed Hanzi would render as .notdef tofu. These
  * fonts also carry Latin glyphs, so a mixed Latin+Hanzi run can be shaped
  * entirely with the CJK face. Returns NULL when none is installed. */
@@ -691,10 +779,10 @@ const char* kira_text_probe_report(const char* font_path) {
 
     kira_text_face* face = NULL;
     if (strcmp(font_path, "<builtin>") == 0) {
-        face = kira_text_embedded_face(px);
+        face = kira_text_embedded_face(px, 400.0f);
         if (face == NULL) {
             snprintf(report, sizeof(report),
-                     "kira-text: ERROR could not load embedded Figtree font");
+                     "kira-text: ERROR could not load embedded Inter font");
             kira_text_engine_destroy(engine);
             return report;
         }
@@ -708,7 +796,7 @@ const char* kira_text_probe_report(const char* font_path) {
         }
     }
 
-    if (face->pixel_size != px && !kira_text_face_set_pixel_size(face, px)) {
+    if (face->pixel_size != px && !kira_text_face_set_pixel_size(face, px, 400.0f)) {
         snprintf(report, sizeof(report),
                  "kira-text: ERROR could not size face '%s'", font_path);
         kira_text_face_destroy(face);
@@ -745,19 +833,21 @@ const char* kira_text_probe_report(const char* font_path) {
     return report;
 }
 
-/* Embedded Figtree font face — lazily loaded from the bundled byte array. */
+/* Embedded Inter font face — lazily loaded from the bundled byte array. */
 static kira_text_engine* g_embedded_engine = NULL;
 static kira_text_face*   g_embedded_face   = NULL;
 static float             g_embedded_ps     = 0.0f;
+static float             g_embedded_weight = 0.0f;
 
-static kira_text_face* kira_text_embedded_face(float pixel_size) {
-    if (g_embedded_face != NULL && g_embedded_ps == pixel_size) {
+static kira_text_face* kira_text_embedded_face(float pixel_size, float weight) {
+    if (g_embedded_face != NULL && g_embedded_ps == pixel_size && g_embedded_weight == weight) {
         return g_embedded_face;
     }
     if (g_embedded_face != NULL) {
         kira_text_face_destroy(g_embedded_face);
         g_embedded_face = NULL;
         g_embedded_ps = 0.0f;
+        g_embedded_weight = 0.0f;
     }
     if (g_embedded_engine == NULL) {
         g_embedded_engine = kira_text_engine_create();
@@ -765,27 +855,36 @@ static kira_text_face* kira_text_embedded_face(float pixel_size) {
     }
     g_embedded_face = kira_text_face_load_memory(
         g_embedded_engine,
-        kira_figtree_font_data,
-        (long)KIRA_FIGTREE_FONT_SIZE,
+        kira_inter_font_data,
+        (long)KIRA_INTER_FONT_SIZE,
         0
     );
     if (g_embedded_face == NULL) return NULL;
-    if (!kira_text_face_set_pixel_size(g_embedded_face, pixel_size)) {
+    if (!kira_text_face_set_pixel_size(g_embedded_face, pixel_size, weight)) {
         kira_text_face_destroy(g_embedded_face);
         g_embedded_face = NULL;
         return NULL;
     }
     g_embedded_ps = pixel_size;
+    g_embedded_weight = weight;
     return g_embedded_face;
 }
 
 /* Face cache: FT_New_Face parses the whole font, far too slow to repeat per
- * draw call. Cache a handful of faces keyed by (path, quantized pixel size). */
+ * draw call. Cache a handful of faces keyed by (path, quantized pixel size,
+ * weight).
+ *
+ * Weight is part of the KEY, not a property set afterwards. A face carries its
+ * variation coordinates, so two runs at the same size and different weights are
+ * two different faces — keying on size alone hands the second run the first
+ * one's weight, and which weight a label ends up drawn in then depends on the
+ * order the panel happened to be built in. */
 #define KIRA_TEXT_DRAW_CACHE_SLOTS 16
 
 typedef struct {
     char            path[260];
     int             pixel_size_q; /* pixel_size rounded to 0.5px units */
+    int             weight_q;     /* weight rounded to whole units */
     kira_text_face* face;
 } kira_text_draw_cache_slot;
 
@@ -793,10 +892,10 @@ static kira_text_engine* g_draw_engine = NULL;
 static kira_text_draw_cache_slot g_draw_cache[KIRA_TEXT_DRAW_CACHE_SLOTS];
 static int g_draw_cache_count = 0;
 
-static kira_text_face* kira_text_cached_face(const char* path, float pixel_size) {
-    /* The embedded Figtree font is loaded from the bundled byte array. */
+static kira_text_face* kira_text_cached_face(const char* path, float pixel_size, float weight) {
+    /* The embedded Inter font is loaded from the bundled byte array. */
     if (strcmp(path, "<builtin>") == 0) {
-        return kira_text_embedded_face(pixel_size);
+        return kira_text_embedded_face(pixel_size, weight);
     }
 
     if (g_draw_engine == NULL) {
@@ -806,9 +905,11 @@ static kira_text_face* kira_text_cached_face(const char* path, float pixel_size)
         }
     }
     int quantized = (int)(pixel_size * 2.0f + 0.5f);
+    int weight_q = (int)(weight + 0.5f);
 
     for (int i = 0; i < g_draw_cache_count; i += 1) {
         if (g_draw_cache[i].pixel_size_q == quantized &&
+            g_draw_cache[i].weight_q == weight_q &&
             strcmp(g_draw_cache[i].path, path) == 0) {
             return g_draw_cache[i].face;
         }
@@ -818,7 +919,7 @@ static kira_text_face* kira_text_cached_face(const char* path, float pixel_size)
     if (face == NULL) {
         return NULL;
     }
-    kira_text_face_set_pixel_size(face, pixel_size);
+    kira_text_face_set_pixel_size(face, pixel_size, weight);
 
     kira_text_draw_cache_slot* slot;
     if (g_draw_cache_count < KIRA_TEXT_DRAW_CACHE_SLOTS) {
@@ -833,11 +934,12 @@ static kira_text_face* kira_text_cached_face(const char* path, float pixel_size)
     }
     snprintf(slot->path, sizeof(slot->path), "%s", path);
     slot->pixel_size_q = quantized;
+    slot->weight_q = weight_q;
     slot->face = face;
     return face;
 }
 
-double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size) {
+double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size, double weight) {
     if (utf8 == NULL || utf8[0] == '\0' || pixel_size <= 0.0) {
         return 0.0;
     }
@@ -845,14 +947,14 @@ double kira_text_measure_run(const char* font_path, const char* utf8, double pix
     if (font_path == NULL) {
         return 0.0;
     }
-    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size, (float)weight);
     if (face == NULL) {
         return 0.0;
     }
     return (double)kira_text_measure_utf8(face, utf8, -1);
 }
 
-double kira_text_line_height(const char* font_path, double pixel_size) {
+double kira_text_line_height(const char* font_path, double pixel_size, double weight) {
     if (pixel_size <= 0.0) {
         return 0.0;
     }
@@ -862,7 +964,7 @@ double kira_text_line_height(const char* font_path, double pixel_size) {
             return 0.0;
         }
     }
-    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size);
+    kira_text_face* face = kira_text_cached_face(font_path, (float)pixel_size, (float)weight);
     if (face == NULL) {
         return 0.0;
     }
@@ -883,6 +985,7 @@ double kira_text_line_height(const char* font_path, double pixel_size) {
 typedef struct {
     int valid;
     int pixel_size_q;
+    int weight_q;
     char path[KIRA_TEXT_INK_CACHE_PATH_MAX];
     char text[KIRA_TEXT_INK_CACHE_TEXT_MAX];
     float left;
@@ -995,6 +1098,7 @@ static int kira_text_cached_ink_bounds(
     const char* font_path,
     const char* utf8,
     double pixel_size,
+    double weight,
     double* out_left,
     double* out_right,
     double* out_top,
@@ -1025,12 +1129,18 @@ static int kira_text_cached_ink_bounds(
     const double raster_measure_scale = 4.0;
     double raster_size = pixel_size * raster_measure_scale;
     int pixel_size_q = (int)(raster_size * 100.0 + 0.5);
+    /* Ink bounds are a property of the WEIGHT as much as the size: a semibold
+     * run is wider and its stems reach further than the regular cut of the same
+     * string. Leaving weight out of the key is how a bold label gets laid out to
+     * the regular run's ink and then painted past it. */
+    int weight_q = (int)(weight + 0.5);
 
     if (path_len < KIRA_TEXT_INK_CACHE_PATH_MAX &&
         text_len < KIRA_TEXT_INK_CACHE_TEXT_MAX) {
         for (int i = 0; i < KIRA_TEXT_INK_CACHE_SLOTS; i += 1) {
             kira_text_ink_cache_slot* slot = &g_ink_cache[i];
             if (slot->valid && slot->pixel_size_q == pixel_size_q &&
+                slot->weight_q == weight_q &&
                 strcmp(slot->path, font_path) == 0 &&
                 strcmp(slot->text, utf8) == 0) {
                 if (out_left != NULL) {
@@ -1050,7 +1160,7 @@ static int kira_text_cached_ink_bounds(
         }
     }
 
-    kira_text_face* face = kira_text_cached_face(font_path, (float)raster_size);
+    kira_text_face* face = kira_text_cached_face(font_path, (float)raster_size, (float)weight);
     float left = 0.0f;
     float right = 0.0f;
     float top = 0.0f;
@@ -1065,6 +1175,7 @@ static int kira_text_cached_ink_bounds(
         g_ink_cache_next = (g_ink_cache_next + 1) % KIRA_TEXT_INK_CACHE_SLOTS;
         slot->valid = 1;
         slot->pixel_size_q = pixel_size_q;
+        slot->weight_q = weight_q;
         snprintf(slot->path, sizeof(slot->path), "%s", font_path);
         snprintf(slot->text, sizeof(slot->text), "%s", utf8);
         slot->left = left;
@@ -1087,27 +1198,27 @@ static int kira_text_cached_ink_bounds(
     return 1;
 }
 
-double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size) {
+double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size, double weight) {
     double left = 0.0;
-    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, &left, NULL, NULL, NULL);
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, weight, &left, NULL, NULL, NULL);
     return left;
 }
 
-double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size) {
+double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size, double weight) {
     double right = 0.0;
-    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, &right, NULL, NULL);
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, weight, NULL, &right, NULL, NULL);
     return right;
 }
 
-double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size) {
+double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size, double weight) {
     double top = 0.0;
-    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, NULL, &top, NULL);
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, weight, NULL, NULL, &top, NULL);
     return top;
 }
 
-double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size) {
+double kira_text_run_ink_bottom(const char* font_path, const char* utf8, double pixel_size, double weight) {
     double bottom = 0.0;
-    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, NULL, NULL, NULL, &bottom);
+    kira_text_cached_ink_bounds(font_path, utf8, pixel_size, weight, NULL, NULL, NULL, &bottom);
     return bottom;
 }
 

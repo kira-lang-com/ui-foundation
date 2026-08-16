@@ -133,7 +133,7 @@ function RunFoundationApp(
             state.cachedLayoutTree = FoundationLayoutPass().run(root: state.root, available: viewport)
             state.hasAppLayout = true
         } else {
-            FoundationLayoutPass().relayout(state.cachedLayoutTree, viewport)
+            FoundationLayoutPass().relayout(state.root, state.cachedLayoutTree, viewport)
         }
         let profileLayoutEnd = foundationProfileNow(state.profile, frame)
         if foundationLayoutHasNonEmptyFrame(state.cachedLayoutTree) && !state.announcedLayout {

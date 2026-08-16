@@ -267,12 +267,12 @@ function FoundationResizeLayoutSmoke() -> Int {
     var tree = pass.run(root: foundationIncrementalDeepView("ALPHA"), available: large)
 
     // Shrink in place, then compare to a clean layout at the smaller viewport.
-    pass.relayout(tree, small)
+    pass.relayout(foundationIncrementalDeepView("ALPHA"), tree, small)
     let scratchSmall = pass.run(root: foundationIncrementalDeepView("ALPHA"), available: small)
     passed = passed + smokePass(foundationTreesGeometryEqual(tree, scratchSmall))
 
     // Grow back in place, then compare to a clean layout at the larger viewport.
-    pass.relayout(tree, large)
+    pass.relayout(foundationIncrementalDeepView("ALPHA"), tree, large)
     let scratchLarge = pass.run(root: foundationIncrementalDeepView("ALPHA"), available: large)
     passed = passed + smokePass(foundationTreesGeometryEqual(tree, scratchLarge))
 

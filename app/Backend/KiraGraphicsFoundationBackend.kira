@@ -14,6 +14,9 @@ struct FoundationHitRegionRecord {
     let onSubmit: () -> Void = foundationNoopPress
     let onKey: (Int) -> Void = foundationNoopTextCodepoint
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
+    // Whether this region is what a wheel turn over it moves. A row inside a
+    // list is under the pointer too, and it is not the thing that scrolls.
+    let wheel: Bool = false
     let interaction: FoundationInteraction = FoundationInteraction {}
 }
 
@@ -105,10 +108,20 @@ class KiraGraphicsFoundationBackend {
         self.clipMaxX = intAsFloat(value: width)
         self.clipMaxY = intAsFloat(value: height)
 
+        // The logical viewport is the drawable divided by the scale, so forcing
+        // the scale trades logical AREA for device pixels per point — which is
+        // exactly what a denser display gives, and the only way to see it on a
+        // panel that has not got the pixels.
+        let renderScale = foundationRenderScale(self.graphics.backingScale())
+        let logicalW = intAsFloat(value: self.graphics.contextWidth()) / renderScale
+        let logicalH = intAsFloat(value: self.graphics.contextHeight()) / renderScale
+        self.clipMaxX = logicalW
+        self.clipMaxY = logicalH
+
         self.batch.beginBatch(
-            intAsFloat(value: width),
-            intAsFloat(value: height),
-            self.graphics.backingScale(),
+            logicalW,
+            logicalH,
+            renderScale,
             self.graphics.contextWidth(),
             self.graphics.contextHeight()
         )
@@ -207,6 +220,13 @@ class KiraGraphicsFoundationBackend {
 
     function drawSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
+        if environmentIsSet("KIRA_UI_DUMP_LAYOUT") {
+            printLine(
+                "paint x=" + String(bounds.x) + " y=" + String(bounds.y)
+                    + " w=" + String(bounds.width) + " h=" + String(bounds.height)
+                    + " r=" + String(radius)
+            )
+        }
         if self.suppressNextFill {
             self.suppressNextFill = false
             let noFill = Color {
@@ -257,18 +277,32 @@ class KiraGraphicsFoundationBackend {
 
     function drawSquircleSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
         self.drewVisibleUi = true
+        if environmentIsSet("KIRA_UI_DUMP_LAYOUT") {
+            printLine(
+                "paint squircle x=" + String(bounds.x) + " y=" + String(bounds.y)
+                    + " w=" + String(bounds.width) + " h=" + String(bounds.height)
+            )
+        }
         self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, 0.25)
         return
     }
 
     function drawText(bounds: borrow Rect, paint: borrow FoundationTextPaint) {
-        drawTextFields(bounds, paint.content, paint.color, paint.size, false)
+        drawTextFields(bounds, paint.content, paint.color, paint.size, paint.weight, false)
         return
     }
 
-    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, adaptiveInk: Bool, inkLeft: Float = 0.0, inkRight: Float = 0.0, inkTop: Float = 0.0, inkBottom: Float = 0.0) {
+    function drawTextFields(bounds: borrow Rect, content: borrow String, color: borrow Color, size: Float, weight: Float, adaptiveInk: Bool, inkLeft: Float = 0.0, inkRight: Float = 0.0, inkTop: Float = 0.0, inkBottom: Float = 0.0) {
         self.drewVisibleUi = true
-        self.batch.pushText(self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma, inkLeft, inkRight, inkTop, inkBottom)
+        if environmentIsSet("KIRA_UI_DUMP_LAYOUT") && content.count <= 3 {
+            printLine(
+                "paint text '" + content + "' x=" + String(bounds.x) + " w=" + String(bounds.width)
+                    + " advance=" + String(foundationTextRunWidth(content: content, size: size, weight: weight))
+                    + " inkL=" + String(foundationTextRunInkLeft(content: content, size: size, weight: weight))
+                    + " inkR=" + String(foundationTextRunInkRight(content: content, size: size, weight: weight))
+            )
+        }
+        self.batch.pushText(self.graphics, content, bounds.x, bounds.y, bounds.width, bounds.height, color, size, weight, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, adaptiveInk, self.glassWash, self.glassWashLuma, inkLeft, inkRight, inkTop, inkBottom)
         return
     }
 
@@ -500,6 +534,7 @@ class KiraGraphicsFoundationBackend {
         onSubmit: () -> Void,
         onKey: (Int) -> Void,
         onScroll: (Float, Float) -> Void,
+        wheel: Bool,
         interaction: FoundationInteraction,
     ) {
         self.hitRegions.append(FoundationHitRegionRecord {
@@ -515,6 +550,7 @@ class KiraGraphicsFoundationBackend {
             onSubmit: onSubmit
             onKey: onKey
             onScroll: onScroll
+            wheel: wheel
             interaction: interaction
         })
         return

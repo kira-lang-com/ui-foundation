@@ -220,10 +220,27 @@ function foundationEndPress(ui: borrow mut FoundationUiContext, regions: borrow 
     return
 }
 
+// A wheel turn goes to the nearest thing under the pointer that SCROLLS, not to
+// whatever happens to be under it: a row in a list is under the pointer too, and
+// a wheel over a row moves the list the row is in.
+function foundationScrollRegionIndexAtPoint(regions: borrow [FoundationHitRegionRecord], x: Float, y: Float) -> Int {
+    var index = regions.count
+    while index > 0 {
+        index = index - 1
+        let region = regions[index]
+        if region.wheel && region.disabled == false {
+            if foundationRectContains(region.bounds, x, y) {
+                return index
+            }
+        }
+    }
+    return -1
+}
+
 function foundationHandleScroll(ui: borrow mut FoundationUiContext, regions: borrow [FoundationHitRegionRecord], dx: Float, dy: Float) {
     ui.scrollX = dx
     ui.scrollY = dy
-    let index = foundationHitRegionIndexAtPoint(regions, ui.pointerX, ui.pointerY)
+    let index = foundationScrollRegionIndexAtPoint(regions, ui.pointerX, ui.pointerY)
     if index >= 0 {
         regions[index].onScroll(dx, dy)
     }

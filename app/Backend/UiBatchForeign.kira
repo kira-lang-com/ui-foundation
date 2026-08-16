@@ -163,7 +163,7 @@ function loadFace(engine: RawPtr, path: CString, faceIndex: I32): RawPtr;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_load_bundled; abi: c; }
 function loadBundledFace(engine: RawPtr): RawPtr;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_set_pixel_size; abi: c; }
-function faceSetPixelSize(face: RawPtr, pixelSize: F32): I32;
+function faceSetPixelSize(face: RawPtr, pixelSize: F32, weight: F32): I32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_glyph_index; abi: c; }
 function faceGlyphIndex(face: RawPtr, codepoint: U32): U32;
 @FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph; abi: c; }
