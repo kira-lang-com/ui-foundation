@@ -224,3 +224,10 @@ function foundationIconInkBottom(svg: borrow String) -> Float {
 function foundationIconInkAspect(svg: borrow String) -> Float {
     return kira_icon_ink_aspect(svg)
 }
+
+// How much of its own box a symbol's drawing covers: low for a stroked symbol,
+// high for a solid one.
+@Native
+function foundationIconInkDensity(svg: borrow String) -> Float {
+    return kira_icon_ink_density(svg)
+}

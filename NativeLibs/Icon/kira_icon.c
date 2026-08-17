@@ -602,6 +602,9 @@ typedef struct {
     float top;
     float right;
     float bottom;
+    /* How much of the ink's own box the drawing covers: a stroked symbol is
+     * mostly the paper it is drawn on, a solid one is mostly ink. */
+    float density;
     int32_t valid;
 } IconInkEntry;
 
@@ -616,9 +619,11 @@ static int32_t icon_ink_measure(const char *svg_utf8, IconInkEntry *out) {
         return 0;
     }
     int32_t first_row = -1, last_row = -1, first_col = ICON_INK_PROBE, last_col = -1;
+    int64_t covered = 0;
     for (int32_t y = 0; y < ICON_INK_PROBE; y++) {
         for (int32_t x = 0; x < ICON_INK_PROBE; x++) {
             if (probe[y * ICON_INK_PROBE + x] < 16) continue;
+            covered++;
             if (first_row < 0) first_row = y;
             last_row = y;
             if (x < first_col) first_col = x;
@@ -631,6 +636,8 @@ static int32_t icon_ink_measure(const char *svg_utf8, IconInkEntry *out) {
     out->top = (float)first_row / (float)ICON_INK_PROBE;
     out->right = (float)(last_col + 1) / (float)ICON_INK_PROBE;
     out->bottom = (float)(last_row + 1) / (float)ICON_INK_PROBE;
+    int64_t box = (int64_t)(last_col - first_col + 1) * (int64_t)(last_row - first_row + 1);
+    out->density = box > 0 ? (float)((double)covered / (double)box) : 0.0f;
     out->valid = 1;
     return 1;
 }
@@ -674,6 +681,18 @@ double kira_icon_ink_bottom(const char *svg_utf8) {
     const IconInkEntry *entry = icon_ink_entry(svg_utf8);
     if (entry == NULL) return 1.0;
     return (double)entry->bottom;
+}
+
+/* How much of its own box a symbol's drawing covers.
+ *
+ * A stroked symbol — a folder, a chevron — is mostly the paper inside its
+ * outline, and answers low. A solid one — a cursor, a filled marker — answers
+ * high. It is the difference between a symbol that HAS stems to match against
+ * type and one that has none: growing the second only swells the shape. */
+double kira_icon_ink_density(const char *svg_utf8) {
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 0.0;
+    return (double)entry->density;
 }
 
 /* How wide a symbol's ink is against how tall it is. A folder is wider than it
