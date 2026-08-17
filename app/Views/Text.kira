@@ -197,3 +197,22 @@ function Icon(svg: String, color: Color, size: Float) -> FoundationView {
         size: size
     }
 }
+
+// --- Symbol metrics ----------------------------------------------------------
+//
+// Where a symbol's ink sits inside its own box, as fractions of that box from
+// its top edge. A library is not one shape: a folder fills the middle of its
+// canvas and an open folder is drawn lower and shorter, so a caller that sizes
+// or places symbols against text has to ask per SYMBOL — exactly as it asks a
+// font per glyph. Asking one constant for the whole set is how one symbol lands
+// on the line and the next one sits below it.
+
+@Native
+function foundationIconInkTop(svg: borrow String) -> Float {
+    return kira_icon_ink_top(svg)
+}
+
+@Native
+function foundationIconInkBottom(svg: borrow String) -> Float {
+    return kira_icon_ink_bottom(svg)
+}

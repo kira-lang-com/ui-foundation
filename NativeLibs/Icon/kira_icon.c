@@ -580,6 +580,93 @@ static void icon_xf_apply(const IconXf *xf, IconPathSet *set) {
     }
 }
 
+/* Where a symbol's ink actually sits inside its own box, as fractions of that
+ * box measured from its top edge.
+ *
+ * A library is not one shape: a folder fills the middle of its canvas, an open
+ * folder is drawn lower and shorter, and every symbol has its own margins. One
+ * constant for the whole set puts each of them somewhere slightly different
+ * against the words beside it, which is exactly what a caller cannot correct
+ * for. So the engine answers per symbol, the way a font answers per glyph.
+ *
+ * Measured off a small rasterization rather than off the path data, because ink
+ * is what the STROKES cover and not where the outlines run. The answers are
+ * cached: a bar redraws the same handful of symbols every frame.
+ */
+#define ICON_INK_PROBE 64
+#define ICON_INK_CACHE 32
+
+typedef struct {
+    int64_t hash;
+    float top;
+    float bottom;
+    int32_t valid;
+} IconInkEntry;
+
+static IconInkEntry icon_ink_cache[ICON_INK_CACHE];
+static int32_t icon_ink_next = 0;
+
+int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_bottom) {
+    if (out_top == NULL || out_bottom == NULL) return 0;
+    *out_top = 0.0;
+    *out_bottom = 1.0;
+    if (svg_utf8 == NULL) return 0;
+
+    int64_t hash = kira_icon_hash(svg_utf8);
+    for (int32_t i = 0; i < ICON_INK_CACHE; i++) {
+        if (icon_ink_cache[i].valid && icon_ink_cache[i].hash == hash) {
+            *out_top = (double)icon_ink_cache[i].top;
+            *out_bottom = (double)icon_ink_cache[i].bottom;
+            return 1;
+        }
+    }
+
+    uint8_t *probe = (uint8_t *)malloc((size_t)ICON_INK_PROBE * (size_t)ICON_INK_PROBE);
+    if (probe == NULL) return 0;
+    if (!kira_icon_rasterize(svg_utf8, ICON_INK_PROBE, probe)) {
+        free(probe);
+        return 0;
+    }
+    int32_t first = -1;
+    int32_t last = -1;
+    for (int32_t y = 0; y < ICON_INK_PROBE; y++) {
+        for (int32_t x = 0; x < ICON_INK_PROBE; x++) {
+            if (probe[y * ICON_INK_PROBE + x] >= 16) {
+                if (first < 0) first = y;
+                last = y;
+                break;
+            }
+        }
+    }
+    free(probe);
+    if (first < 0) return 0;
+
+    float top = (float)first / (float)ICON_INK_PROBE;
+    float bottom = (float)(last + 1) / (float)ICON_INK_PROBE;
+    icon_ink_cache[icon_ink_next].hash = hash;
+    icon_ink_cache[icon_ink_next].top = top;
+    icon_ink_cache[icon_ink_next].bottom = bottom;
+    icon_ink_cache[icon_ink_next].valid = 1;
+    icon_ink_next = (icon_ink_next + 1) % ICON_INK_CACHE;
+    *out_top = (double)top;
+    *out_bottom = (double)bottom;
+    return 1;
+}
+
+double kira_icon_ink_top(const char *svg_utf8) {
+    double top = 0.0;
+    double bottom = 1.0;
+    if (!kira_icon_ink_bounds(svg_utf8, &top, &bottom)) return 0.0;
+    return top;
+}
+
+double kira_icon_ink_bottom(const char *svg_utf8) {
+    double top = 0.0;
+    double bottom = 1.0;
+    if (!kira_icon_ink_bounds(svg_utf8, &top, &bottom)) return 1.0;
+    return bottom;
+}
+
 int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffer) {
     return kira_icon_rasterize_weighted(svg_utf8, px, 0.0, out_buffer);
 }
