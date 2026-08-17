@@ -30,6 +30,10 @@ int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_
 double kira_icon_ink_top(const char *svg_utf8);
 double kira_icon_ink_bottom(const char *svg_utf8);
 double kira_icon_ink_aspect(const char *svg_utf8);
+/* How much of its own box the drawing covers: low for a stroked symbol, high
+ * for a solid one. A caller matching a symbol's weight to type needs to know
+ * which it has — a solid shape has no stems, and growing it only swells it. */
+double kira_icon_ink_density(const char *svg_utf8);
 
 /* Rasterize so the symbol's INK fills the output exactly, with no canvas margin
  * on any side, optionally grown by `dilate_px`. The margin belongs to the canvas
