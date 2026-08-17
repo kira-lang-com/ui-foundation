@@ -216,3 +216,11 @@ function foundationIconInkTop(svg: borrow String) -> Float {
 function foundationIconInkBottom(svg: borrow String) -> Float {
     return kira_icon_ink_bottom(svg)
 }
+
+// The shape of a symbol's ink: its width over its height. A folder is wider
+// than it is tall and a chevron is narrower, so a caller that wants the INK to
+// occupy a box needs the shape of that box rather than a square.
+@Native
+function foundationIconInkAspect(svg: borrow String) -> Float {
+    return kira_icon_ink_aspect(svg)
+}

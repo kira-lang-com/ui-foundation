@@ -192,6 +192,8 @@ function iconHash(svg: CString): Int;
 function rasterizeIcon(svg: CString, px: I32, outBuffer: RawPtr): I32;
 @FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize_weighted; abi: c; }
 function rasterizeIconWeighted(svg: CString, px: I32, dilatePx: Float, outBuffer: RawPtr): I32;
+@FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize_ink; abi: c; }
+function rasterizeIconInk(svg: CString, outW: I32, outH: I32, dilatePx: Float, outBuffer: RawPtr): I32;
 
 // libc fread — the only raw-file symbol the linked program does not already bind
 // (fopen/fwrite/fclose live in the Metal backend's foreign surface and are reused

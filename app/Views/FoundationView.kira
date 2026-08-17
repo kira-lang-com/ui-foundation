@@ -178,6 +178,10 @@ struct FoundationView {
     // is told where it wants to sit against the words beside it. Zero means the
     // leaf has none, and such a leaf hangs from its bottom edge.
     let baseline: Float = 0.0
+    // A glyph's own width. Its ink is not square — a folder is wider than it is
+    // tall — and the leaf is the ink, so the two sides are stated separately.
+    // Zero means square, which is what a leaf that says nothing about it is.
+    let iconWidth: Float = 0.0
     // How much heavier than drawn a GLYPH is, in points of outward growth. The
     // symbol library is drawn at one weight, so a hairline symbol beside
     // semibold words reads as a lighter object standing near them rather than as
@@ -330,6 +334,15 @@ function foundationViewTextHeight(view: borrow FoundationView) -> Float {
         return view.lineHeight
     }
     return foundationTextMeasure(content: view.content, size: view.size, weight: view.weight).height
+}
+
+// How wide a glyph leaf is: its own width when it stated one, and otherwise the
+// square a symbol that said nothing about its shape gets.
+function foundationIconWidth(view: borrow FoundationView) -> Float {
+    if view.iconWidth > 0.0 {
+        return view.iconWidth
+    }
+    return view.size
 }
 
 function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDescriptor {
@@ -506,9 +519,10 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         Icon -> {
-            // A fixed square leaf sized by the icon's logical pixel size.
+            // A fixed leaf, the size of the symbol's own ink: as tall as the band
+            // it was asked to fill and as wide as its drawing is at that height.
             return LayoutDescriptor {
-                width: .Fixed(view.size)
+                width: .Fixed(foundationIconWidth(view))
                 height: .Fixed(view.size)
                 arrange: .Fill
                 axis: .Vertical
