@@ -34,6 +34,32 @@ function foundationTextRunLineHeight(size: Float, weight: Float) -> Float {
     return kira_text_line_height("", size * textOversample(), weight) / textOversample()
 }
 
+// The face's own ascent and descent: baseline to the top of the line box, and
+// baseline to the bottom of it. The rasterizer places a run by these, so
+// anything that has to line up WITH the run — a glyph beside it, a second run at
+// another size — has to ask the same two questions rather than guess from ink.
+@Native
+function foundationTextAscent(size: Float, weight: Float) -> Float {
+    return kira_text_ascent("", size * textOversample(), weight) / textOversample()
+}
+
+@Native
+function foundationTextDescent(size: Float, weight: Float) -> Float {
+    return kira_text_descent("", size * textOversample(), weight) / textOversample()
+}
+
+// Where a run's baseline sits inside a box `height` tall — the same arithmetic
+// the rasterizer does, in one place, so the two cannot drift apart.
+function foundationTextBaseline(size: Float, weight: Float, height: Float) -> Float {
+    let ascent = foundationTextAscent(size, weight)
+    let descent = foundationTextDescent(size, weight)
+    let lineBox = ascent + descent
+    if lineBox <= 0.0 {
+        return height
+    }
+    return (height - lineBox) / 2.0 + ascent
+}
+
 // Visible glyph bounds relative to the baseline. These are deliberately kept
 // separate from line height: layout must not reserve the font's invisible
 // leading when a text leaf is placed inside a padded card or stack.
