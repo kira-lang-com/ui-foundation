@@ -25,6 +25,10 @@ extend UiBatch {
         m12: Float = 0.0, m13: Float = 0.0, m14: Float = 0.0, m15: Float = 0.0,
         m16: Float = 0.0, m17: Float = 0.0, m18: Float = 0.0, m19: Float = 0.0,
         m20: Float = 0.0, m21: Float = 0.0, m22: Float = 0.0, m23: Float = 0.0,
+        // The gradient's far colour and its axis (0 none, 1 down, 2 across,
+        // 3 corner to corner). A flat quad leaves them at zero.
+        gradR: Float = 0.0, gradG: Float = 0.0, gradB: Float = 0.0, gradA: Float = 0.0,
+        gradAxis: Float = 0.0,
     ) {
         var state = nativeRecover<UiBatchState>(self.storage)
         if state.quadCount >= maxQuadsPerBatch() {
@@ -85,6 +89,9 @@ extend UiBatch {
         // any backend's compiled shader, so only mode 3 writes it. The slot keeps
         // whatever the last quad to occupy it wrote (a fresh Metal buffer arrives
         // zeroed), which the modes that skip it never look at.
+        // Written for every quad, flat ones included: the slot is reused, and an
+        // unwritten block carries whatever gradient last occupied it.
+        writeQuadGradient(contents, U64(base), gradR, gradG, gradB, gradA, gradAxis)
         if writesMaterial {
             writeQuadMaterial(
                 contents, U64(base),
@@ -133,11 +140,18 @@ extend UiBatch {
         fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float,
         clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
         shapeMode: Float = 0.0,
+        // A gradient fill: `fill` is the near end, this is the far one, and the
+        // axis says which way far runs (0 none, 1 down, 2 across, 3 corner to
+        // corner). One quad either way — the blend is per corner.
+        gradient: borrow Color = Color { a: 0.0 },
+        gradientAxis: Float = 0.0,
     ) {
         if w <= 0.0 || h <= 0.0 {
             return
         }
-        if fill.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) {
+        // A gradient can start transparent and end opaque, so what decides
+        // whether there is anything to draw is BOTH ends of the fill.
+        if fill.a <= 0.0 && gradient.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) {
             return
         }
         let pad = 1.0
@@ -160,7 +174,11 @@ extend UiBatch {
             halfW, halfH, clampedRadius, borderWidth, shapeMode, 0.0,
             fill.r, fill.g, fill.b, fill.a,
             border.r, border.g, border.b, border.a,
-            clipMinX, clipMinY, clipMaxX, clipMaxY
+            clipMinX, clipMinY, clipMaxX, clipMaxY,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            gradient.r, gradient.g, gradient.b, gradient.a, gradientAxis
         )
         return
     }

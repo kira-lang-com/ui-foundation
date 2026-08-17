@@ -101,6 +101,21 @@ type UiQuad {
     let materialSpare0: Float
     let materialSpare1: Float
     let materialSpare2: Float
+    // A gradient fill: the colour the far end of the quad takes, and which way
+    // "far" runs — 0 none, 1 down, 2 across, 3 corner to corner. The near end is
+    // `fill`, so a flat surface is a gradient whose axis is none and costs the
+    // same quad it always did.
+    //
+    // The blend happens in the VERTEX stage: a corner's colour is the mix at
+    // that corner, and the rasterizer interpolates between them for free. A
+    // gradient drawn as a stack of strips — which is what a UI layer without
+    // this has to do — is a dozen quads, a dozen draw records, and visible bands
+    // wherever the strips are wider than the eye's threshold.
+    let gradientR: Float
+    let gradientG: Float
+    let gradientB: Float
+    let gradientA: Float
+    let gradientAxis: Float
 }
 
 type VertexIn {
@@ -220,7 +235,21 @@ shader UiBatch {
             out.borderWidth = v.borderWidth
             out.mode = v.mode
             out.edgeRefraction = v.edgeRefraction
-            out.fill = Float4(v.fillR, v.fillG, v.fillB, v.fillA)
+            // The corner's own fill: the near colour, or its mix with the far
+            // one at this corner's position along the gradient's axis.
+            let mixT = 0.0
+            if v.gradientAxis > 2.5 {
+                mixT = (right + bottom) * 0.5
+            } else if v.gradientAxis > 1.5 {
+                mixT = right
+            } else if v.gradientAxis > 0.5 {
+                mixT = bottom
+            }
+            out.fill = mix(
+                Float4(v.fillR, v.fillG, v.fillB, v.fillA),
+                Float4(v.gradientR, v.gradientG, v.gradientB, v.gradientA),
+                mixT,
+            )
             out.border = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
             out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
             out.edge = Float4(v.edgeStrokeStrength, v.edgeStrokeDarken, v.edgeStrokePeak, v.edgeStrokeFade)

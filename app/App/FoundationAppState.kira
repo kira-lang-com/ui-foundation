@@ -8,6 +8,32 @@ import Foundation
 //
 // Apart from the run loops because none of it runs anything — it is what the
 // loops read and write.
+
+// The page an ordinary window is cleared to: the paper an interface is drawn
+// on, and what shows wherever it draws nothing.
+function foundationPageColor() -> Color {
+    return Color {
+        r: 0.96
+        g: 0.95
+        b: 0.93
+        a: 1.0
+    }
+}
+
+// The page a TRANSPARENT window is cleared to: the desktop's key colour, so
+// every pixel the interface does not paint is a hole rather than paper. See
+// KiraGraphics' Public/WindowComposition.kira.
+function foundationTransparentPage() -> Color {
+    return graphicsTransparentKey()
+}
+
+// Which of the two a window is drawn on.
+function foundationPageFor(transparent: Bool) -> Color {
+    if transparent {
+        return foundationTransparentPage()
+    }
+    return foundationPageColor()
+}
 struct FoundationUiContext {
     var frameCount: Int = 0
     var viewport: Size = Size {}
@@ -60,6 +86,14 @@ function foundationKeyBit(keyCode: Int) -> Int {
 }
 
 struct FoundationAppState {
+    // What the frame is cleared to before anything draws. It is the window's
+    // PAGE: an ordinary app clears to its page colour, and a transparent one
+    // clears to the key the desktop shows through, so everything the interface
+    // does not paint is a hole rather than a colour.
+    // Whether the window is composited with holes in it — what the page above
+    // is a hole INTO.
+    var transparent: Bool = false
+    var page: Color = foundationPageColor()
     var frameCount: Int = 0
     var announcedTree: Bool = false
     var announcedRetainedTree: Bool = false

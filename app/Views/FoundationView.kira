@@ -21,6 +21,29 @@ enum FoundationViewKind {
     Icon
 }
 
+// Which way a gradient runs across the surface it fills. Named directions
+// rather than an angle: these are the four a layout can answer without knowing
+// how large the surface came out, and an angle over a box whose aspect changes
+// is a gradient that shears as the window resizes.
+enum FoundationGradient {
+    None
+    // Top to bottom.
+    Down
+    // Leading to trailing.
+    Across
+    // Top-leading corner to bottom-trailing corner.
+    Diagonal
+}
+
+function foundationGradientAxis(gradient: borrow FoundationGradient) -> Float {
+    match gradient {
+        None -> return 0.0;
+        Down -> return 1.0;
+        Across -> return 2.0;
+        Diagonal -> return 3.0;
+    }
+}
+
 function foundationNoopPress() {
     return
 }
@@ -108,6 +131,16 @@ struct FoundationView {
         a: 0.0
     }
     let borderWidth: Float = 0.0
+    // A gradient fill: `fill` is the colour at the near end, this is the colour
+    // at the far end, and `gradient` says which way far runs. `None` leaves the
+    // surface flat, which is what every surface that says nothing about it is.
+    //
+    // It is a property of the surface rather than a widget of its own, so a
+    // gradient can be a background, a card, a bar or a swatch without any of
+    // them being a different kind of view — and it costs the same ONE quad a
+    // flat fill does.
+    let fillEnd: Color = Color { a: 0.0 }
+    let gradient: FoundationGradient = .None
     let radius: Float = 0.0
     // Optional background painted behind a HitArea (transparent = none). Buttons
     // use it for their default hover highlight without any layout wrapping.

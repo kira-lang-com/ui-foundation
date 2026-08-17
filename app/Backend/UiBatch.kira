@@ -35,7 +35,8 @@ class UiBatch {
 // comes from the blurred capture under the RUN it belongs to, so text stays legible
 // over whatever the backdrop turns out to be (see pushText).
 
-// 24 shared fields plus a sixteen-float material block (mode 3 only).
+// 24 shared fields, a twenty-four-float material block (mode 3 only) and a
+// five-float gradient block (the far colour and its axis, zero when flat).
 // 24 shared floats + 24 material floats. The material block grew from 16 when the
 // wash stopped being one alpha and became the platform's own two-layer fill stack
 // (app/Core/Materials.kira): a layer is a colour, an opacity and a blend mode, and
@@ -51,7 +52,7 @@ class UiBatch {
 // the vertex stage picks per corner. Eighteen shared floats used to be written
 // once per vertex, so a quad cost 192 floats where it now costs 54 — 30 for
 // everything but liquid glass, which is every glyph on screen.
-function quadFloatCount() -> Int { return 54 }
+function quadFloatCount() -> Int { return 59 }
 // Where the material block starts inside a record.
 function quadMaterialOffset() -> Int { return 30 }
 function quadVertexCount() -> Int { return 4 }

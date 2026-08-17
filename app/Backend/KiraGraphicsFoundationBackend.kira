@@ -60,6 +60,11 @@ function foundationPopOneFloat(stack: [Float]) -> [Float] {
 class KiraGraphicsFoundationBackend {
     var graphics: Graphics
     var batch: UiBatch
+    // Whether the WINDOW is composited with holes in it. A window-backdrop
+    // surface is a hole, and a hole in a window that has none is a magenta
+    // rectangle — so where the window cannot carry one, the surface draws in
+    // its own colour like any other.
+    var windowTransparent: Bool = false
     var hitRegions: [FoundationHitRegionRecord] = []
     var clipDepth: Int = 0
     var backdropDepth: Int = 0
@@ -218,7 +223,17 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function drawSurfaceFields(bounds: borrow Rect, fill: borrow Color, border: borrow Color, borderWidth: Float, radius: Float) {
+    function drawSurfaceFields(
+        bounds: borrow Rect,
+        fill: borrow Color,
+        border: borrow Color,
+        borderWidth: Float,
+        radius: Float,
+        // The far end of a gradient fill and the direction it runs. A flat
+        // surface leaves them alone and draws exactly as it did.
+        fillEnd: borrow Color = Color { a: 0.0 },
+        gradient: borrow FoundationGradient = FoundationGradient.None,
+    ) {
         self.drewVisibleUi = true
         if environmentIsSet("KIRA_UI_DUMP_LAYOUT") {
             printLine(
@@ -251,7 +266,13 @@ class KiraGraphicsFoundationBackend {
                 effectiveRadius = self.clipRadius
             }
         }
-        self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, effectiveRadius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+        self.batch.pushRect(
+            bounds.x, bounds.y, bounds.width, bounds.height,
+            fill, border, borderWidth, effectiveRadius,
+            self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY,
+            0.0,
+            fillEnd, foundationGradientAxis(gradient)
+        )
         return
     }
 
@@ -565,6 +586,8 @@ class KiraGraphicsFoundationBackend {
             Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
             Frosted -> return Color { r: 0.88 g: 0.94 b: 1.0 a: 0.10 };
             LiquidGlass -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.04 };
+            // The compositor fills this one; nothing is washed over it here.
+            WindowBackdrop -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
         }
     }
 
