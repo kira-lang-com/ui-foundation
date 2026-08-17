@@ -127,7 +127,7 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
         }
         Icon -> {
             let frame = layoutFrame(tree, nodeIndex)
-            current.drawIconFields(frame, view.content, view.color)
+            current.drawIconFields(frame, view.content, view.color, view.weightGrowth)
             return 1
         }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current);

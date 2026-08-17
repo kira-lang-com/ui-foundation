@@ -19,6 +19,13 @@ int64_t kira_icon_hash(const char *svg_utf8);
  * Returns 1 on success, 0 on parse failure (buffer cleared to 0). */
 int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffer);
 
+/* The same, with the coverage grown outward by `dilate_px` pixels: the WEIGHT of
+ * a symbol. The library is drawn at ONE weight, so a glyph standing beside
+ * heavier type has to be thickened to match its stems — a hairline outline next
+ * to semibold words reads as a different, lighter object sitting near them.
+ * Zero is the artwork as drawn, which is what `kira_icon_rasterize` asks for. */
+int32_t kira_icon_rasterize_weighted(const char *svg_utf8, int32_t px, double dilate_px, uint8_t *out_buffer);
+
 #ifdef __cplusplus
 }
 #endif

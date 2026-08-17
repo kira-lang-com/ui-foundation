@@ -19,6 +19,10 @@ extend UiBatch {
         x: Float, y: Float, w: Float, h: Float,
         color: borrow Color,
         clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+        // How much heavier than the drawn artwork this glyph is, in POINTS of
+        // outward growth. It is the symbol's weight, and it is part of the atlas
+        // key: the same folder at two weights is two different pictures.
+        weightGrowth: Float = 0.0,
     ) {
         var state = nativeRecover<UiBatchState>(self.storage)
         var scale = state.scale
@@ -53,7 +57,11 @@ extend UiBatch {
         let overs = Float(px) / devPx
         let hash64 = iconHash(svg)
         let iconHash = Int(hash64)
-        let key = 0 - ((iconHash % 4294967291) * 1024 + px)
+        // The growth is applied to the RASTER, so it is measured in raster
+        // pixels, and it belongs in the key beside the size.
+        let growthPx = weightGrowth * scale * overs
+        let growthKey = Int(growthPx * 4.0 + 0.5)
+        let key = 0 - (((iconHash % 4294967291) * 1024 + px) * 64 + growthKey)
         let cap = state.glyphHashKeys.count
         var slotIdx = -1
         var homeSlot = -1
@@ -81,7 +89,7 @@ extend UiBatch {
         if slotIdx < 0 {
             let bufBytes = px * px
             let buf = allocateBytes(U64(bufBytes))
-            let rendered = rasterizeIcon(svg, px, buf)
+            let rendered = rasterizeIconWeighted(svg, px, Float(growthKey) / 4.0, buf)
             var newSlot = UiGlyphSlot {
                 key: key
                 advance: 0.0
