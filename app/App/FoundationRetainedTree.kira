@@ -71,6 +71,7 @@ function foundationMaterialCode(material: FoundationMaterial) -> Int {
         Flat -> return 1;
         Frosted -> return 2;
         LiquidGlass -> return 3;
+        WindowBackdrop -> return 4;
     }
 }
 

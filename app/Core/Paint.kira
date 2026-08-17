@@ -26,6 +26,19 @@ enum FoundationMaterial {
     // liquid_glass example, driven by the batched UI compositor. On the legacy
     // Sokol path it falls back to a translucent tint like the other materials.
     LiquidGlass
+    // The WINDOW's backdrop: what is behind the window itself, blurred and
+    // tinted by the desktop compositor — the material a platform sidebar is
+    // made of.
+    //
+    // It is not a blur this compositor performs. Frosted and LiquidGlass blur
+    // what the APPLICATION drew underneath them, which is the wrong thing for a
+    // sidebar: what should show through a sidebar is the desktop, and an
+    // application cannot see the desktop. So the surface is cleared to the
+    // window's key colour and the compositor fills it, which is also why it
+    // only means anything in a transparent window (see
+    // KiraGraphics' Public/WindowComposition.kira) — anywhere else it is a
+    // hole in a window that has none, and draws as an ordinary flat surface.
+    WindowBackdrop
 }
 
 // How much a LiquidGlass surface washes over what it refracts. The steps ramp the

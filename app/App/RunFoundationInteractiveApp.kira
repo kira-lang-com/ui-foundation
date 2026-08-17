@@ -38,11 +38,22 @@ function RunFoundationInteractiveApp(
     // display's, which the layout picks up from the frame's viewport like any
     // other size.
     windowMode: WindowMode = .Windowed,
+    // A window the desktop shows through. The frame is cleared to the key
+    // colour instead of a page, so what the interface does not paint is a hole:
+    // a floating panel, a rounded window with nothing square behind it, a
+    // heads-up display over whatever is running underneath.
+    transparent: Bool = false,
+    // How opaque the whole window is composited — the sheet of glass an overlay
+    // is drawn on, which is not the same as a translucent surface inside an
+    // opaque window.
+    opacity: Float = 1.0,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
         batch: UiBatch { storage: nullPointer() }
         profile: foundationFrameProfileFromEnvironment()
+        page: foundationPageFor(transparent)
+        transparent: transparent
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -52,6 +63,8 @@ function RunFoundationInteractiveApp(
         height: height
         sampleCount: 1
         windowMode: windowMode
+        transparent: transparent
+        opacity: opacity
         // Platform-aware default: Metal on Apple hosts, Sokol everywhere else
         // (including Web/WASM, where the host-platform probe honestly reports
         // Unknown and Sokol/WebGPU is the only backend). The per-frame path
@@ -160,7 +173,7 @@ function RunFoundationInteractiveApp(
             // capture/blur passes on a split frame, so glass stays live over an
             // engine viewport that re-renders beneath it.
             let profilePresentStart = foundationProfileNow(state.profile, frame)
-            state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            state.batch.presentBatch(frame, graphics, state.page.r, state.page.g, state.page.b, state.page.a)
             let profilePresentEnd = foundationProfileNow(state.profile, frame)
             foundationProfileSample(
                 state.profile,
@@ -211,6 +224,7 @@ function RunFoundationInteractiveApp(
         var backend = KiraGraphicsFoundationBackend {
             graphics: graphics
             batch: batch
+            windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
         // A resize-only frame reuses the cached tree, so the retained structure
@@ -293,7 +307,7 @@ function RunFoundationInteractiveApp(
             foundationEmitHud(graphics, state.batch, hudOverlay, hudLayout, Int(viewport.width), Int(viewport.height))
         }
         let profilePresentStart = foundationProfileNow(state.profile, frame)
-        state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+        state.batch.presentBatch(frame, graphics, state.page.r, state.page.g, state.page.b, state.page.a)
         let profilePresentEnd = foundationProfileNow(state.profile, frame)
         foundationProfileSample(
             state.profile,

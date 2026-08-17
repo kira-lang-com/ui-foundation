@@ -10,11 +10,17 @@ function RunFoundationApp(
     root: FoundationView,
     windowMode: WindowMode = .Windowed,
     showFpsOverlay: Bool = true,
+    // See RunFoundationInteractiveApp: a window the desktop shows through, and
+    // how opaque the whole window is composited.
+    transparent: Bool = false,
+    opacity: Float = 1.0,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: root
         batch: UiBatch { storage: nullPointer() }
         profile: foundationFrameProfileFromEnvironment()
+        page: foundationPageFor(transparent)
+        transparent: transparent
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
@@ -24,6 +30,8 @@ function RunFoundationApp(
         height: 720
         sampleCount: 1
         windowMode: windowMode
+        transparent: transparent
+        opacity: opacity
         // Platform-aware default: Metal on Apple hosts, Sokol otherwise
         // (incl. Web/WASM where the platform probe reports Unknown).
         backend: graphicsDefaultBackend()
@@ -79,7 +87,7 @@ function RunFoundationApp(
             // Re-runs the retained streams — including the liquid-glass
             // capture/blur passes on a split frame.
             let profilePresentStart = foundationProfileNow(state.profile, frame)
-            state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+            state.batch.presentBatch(frame, graphics, state.page.r, state.page.g, state.page.b, state.page.a)
             let profilePresentEnd = foundationProfileNow(state.profile, frame)
             foundationProfileSample(
                 state.profile,
@@ -112,6 +120,7 @@ function RunFoundationApp(
         var backend = KiraGraphicsFoundationBackend {
             graphics: graphics
             batch: batch
+            windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
         if !state.announcedTree && foundationRenderableViewCount(state.root) > 0 {
@@ -181,7 +190,7 @@ function RunFoundationApp(
 
         state.frameCount = state.frameCount + 1
         let profilePresentStart = foundationProfileNow(state.profile, frame)
-        state.batch.presentBatch(frame, graphics, 0.96, 0.95, 0.93, 1.0)
+        state.batch.presentBatch(frame, graphics, state.page.r, state.page.g, state.page.b, state.page.a)
         let profilePresentEnd = foundationProfileNow(state.profile, frame)
         foundationProfileSample(
             state.profile,
