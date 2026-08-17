@@ -178,6 +178,11 @@ struct FoundationView {
     // is told where it wants to sit against the words beside it. Zero means the
     // leaf has none, and such a leaf hangs from its bottom edge.
     let baseline: Float = 0.0
+    // How much heavier than drawn a GLYPH is, in points of outward growth. The
+    // symbol library is drawn at one weight, so a hairline symbol beside
+    // semibold words reads as a lighter object standing near them rather than as
+    // a character in the same run.
+    let weightGrowth: Float = 0.0
     let disabled: Bool = false
     let focusable: Bool = false
     // A focusable region that grabs the keyboard as soon as it appears while

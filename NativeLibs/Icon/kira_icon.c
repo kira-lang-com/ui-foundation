@@ -581,6 +581,77 @@ static void icon_xf_apply(const IconXf *xf, IconPathSet *set) {
 }
 
 int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffer) {
+    return kira_icon_rasterize_weighted(svg_utf8, px, 0.0, out_buffer);
+}
+
+/* Coverage grown outward by `radius` pixels: the weight of a symbol, the way a
+ * heavier cut of a typeface is a heavier stem. The artwork is drawn once at one
+ * weight, so matching the words beside it means thickening what was drawn --
+ * a maximum over a disc of that radius, which grows every edge outward by it and
+ * leaves the shape's corners round rather than square. */
+static void icon_dilate_radius(const uint8_t *src, uint8_t *dst, int32_t px, int32_t r) {
+    float rr = (float)r * (float)r;
+    for (int32_t y = 0; y < px; y++) {
+        for (int32_t x = 0; x < px; x++) {
+            int32_t best = src[y * px + x];
+            for (int32_t dy = -r; dy <= r && best < 255; dy++) {
+                int32_t sy = y + dy;
+                if (sy < 0 || sy >= px) continue;
+                for (int32_t dx = -r; dx <= r; dx++) {
+                    int32_t sx = x + dx;
+                    if (sx < 0 || sx >= px) continue;
+                    if ((float)(dx * dx + dy * dy) > rr) continue;
+                    int32_t v = src[sy * px + sx];
+                    if (v > best) best = v;
+                    if (best >= 255) break;
+                }
+            }
+            dst[y * px + x] = (uint8_t)best;
+        }
+    }
+}
+
+/* Coverage grown outward by `radius` pixels: the WEIGHT of a symbol, the way a
+ * heavier cut of a typeface is a heavier stem. The artwork is drawn once at one
+ * weight, so matching the words beside it means thickening what was drawn.
+ *
+ * A whole-pixel grow is a maximum over a disc of that radius. A fraction of a
+ * pixel is the two whole grows either side of it, mixed — a symbol's weight has
+ * to follow the type's continuously, and a grow that could only step by whole
+ * pixels would jump from too light to too heavy between two font sizes. */
+static void icon_dilate(uint8_t *cov, int32_t px, float radius) {
+    if (radius <= 0.0f || px <= 0) return;
+    int32_t lo = (int32_t)radius;
+    float frac = radius - (float)lo;
+    size_t bytes = (size_t)px * (size_t)px;
+    uint8_t *src = (uint8_t *)malloc(bytes);
+    uint8_t *low = (uint8_t *)malloc(bytes);
+    uint8_t *high = (uint8_t *)malloc(bytes);
+    if (src == NULL || low == NULL || high == NULL) {
+        free(src);
+        free(low);
+        free(high);
+        return;
+    }
+    memcpy(src, cov, bytes);
+    if (lo <= 0) {
+        memcpy(low, src, bytes);
+    } else {
+        icon_dilate_radius(src, low, px, lo);
+    }
+    icon_dilate_radius(src, high, px, lo + 1);
+    for (size_t i = 0; i < bytes; i++) {
+        float mixed = (float)low[i] + ((float)high[i] - (float)low[i]) * frac;
+        if (mixed < 0.0f) mixed = 0.0f;
+        if (mixed > 255.0f) mixed = 255.0f;
+        cov[i] = (uint8_t)(mixed + 0.5f);
+    }
+    free(src);
+    free(low);
+    free(high);
+}
+
+int32_t kira_icon_rasterize_weighted(const char *svg_utf8, int32_t px, double dilate_px, uint8_t *out_buffer) {
     if (out_buffer == NULL || px <= 0) return 0;
     memset(out_buffer, 0, (size_t)px * (size_t)px);
     if (svg_utf8 == NULL) return 0;
@@ -771,5 +842,6 @@ int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffe
         out_buffer[i] = (unsigned char)(cov * 255.0f + 0.5f);
     }
     free(plane);
+    icon_dilate(out_buffer, px, (float)dilate_px);
     return 1;
 }
