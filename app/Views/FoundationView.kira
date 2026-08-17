@@ -490,7 +490,11 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
         }
         HitArea -> {
             // Honors the view's size modes (default Hug/Hug) so hit wrappers can
-            // stretch with fill-width rows instead of collapsing around them.
+            // stretch with fill-width rows instead of collapsing around them —
+            // and its PADDING, which is what a pressable box is made of: a
+            // button is a label held off the edges of its own fill, and a hit
+            // area that dropped the padding drew the fill tight around the
+            // letters.
             return LayoutDescriptor {
                 width: view.width
                 height: view.height
@@ -499,7 +503,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 alignment: .Stretch
                 overlayAlignment: .Center
                 baseline: foundationWrappedBaseline(view)
-                padding: EdgeInsets {}
+                padding: view.padding
                 margin: EdgeInsets {}
             }
         }
