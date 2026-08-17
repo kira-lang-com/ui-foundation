@@ -598,7 +598,9 @@ static void icon_xf_apply(const IconXf *xf, IconPathSet *set) {
 
 typedef struct {
     int64_t hash;
+    float left;
     float top;
+    float right;
     float bottom;
     int32_t valid;
 } IconInkEntry;
@@ -606,65 +608,126 @@ typedef struct {
 static IconInkEntry icon_ink_cache[ICON_INK_CACHE];
 static int32_t icon_ink_next = 0;
 
-int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_bottom) {
-    if (out_top == NULL || out_bottom == NULL) return 0;
-    *out_top = 0.0;
-    *out_bottom = 1.0;
-    if (svg_utf8 == NULL) return 0;
-
-    int64_t hash = kira_icon_hash(svg_utf8);
-    for (int32_t i = 0; i < ICON_INK_CACHE; i++) {
-        if (icon_ink_cache[i].valid && icon_ink_cache[i].hash == hash) {
-            *out_top = (double)icon_ink_cache[i].top;
-            *out_bottom = (double)icon_ink_cache[i].bottom;
-            return 1;
-        }
-    }
-
+static int32_t icon_ink_measure(const char *svg_utf8, IconInkEntry *out) {
     uint8_t *probe = (uint8_t *)malloc((size_t)ICON_INK_PROBE * (size_t)ICON_INK_PROBE);
     if (probe == NULL) return 0;
     if (!kira_icon_rasterize(svg_utf8, ICON_INK_PROBE, probe)) {
         free(probe);
         return 0;
     }
-    int32_t first = -1;
-    int32_t last = -1;
+    int32_t first_row = -1, last_row = -1, first_col = ICON_INK_PROBE, last_col = -1;
     for (int32_t y = 0; y < ICON_INK_PROBE; y++) {
         for (int32_t x = 0; x < ICON_INK_PROBE; x++) {
-            if (probe[y * ICON_INK_PROBE + x] >= 16) {
-                if (first < 0) first = y;
-                last = y;
-                break;
-            }
+            if (probe[y * ICON_INK_PROBE + x] < 16) continue;
+            if (first_row < 0) first_row = y;
+            last_row = y;
+            if (x < first_col) first_col = x;
+            if (x > last_col) last_col = x;
         }
     }
     free(probe);
-    if (first < 0) return 0;
+    if (first_row < 0) return 0;
+    out->left = (float)first_col / (float)ICON_INK_PROBE;
+    out->top = (float)first_row / (float)ICON_INK_PROBE;
+    out->right = (float)(last_col + 1) / (float)ICON_INK_PROBE;
+    out->bottom = (float)(last_row + 1) / (float)ICON_INK_PROBE;
+    out->valid = 1;
+    return 1;
+}
 
-    float top = (float)first / (float)ICON_INK_PROBE;
-    float bottom = (float)(last + 1) / (float)ICON_INK_PROBE;
-    icon_ink_cache[icon_ink_next].hash = hash;
-    icon_ink_cache[icon_ink_next].top = top;
-    icon_ink_cache[icon_ink_next].bottom = bottom;
-    icon_ink_cache[icon_ink_next].valid = 1;
+static const IconInkEntry *icon_ink_entry(const char *svg_utf8) {
+    if (svg_utf8 == NULL) return NULL;
+    int64_t hash = kira_icon_hash(svg_utf8);
+    for (int32_t i = 0; i < ICON_INK_CACHE; i++) {
+        if (icon_ink_cache[i].valid && icon_ink_cache[i].hash == hash) {
+            return &icon_ink_cache[i];
+        }
+    }
+    IconInkEntry measured;
+    memset(&measured, 0, sizeof(measured));
+    if (!icon_ink_measure(svg_utf8, &measured)) return NULL;
+    measured.hash = hash;
+    int32_t slot = icon_ink_next;
+    icon_ink_cache[slot] = measured;
     icon_ink_next = (icon_ink_next + 1) % ICON_INK_CACHE;
-    *out_top = (double)top;
-    *out_bottom = (double)bottom;
+    return &icon_ink_cache[slot];
+}
+
+int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_bottom) {
+    if (out_top == NULL || out_bottom == NULL) return 0;
+    *out_top = 0.0;
+    *out_bottom = 1.0;
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 0;
+    *out_top = (double)entry->top;
+    *out_bottom = (double)entry->bottom;
     return 1;
 }
 
 double kira_icon_ink_top(const char *svg_utf8) {
-    double top = 0.0;
-    double bottom = 1.0;
-    if (!kira_icon_ink_bounds(svg_utf8, &top, &bottom)) return 0.0;
-    return top;
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 0.0;
+    return (double)entry->top;
 }
 
 double kira_icon_ink_bottom(const char *svg_utf8) {
-    double top = 0.0;
-    double bottom = 1.0;
-    if (!kira_icon_ink_bounds(svg_utf8, &top, &bottom)) return 1.0;
-    return bottom;
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 1.0;
+    return (double)entry->bottom;
+}
+
+/* How wide a symbol's ink is against how tall it is. A folder is wider than it
+ * is tall and a chevron is narrower; a caller that wants the ink itself to
+ * occupy a box needs the shape of that box, not a square. */
+double kira_icon_ink_aspect(const char *svg_utf8) {
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 1.0;
+    float h = entry->bottom - entry->top;
+    if (h <= 0.0f) return 1.0;
+    return (double)((entry->right - entry->left) / h);
+}
+
+/* Rasterize so the symbol's INK fills the output exactly: no canvas margin on
+ * any side.
+ *
+ * The margin around a symbol's drawing belongs to the canvas it was authored
+ * on, not to the symbol. Left in, it is dead space that pushes the glyph in from
+ * the edge a run of text starts at and holds it off the line it should sit on —
+ * and it differs per symbol, so no caller can correct for it. Trimmed, a
+ * symbol's box IS its ink: it starts where a letter would start, and it stands
+ * on the line a letter stands on.
+ */
+int32_t kira_icon_rasterize_ink(const char *svg_utf8, int32_t out_w, int32_t out_h, double dilate_px, uint8_t *out_buffer) {
+    if (out_buffer == NULL || out_w <= 0 || out_h <= 0) return 0;
+    memset(out_buffer, 0, (size_t)out_w * (size_t)out_h);
+    const IconInkEntry *entry = icon_ink_entry(svg_utf8);
+    if (entry == NULL) return 0;
+    float ink_h = entry->bottom - entry->top;
+    if (ink_h <= 0.0f) return 0;
+
+    /* The square the whole canvas has to be drawn at for its ink to come out
+     * `out_h` tall, and where the ink sits inside it. */
+    int32_t square = (int32_t)((float)out_h / ink_h + 0.5f);
+    if (square <= 0) return 0;
+    uint8_t *full = (uint8_t *)malloc((size_t)square * (size_t)square);
+    if (full == NULL) return 0;
+    if (!kira_icon_rasterize_weighted(svg_utf8, square, dilate_px, full)) {
+        free(full);
+        return 0;
+    }
+    int32_t src_x = (int32_t)(entry->left * (float)square + 0.5f);
+    int32_t src_y = (int32_t)(entry->top * (float)square + 0.5f);
+    for (int32_t y = 0; y < out_h; y++) {
+        int32_t sy = src_y + y;
+        if (sy < 0 || sy >= square) continue;
+        for (int32_t x = 0; x < out_w; x++) {
+            int32_t sx = src_x + x;
+            if (sx < 0 || sx >= square) continue;
+            out_buffer[y * out_w + x] = full[sy * square + sx];
+        }
+    }
+    free(full);
+    return 1;
 }
 
 int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffer) {

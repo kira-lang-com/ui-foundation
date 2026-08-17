@@ -29,8 +29,13 @@ extend UiBatch {
         if scale <= 0.0 {
             scale = 1.0
         }
-        let sizePts = w < h ? w : h
-        let devPx = sizePts * scale
+        // The box the caller gave IS the ink's box: a symbol is rasterized
+        // trimmed to its drawing, so its width and height are its own and the
+        // two are not generally equal.
+        let devPxW = w * scale
+        let devPxH = h * scale
+        let sizePts = h
+        let devPx = devPxH
         // Rasterized at the same oversample as text, and for the same reason: an icon is
         // coverage in the same atlas, drawn through the same sampler. Left at one sample
         // per device pixel it was the softest thing on screen once the glyphs were
@@ -42,26 +47,32 @@ extend UiBatch {
         // size ceiling this replaces DROPPED the draw — an icon asked for above it left
         // nothing on screen at all.
         let maxPx = glyphAtlasSize() - 2 * atlasGutter()
-        var px = Int(devPx * textOversample() + 0.5)
-        if px > maxPx {
-            px = Int(devPx + 0.5)
+        let devPxLong = devPxW > devPxH ? devPxW : devPxH
+        var longPx = Int(devPxLong * textOversample() + 0.5)
+        if longPx > maxPx {
+            longPx = Int(devPxLong + 0.5)
         }
-        if px > maxPx {
-            px = maxPx
+        if longPx > maxPx {
+            longPx = maxPx
         }
-        if px <= 0 {
+        if longPx <= 0 {
             return
         }
         // The oversample the entry ACTUALLY carries, which is what the quad and its uv
         // slack are measured in below.
-        let overs = Float(px) / devPx
+        let overs = Float(longPx) / devPxLong
+        let px = Int(devPxW * overs + 0.5)
+        let pxH = Int(devPxH * overs + 0.5)
+        if px <= 0 || pxH <= 0 {
+            return
+        }
         let hash64 = iconHash(svg)
         let iconHash = Int(hash64)
         // The growth is applied to the RASTER, so it is measured in raster
         // pixels, and it belongs in the key beside the size.
         let growthPx = weightGrowth * scale * overs
         let growthKey = Int(growthPx * 4.0 + 0.5)
-        let key = 0 - (((iconHash % 4294967291) * 1024 + px) * 64 + growthKey)
+        let key = 0 - ((((iconHash % 4294967291) * 1024 + px) * 1024 + pxH) * 64 + growthKey)
         let cap = state.glyphHashKeys.count
         var slotIdx = -1
         var homeSlot = -1
@@ -87,16 +98,16 @@ extend UiBatch {
             }
         }
         if slotIdx < 0 {
-            let bufBytes = px * px
+            let bufBytes = px * pxH
             let buf = allocateBytes(U64(bufBytes))
-            let rendered = rasterizeIconWeighted(svg, px, Float(growthKey) / 4.0, buf)
+            let rendered = rasterizeIconInk(svg, px, pxH, Float(growthKey) / 4.0, buf)
             var newSlot = UiGlyphSlot {
                 key: key
                 advance: 0.0
                 bearingX: 0
                 bearingY: 0
                 w: px
-                h: px
+                h: pxH
                 valid: true
             }
             if rendered != 0 {
@@ -105,13 +116,13 @@ extend UiBatch {
                     state.cursorY = state.cursorY + state.rowHeight + atlasGutter()
                     state.rowHeight = 0
                 }
-                if state.cursorY + px + atlasGutter() <= state.atlasH {
+                if state.cursorY + pxH + atlasGutter() <= state.atlasH {
                     newSlot.atlasX = state.cursorX
                     newSlot.atlasY = state.cursorY
-                    atlasBlitCoverage(state, buf, px, newSlot.atlasX, newSlot.atlasY, px, px)
+                    atlasBlitCoverage(state, buf, px, newSlot.atlasX, newSlot.atlasY, px, pxH)
                     state.cursorX = state.cursorX + px + atlasGutter()
-                    if px > state.rowHeight {
-                        state.rowHeight = px
+                    if pxH > state.rowHeight {
+                        state.rowHeight = pxH
                     }
                 } else {
                     newSlot.valid = false
@@ -134,13 +145,14 @@ extend UiBatch {
                 let wpx = state.glyphs[slotIdx].w
                 let hpx = state.glyphs[slotIdx].h
                 let atlasW = Float(glyphAtlasSize())
-                // Centre the square icon box inside the given bounds, then land it on
-                // whole device pixels the way a glyph does — grown outward, with the
-                // slack drawn from the atlas's transparent gutter. Centring produces a
-                // fractional position more often than not, and a coverage bitmap read at
-                // a fractional offset is resampled rather than displayed.
-                let leftDev = (x + (w - sizePts) / 2.0) * scale
-                let topDev = (y + (h - sizePts) / 2.0) * scale
+                // The ink fills the box it was given, so it is drawn AT that box —
+                // no centring, because there is no margin left to centre. It is
+                // still landed on whole device pixels the way a glyph is, grown
+                // outward with the slack drawn from the atlas's transparent
+                // gutter: a coverage bitmap read at a fractional offset is
+                // resampled rather than displayed.
+                let leftDev = x * scale
+                let topDev = y * scale
                 let rightDev = leftDev + Float(wpx) / overs
                 let bottomDev = topDev + Float(hpx) / overs
                 let x0 = Float(Int(leftDev))

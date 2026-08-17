@@ -25,9 +25,18 @@ int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffe
  * symbol against text has to ask per SYMBOL, the way it would ask a font per
  * glyph. Returns 1 and writes both, or 0 and leaves 0..1. */
 int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_bottom);
-/* The same two numbers, one call each, for callers that cannot take a pointer. */
+/* The same two numbers, one call each, for callers that cannot take a pointer,
+ * plus the shape of the ink: its width over its height. */
 double kira_icon_ink_top(const char *svg_utf8);
 double kira_icon_ink_bottom(const char *svg_utf8);
+double kira_icon_ink_aspect(const char *svg_utf8);
+
+/* Rasterize so the symbol's INK fills the output exactly, with no canvas margin
+ * on any side, optionally grown by `dilate_px`. The margin belongs to the canvas
+ * a symbol was authored on and not to the symbol: left in, it pushes the glyph
+ * in from the edge a run of text starts at and holds it off the line text sits
+ * on, and it differs per symbol so no caller can correct for it. */
+int32_t kira_icon_rasterize_ink(const char *svg_utf8, int32_t out_w, int32_t out_h, double dilate_px, uint8_t *out_buffer);
 
 /* The same, with the coverage grown outward by `dilate_px` pixels: the WEIGHT of
  * a symbol. The library is drawn at ONE weight, so a glyph standing beside
