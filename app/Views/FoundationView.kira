@@ -261,6 +261,77 @@ function foundationLayoutDescriptorWithFlex(layout: borrow LayoutDescriptor, fle
     }
 }
 
+// The baseline a view offers a row that lines its children up on one.
+//
+// A leaf answers for itself: a run of text from the face, a glyph from where it
+// asked to sit. A WRAPPER answers with its child's, moved down by whatever it
+// holds the child off its own top edge — a glyph does not stop being a glyph
+// because something was hung on it, and `.onClick(...)`, a frame or a priority
+// marker each wrap one. Without this a symbol with a handler on it falls out of
+// the line and is aligned by its bottom edge instead, which is how the one
+// pressable glyph on a bar ends up sitting lower than the words beside it.
+function foundationViewBaseline(view: borrow FoundationView) -> Float {
+    match view.kind {
+        Text -> {
+            return foundationTextBaseline(view.size, view.weight, foundationViewTextHeight(view))
+        }
+        Icon -> {
+            return view.baseline
+        }
+        HitArea -> {
+            return foundationWrappedBaseline(view)
+        }
+        Frame -> {
+            return foundationWrappedBaseline(view)
+        }
+        LayoutPriority -> {
+            return foundationWrappedBaseline(view)
+        }
+        // A ROW of things reports the deepest line among them: a breadcrumb is a
+        // row, and the row it is placed in has to see the line its words are
+        // written on rather than the box they came in.
+        Row -> { return foundationDeepestBaseline(view) }
+        Column -> { return foundationWrappedBaseline(view) }
+        Expanded -> { return foundationWrappedBaseline(view) }
+        Surface -> { return foundationWrappedBaseline(view) }
+        // A spacer is as tall as whatever it is put in, so it has no line to
+        // offer and must not be asked for one.
+        Spacer -> { return 0.0 }
+        TextureView -> { return 0.0 }
+    }
+}
+
+// The deepest line among a view's children, moved down by whatever the view
+// holds them off its own top edge.
+function foundationDeepestBaseline(view: borrow FoundationView) -> Float {
+    var deepest = 0.0
+    for index in 0..view.children.count {
+        let child = foundationViewBaseline(view.children[index])
+        if child > deepest {
+            deepest = child
+        }
+    }
+    if deepest <= 0.0 {
+        return 0.0
+    }
+    return deepest + view.padding.top
+}
+
+function foundationWrappedBaseline(view: borrow FoundationView) -> Float {
+    if view.children.count == 0 {
+        return view.baseline
+    }
+    return foundationDeepestBaseline(view)
+}
+
+// The box a run of text is laid out in: its line, never its letters.
+function foundationViewTextHeight(view: borrow FoundationView) -> Float {
+    if view.lineHeight > 0.0 {
+        return view.lineHeight
+    }
+    return foundationTextMeasure(content: view.content, size: view.size, weight: view.weight).height
+}
+
 function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDescriptor {
     match view.kind {
         Row -> {
@@ -272,6 +343,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 spacing: view.gap
                 alignment: view.crossAxisAlignment
                 overlayAlignment: .Center
+                baseline: foundationDeepestBaseline(view)
                 padding: view.padding
                 margin: EdgeInsets {}
             }
@@ -285,6 +357,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 spacing: view.gap
                 alignment: view.crossAxisAlignment
                 overlayAlignment: .Center
+                baseline: foundationWrappedBaseline(view)
                 padding: view.padding
                 margin: EdgeInsets {}
             }
@@ -311,6 +384,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 axis: .Vertical
                 alignment: .Stretch
                 overlayAlignment: view.alignment
+                baseline: foundationWrappedBaseline(view)
                 padding: view.padding
                 margin: EdgeInsets {}
             }
@@ -411,6 +485,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 axis: .Vertical
                 alignment: .Stretch
                 overlayAlignment: .Center
+                baseline: foundationWrappedBaseline(view)
                 padding: EdgeInsets {}
                 margin: EdgeInsets {}
             }

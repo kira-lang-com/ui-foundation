@@ -19,6 +19,16 @@ int64_t kira_icon_hash(const char *svg_utf8);
  * Returns 1 on success, 0 on parse failure (buffer cleared to 0). */
 int32_t kira_icon_rasterize(const char *svg_utf8, int32_t px, uint8_t *out_buffer);
 
+/* Where a symbol's ink sits inside its own box, as fractions of that box from
+ * its top edge. A library is not one shape — a folder fills the middle of its
+ * canvas, an open folder is drawn lower and shorter — so a caller placing a
+ * symbol against text has to ask per SYMBOL, the way it would ask a font per
+ * glyph. Returns 1 and writes both, or 0 and leaves 0..1. */
+int32_t kira_icon_ink_bounds(const char *svg_utf8, double *out_top, double *out_bottom);
+/* The same two numbers, one call each, for callers that cannot take a pointer. */
+double kira_icon_ink_top(const char *svg_utf8);
+double kira_icon_ink_bottom(const char *svg_utf8);
+
 /* The same, with the coverage grown outward by `dilate_px` pixels: the WEIGHT of
  * a symbol. The library is drawn at ONE weight, so a glyph standing beside
  * heavier type has to be thickened to match its stems — a hairline outline next
