@@ -173,6 +173,11 @@ struct FoundationView {
     // unavailable. Visible ink wins whenever both ink bounds are present.
     let lineHeight: Float = 0.0
     let weight: Float = 400.0
+    // Where this leaf's baseline sits, from its own top edge, for a row that
+    // lines its children up on one. Text computes its own from the face; a glyph
+    // is told where it wants to sit against the words beside it. Zero means the
+    // leaf has none, and such a leaf hangs from its bottom edge.
+    let baseline: Float = 0.0
     let disabled: Bool = false
     let focusable: Bool = false
     // A focusable region that grabs the keyboard as soon as it appears while
@@ -361,10 +366,22 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             if hasInk {
                 textWidth = view.inkRight - view.inkLeft
             }
+            // A run is as tall as its LINE, never as tall as its letters.
+            //
+            // Ink is a property of the letters: sized to it, "Name" and
+            // "dragon.kmesh 0" come out different heights, so centring the two in
+            // one row puts them on different baselines and the row reads as two
+            // rows slightly out of step. It also moves a value the moment its
+            // text changes — `1.000` becoming `-1.250` would shift on its own.
+            // The line box is a property of the FONT, so every run at one size is
+            // one height, and a glyph centred beside them lands in the same place
+            // every frame.
+            //
+            // Ink still decides the WIDTH: horizontal ink is what a run occupies,
+            // and trimming the side bearings is what lets a column of glyphs and
+            // a column of text line up on their edges.
             var textHeight = measured.height
-            if hasInk {
-                textHeight = view.inkTop + view.inkBottom
-            } else if view.lineHeight > 0.0 {
+            if view.lineHeight > 0.0 {
                 textHeight = view.lineHeight
             }
             return LayoutDescriptor {
@@ -374,6 +391,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 axis: .Vertical
                 alignment: .Stretch
                 overlayAlignment: .Center
+                baseline: foundationTextBaseline(view.size, view.weight, textHeight)
                 padding: EdgeInsets {}
                 margin: EdgeInsets {}
             }
@@ -416,6 +434,7 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 axis: .Vertical
                 alignment: .Stretch
                 overlayAlignment: .Center
+                baseline: view.baseline
                 padding: EdgeInsets {}
                 margin: EdgeInsets {}
             }

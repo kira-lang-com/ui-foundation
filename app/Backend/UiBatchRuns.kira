@@ -246,16 +246,27 @@ extend UiBatch {
         }
         let ascender = state.ascender / rasterScale
         let descender = state.descender / rasterScale
-        // Text leaves are laid out from their visible ink bounds. When those
-        // bounds are available, put the actual raster ink on the bounds rather
-        // than centring the font's larger line box inside them; the latter adds
-        // invisible leading above and below a metric card.
+        // Where the BASELINE goes.
+        //
+        // A run given room for the font's line box sits on the baseline that box
+        // implies — the font's own ascent and descent, not this string's ink. It
+        // has to be the font's, because ink is a property of the LETTERS: centre
+        // the ink instead and "editornext-test" (ascenders, no descenders) sits
+        // on a different line from "main.kworld", every label in a column moves
+        // as its text changes, and a glyph beside any of them can only agree
+        // with one of them by accident.
+        //
+        // Ink still places the run when the box is TIGHTER than the line box:
+        // a text leaf hugs its ink, so a card sized to a number has no invisible
+        // leading above and below it, and that is the case this branch exists
+        // for.
         var hasInk = false
         if inkRight > inkLeft && inkTop > 0.0 && inkBottom >= 0.0 {
             hasInk = true
         }
-        var baseline = y + (h - (ascender + descender)) / 2.0 + ascender
-        if hasInk {
+        let lineBox = ascender + descender
+        var baseline = y + (h - lineBox) / 2.0 + ascender
+        if hasInk && h < lineBox {
             let inkHeight = inkTop + inkBottom
             if h > inkHeight {
                 baseline = y + (h - inkHeight) / 2.0 + inkTop

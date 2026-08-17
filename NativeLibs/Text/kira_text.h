@@ -126,6 +126,12 @@ const char* kira_text_probe_report(const char* font_path);
  * NULL/empty to auto-discover. Both return 0 if no face is available. */
 double kira_text_measure_run(const char* font_path, const char* utf8, double pixel_size, double weight);
 double kira_text_line_height(const char* font_path, double pixel_size, double weight);
+/* The face's own ascent and descent at this size: baseline to top, and baseline
+ * to bottom (positive down). A caller that places a run — or places anything ON
+ * that run's baseline — needs the same two numbers the rasterizer uses, or the
+ * two disagree about where the baseline is. */
+double kira_text_ascent(const char* font_path, double pixel_size, double weight);
+double kira_text_descent(const char* font_path, double pixel_size, double weight);
 double kira_text_run_ink_left(const char* font_path, const char* utf8, double pixel_size, double weight);
 double kira_text_run_ink_right(const char* font_path, const char* utf8, double pixel_size, double weight);
 double kira_text_run_ink_top(const char* font_path, const char* utf8, double pixel_size, double weight);
