@@ -47,6 +47,11 @@ function RunFoundationInteractiveApp(
     // is drawn on, which is not the same as a translucent surface inside an
     // opaque window.
     opacity: Float = 1.0,
+    // Launch-time harness — capture, quit-after, input scripts — as a value
+    // rather than environment variables. Default is unconfigured, so a run given
+    // none reads the environment exactly as before; a caller that provides one
+    // (a screenshot tool, a driven test) needs no environment at all.
+    harness: HarnessConfig = HarnessConfig {},
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
@@ -70,6 +75,7 @@ function RunFoundationInteractiveApp(
         // Unknown and Sokol/WebGPU is the only backend). The per-frame path
         // already dispatches on the frame's own backend.
         backend: graphicsDefaultBackend()
+        harness: harness
     }
 
     app.onEvent { event in
