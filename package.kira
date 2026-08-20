@@ -13,12 +13,12 @@ Package KiraUIFoundation {
         NativeLibrary {
             name: "kiratext",
             linkMode: LinkMode.Static,
-            headers: Headers { entrypoint: "NativeLibs/Text/kira_text.h", includeDirs: ["NativeLibs/Text", "NativeLibs/Text/vendor/freetype/include", "NativeLibs/Text/vendor/harfbuzz/src"], defines: ["FT2_BUILD_LIBRARY", "FT_CONFIG_MODULES_H=<kira_ftmodules.h>", "HAVE_FREETYPE=1"] },
+            headers: Headers { entrypoint: "NativeLibs/Text/kira_text.h", includeDirs: ["NativeLibs/Text", "NativeLibs/Text/vendor/freetype/include", "NativeLibs/Text/vendor/harfbuzz/src"], defines: ["FT2_BUILD_LIBRARY", "FT_CONFIG_MODULES_H=<kira_ftmodules.h>", "HAVE_FREETYPE=1", "HB_NO_PRAGMA_GCC_DIAGNOSTIC"] },
             sources: ["NativeLibs/Text/vendor/freetype/src/base/ftbase.c", "NativeLibs/Text/vendor/freetype/src/base/ftmm.c", "NativeLibs/Text/vendor/freetype/src/base/ftinit.c", "NativeLibs/Text/vendor/freetype/src/base/ftsystem.c", "NativeLibs/Text/vendor/freetype/src/base/ftdebug.c", "NativeLibs/Text/vendor/freetype/src/base/ftbbox.c", "NativeLibs/Text/vendor/freetype/src/base/ftbitmap.c", "NativeLibs/Text/vendor/freetype/src/base/ftglyph.c", "NativeLibs/Text/vendor/freetype/src/base/ftstroke.c", "NativeLibs/Text/vendor/freetype/src/sfnt/sfnt.c", "NativeLibs/Text/vendor/freetype/src/truetype/truetype.c", "NativeLibs/Text/vendor/freetype/src/cff/cff.c", "NativeLibs/Text/vendor/freetype/src/psaux/psaux.c", "NativeLibs/Text/vendor/freetype/src/psnames/psnames.c", "NativeLibs/Text/vendor/freetype/src/pshinter/pshinter.c", "NativeLibs/Text/vendor/freetype/src/smooth/smooth.c", "NativeLibs/Text/vendor/freetype/src/autofit/autofit.c", "NativeLibs/Text/vendor/freetype/src/raster/raster.c", "NativeLibs/Text/vendor/freetype/src/gzip/ftgzip.c", "NativeLibs/Text/vendor/harfbuzz/src/harfbuzz.cc", "NativeLibs/Text/kira_text.c"],
             autobind: Autobind { module: "text", headers: ["NativeLibs/Text/kira_text.h"], mode: AutobindMode.AllPublic },
             nativeTargets: [
                 NativeTarget { triple: "x86_64-windows-msvc", staticLib: "NativeLibs/../generated/native/x86_64-windows-msvc/kiratext.lib" },
-                NativeTarget { triple: "x86_64-linux-gnu", staticLib: "NativeLibs/../generated/native/x86_64-linux-gnu/libkiratext.a" },
+                NativeTarget { triple: "x86_64-linux-gnu", staticLib: "NativeLibs/../generated/native/x86_64-linux-gnu/libkiratext.a", systemLibs: ["stdc++"] },
                 NativeTarget { triple: "aarch64-macos-none", staticLib: "NativeLibs/../generated/native/aarch64-macos/libkiratext.a", systemLibs: ["c++"] },
                 NativeTarget { triple: "aarch64-ios-none", staticLib: "NativeLibs/../generated/native/aarch64-ios/libkiratext.a" },
                 NativeTarget { triple: "aarch64-ios-simulator", staticLib: "NativeLibs/../generated/native/aarch64-ios-simulator/libkiratext.a" },
