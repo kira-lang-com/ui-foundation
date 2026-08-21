@@ -110,16 +110,30 @@ class KiraGraphicsFoundationBackend {
         self.glassWashLumaStack = []
         self.clipMinX = 0.0
         self.clipMinY = 0.0
-        self.clipMaxX = intAsFloat(value: width)
-        self.clipMaxY = intAsFloat(value: height)
 
         // The logical viewport is the drawable divided by the scale, so forcing
         // the scale trades logical AREA for device pixels per point — which is
         // exactly what a denser display gives, and the only way to see it on a
         // panel that has not got the pixels.
         let renderScale = foundationRenderScale(self.graphics.backingScale())
-        let logicalW = intAsFloat(value: self.graphics.contextWidth()) / renderScale
-        let logicalH = intAsFloat(value: self.graphics.contextHeight()) / renderScale
+        // The drawable this frame projects onto: the graphics context's, or --
+        // for a device that HAS no context -- the extent the caller passed.
+        //
+        // A headless device answers 0x0, because there is no window to measure
+        // and the target is whichever texture the present names. Dividing that
+        // zero gave a zero-wide viewport, which every quad was then projected
+        // into and collapsed by: emitted, counted, committed and drawn, and
+        // covering no pixel. A component surface came out carrying its clear
+        // colour and nothing else, which reads exactly like a tree that never
+        // rendered rather than one that rendered into nowhere.
+        var deviceW = self.graphics.contextWidth()
+        var deviceH = self.graphics.contextHeight()
+        if deviceW <= 0 || deviceH <= 0 {
+            deviceW = width
+            deviceH = height
+        }
+        let logicalW = intAsFloat(value: deviceW) / renderScale
+        let logicalH = intAsFloat(value: deviceH) / renderScale
         self.clipMaxX = logicalW
         self.clipMaxY = logicalH
 
@@ -127,8 +141,8 @@ class KiraGraphicsFoundationBackend {
             logicalW,
             logicalH,
             renderScale,
-            self.graphics.contextWidth(),
-            self.graphics.contextHeight()
+            deviceW,
+            deviceH
         )
         // Claim this frame's slot in each vertex stream before anything emits into
         // one; the frames still on the GPU keep theirs.
