@@ -363,6 +363,8 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
         contentsPtr: vbuf.contents
         vertsGroup: bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), vbuf.buffer.id), "verts group")
         quadModes: zeroedInts(maxQuadsPerBatch())
+        quadExternals: zeroedInts(maxQuadsPerBatch())
+        quadSecondaries: zeroedInts(maxQuadsPerBatch())
     })
 
     // Second stream: the first glass layer. Allocated up front so the common
@@ -374,6 +376,8 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
         contentsPtr: vbuf2.contents
         vertsGroup: bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), vbuf2.buffer.id), "verts group")
         quadModes: zeroedInts(maxQuadsPerBatch())
+        quadExternals: zeroedInts(maxQuadsPerBatch())
+        quadSecondaries: zeroedInts(maxQuadsPerBatch())
     })
 
     // The rest of the stream slots — the deeper glass layers and the HUD's own —

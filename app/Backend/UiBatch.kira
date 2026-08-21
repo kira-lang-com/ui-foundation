@@ -346,6 +346,17 @@ function loadBatchFont(state: borrow mut UiBatchState) {
 // buffer would keep the slot the last frame that used it left behind, and a later
 // frame writing that slot would be writing what a running frame is drawing.
 extend UiBatch {
+    // Whether this batch may promote a full-bleed quad into the background pass.
+    //
+    // A component rendering for another process says no, once, when it makes the
+    // batch: it has no external texture bound, and the background pass does not
+    // run without one.
+    function setBackgroundPromotable(allowed: Bool) {
+        var state = nativeRecover<UiBatchState>(self.storage)
+        state.backgroundPromotable = allowed
+        return
+    }
+
     function beginFrameSlots(graphics: borrow Graphics) {
         var state = nativeRecover<UiBatchState>(self.storage)
         for i in 0..state.streams.count {

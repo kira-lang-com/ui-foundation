@@ -40,6 +40,24 @@ extend UiBatch {
         } else {
             state.streams[state.streamIndex].quadModes.append(modeCode)
         }
+        // Which texture this quad samples, recorded beside its mode. Only a
+        // mode-2 quad samples one; every other quad records nothing, so a run
+        // of them never breaks a draw call in two.
+        var externalId = 0
+        if modeCode == 20 {
+            externalId = state.externalPending
+        }
+        var secondaryId = 0
+        if modeCode == 20 {
+            secondaryId = state.secondaryPending
+        }
+        if state.quadCount < state.streams[state.streamIndex].quadExternals.count {
+            state.streams[state.streamIndex].quadExternals[state.quadCount] = externalId
+            state.streams[state.streamIndex].quadSecondaries[state.quadCount] = secondaryId
+        } else {
+            state.streams[state.streamIndex].quadExternals.append(externalId)
+            state.streams[state.streamIndex].quadSecondaries.append(secondaryId)
+        }
         if state.streamIndex == 0 && state.probeQuads {
             print(636363)
             print(Int(mode * 10.0))
@@ -185,12 +203,115 @@ extend UiBatch {
 }
 
 
-// Register the external texture TextureViews sample this frame (one per frame — the
-// editor viewport). The slot-1 bind group is cached per texture id, so a stable
-// render-target id costs one creation total.
+// The bind group a TextureView quad samples ITS OWN texture through.
+//
+// One per texture id, created on first sight and kept. A window compositing
+// several components draws a TextureView per component in the same stream, and
+// the single backdrop group cannot serve them: whichever texture was registered
+// last would be the one all of them showed.
+//
+// Kept rather than rebuilt because an id here names a shared surface, which
+// outlives the frame -- so a window holding three components pays three
+// creations for the run of the process, not three per frame.
+function externalCacheEnsure(state: borrow mut UiBatchState, graphics: borrow Graphics, textureId: Int) {
+    if textureId <= 0 {
+        return
+    }
+    var index = 0
+    while index < state.externalCacheIds.count {
+        if state.externalCacheIds[index] == textureId {
+            return
+        }
+        index = index + 1
+    }
+    let texture = sampledTextureFromViewId(U32(textureId))
+    let group = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-cached"), "external cache group")
+    glassAddSharpBackdrop(graphics, group, texture, texture, state.sampler, state.backdropBlend)
+    state.externalCacheIds.append(textureId)
+    state.externalCacheGroups.append(group)
+    return
+}
+
+function externalCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
+    var index = 0
+    while index < state.externalCacheIds.count {
+        if state.externalCacheIds[index] == textureId {
+            return state.externalCacheGroups[index]
+        }
+        index = index + 1
+    }
+    return emptyBindGroup()
+}
+
+// The group a crossfading quad reads its TARGET through.
+//
+// Bound at the near group rather than beside the primary, because that is where
+// the generic shader's `backdrop` tap lives. Binding it beside the primary put
+// the texture in a slot mode 2 never reads, and the tap fell back to the group
+// underneath it -- which is the glyph atlas, so a sidebar mid-swipe crossfaded
+// into a page of packed glyphs.
+function secondaryCacheEnsure(state: borrow mut UiBatchState, graphics: borrow Graphics, textureId: Int) {
+    if textureId <= 0 {
+        return
+    }
+    var index = 0
+    while index < state.secondaryCacheIds.count {
+        if state.secondaryCacheIds[index] == textureId {
+            return
+        }
+        index = index + 1
+    }
+    let texture = sampledTextureFromViewId(U32(textureId))
+    let group = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-secondary-cached"), "secondary cache group")
+    graphics.bindGroupAddTexture(group, backdropTextureSlot(), texture)
+    graphics.bindGroupAddSampler(group, backdropSamplerSlot(), state.sampler)
+    graphics.bindGroupAddTexture(group, nearTextureSlot(), texture)
+    graphics.bindGroupAddSampler(group, nearSamplerSlot(), state.sampler)
+    state.secondaryCacheIds.append(textureId)
+    state.secondaryCacheGroups.append(group)
+    return
+}
+
+function secondaryCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
+    var index = 0
+    while index < state.secondaryCacheIds.count {
+        if state.secondaryCacheIds[index] == textureId {
+            return state.secondaryCacheGroups[index]
+        }
+        index = index + 1
+    }
+    return emptyBindGroup()
+}
+
+// The texture a given quad crossfades towards, or 0 for one that does not.
+function quadSecondaryAt(state: borrow UiBatchState, modeStream: Int, quad: Int) -> Int {
+    if quad < 0 || quad >= state.streams[modeStream].quadSecondaries.count {
+        return 0
+    }
+    return state.streams[modeStream].quadSecondaries[quad]
+}
+
+// The external texture a given quad samples, or 0 for one that samples none.
+function quadExternalAt(state: borrow UiBatchState, modeStream: Int, quad: Int) -> Int {
+    if quad < 0 || quad >= state.streams[modeStream].quadExternals.count {
+        return 0
+    }
+    return state.streams[modeStream].quadExternals[quad]
+}
+
+// Register the external texture the frame's BACKDROP reads: what glass blurs and
+// what the background pass draws. There is one of those per frame. The slot-1
+// bind group is cached per texture id, so a stable render-target id costs one
+// creation total.
 extend UiBatch {
     function setExternalTextures(graphics: borrow Graphics, textureId: U32, secondaryTextureId: U32) {
         var state = nativeRecover<UiBatchState>(self.storage)
+        // Settled before the early-out below: the quads that follow sample THIS
+        // texture whether or not the backdrop slot already held it.
+        state.externalPending = Int(textureId)
+        state.secondaryPending = Int(secondaryTextureId)
+        externalCacheEnsure(state, graphics, Int(textureId))
+        secondaryCacheEnsure(state, graphics, Int(secondaryTextureId))
         let primaryMatches = state.externalBindReady && state.externalTextureId == textureId
         let secondaryMatches =
             (secondaryTextureId == 0 && !state.secondaryExternalBindReady) ||
@@ -275,7 +396,7 @@ extend UiBatch {
             radius <= 0.0 &&
             clipMinX <= 0.01 && clipMinY <= 0.01 &&
             clipMaxX >= state.viewportW - 0.01 && clipMaxY >= state.viewportH - 0.01
-        if state.backgroundPipeline.id != 0 && state.streamIndex == 0 && state.quadCount == 0 && alpha >= 0.999 && coversViewport {
+        if state.backgroundPromotable && state.backgroundPipeline.id != 0 && state.streamIndex == 0 && state.quadCount == 0 && alpha >= 0.999 && coversViewport {
             state.backgroundActive = true
             state.backgroundTransition = transition
             return

@@ -28,6 +28,11 @@ struct UiStream {
     var glassBounds: [Float] = []
     var glassBoundCount: Int = 0
     var quadModes: [Int] = []
+    // The external texture each quad samples, beside the mode that says whether
+    // it samples one at all. Parallel to `quadModes` and allocated with it.
+    var quadExternals: [Int] = []
+    // And the one it crossfades TOWARDS, for a quad that is mid-transition.
+    var quadSecondaries: [Int] = []
 }
 
 // An unallocated stream slot. A zero buffer id is what marks it: no backend hands
@@ -57,6 +62,8 @@ function createDrawStream(state: borrow mut UiBatchState, graphics: borrow Graph
     state.streams[index].frameBase = graphics.dynamicBufferFrameStart(dynamic.buffer) / 4
     state.streams[index].vertsGroup = bindGroupOrReport(graphics.createStorageBufferBindGroup("kira-ui-verts", vertexBufferSlot(), dynamic.buffer.id), "verts group")
     state.streams[index].quadModes = zeroedInts(maxQuadsPerBatch())
+    state.streams[index].quadExternals = zeroedInts(maxQuadsPerBatch())
+    state.streams[index].quadSecondaries = zeroedInts(maxQuadsPerBatch())
     return
 }
 
@@ -184,9 +191,41 @@ struct UiBatchState {
     // uniform slot. `UiBackground.ksl` declares it `uniform params`, and a
     // backend that pushes uniforms through its own call (sokol does) has no way
     // to read them out of a buffer a caller bound instead.
+    // The external texture the next mode-2 quad will sample, and a bind group
+    // per texture id to sample it through.
+    //
+    // `externalGroup` beside these is the frame's BACKDROP -- what glass blurs
+    // and what the background pass draws -- and there is exactly one of those.
+    // A window compositing several components has as many TextureViews as it
+    // has components, and one group bound for the whole stream made every one
+    // of them show whichever texture was registered last. Groups are kept
+    // rather than rebuilt: an id here names a surface, and a surface outlives
+    // the frame that drew it.
+    var externalPending: Int = 0
+    var secondaryPending: Int = 0
+    var externalCacheIds: [Int] = []
+    var externalCacheGroups: [BindGroup] = []
+    // And the texture a crossfading quad is heading towards, which binds through
+    // a DIFFERENT encoder group: the generic shader reads its primary from the
+    // external group and its crossfade target from the near one, so the two are
+    // cached apart because they are bound apart.
+    var secondaryCacheIds: [Int] = []
+    var secondaryCacheGroups: [BindGroup] = []
     var backgroundParams: Uniform = emptyUniform()
     var backgroundParamsGroup: BindGroup = emptyBindGroup()
     var backgroundActive: Bool = false
+    // Whether a full-bleed opaque quad may be PROMOTED out of the stream and
+    // drawn by the background pass instead.
+    //
+    // True for a window, where it is a real saving: the page colour covers every
+    // pixel, so drawing it through the backdrop pipeline costs one fullscreen
+    // sample instead of a quad the whole batch then draws over.
+    //
+    // False for a surface rendered for another process. The promotion hands the
+    // quad to a pass that only runs when an external texture is bound -- which a
+    // window always has and a component never does -- so a component's
+    // background is taken out of the batch and then not drawn at all.
+    var backgroundPromotable: Bool = true
     var backgroundTransition: Float = 0.0
     var indexBuffer: GraphicsBuffer = emptyGraphicsBuffer()
     var atlasTexture: GraphicsTexture = emptyGraphicsTexture()
