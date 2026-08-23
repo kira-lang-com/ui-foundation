@@ -484,6 +484,7 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     state.probeBatch = environmentIsSet("KIRA_UI_BATCH_PROBE")
     state.probeGlassLayers = environmentIsSet("KIRA_GLASS_LAYERS")
     state.probeGlassLayerOpen = environmentIsSet("KIRA_GLASS_LAYER_PROBE")
+    state.probeGlassDebug = environmentIsSet("KIRA_GLASS_DEBUG")
     state.benchFinalOnly = environmentIsSet("KIRA_GLASS_BENCH_FINAL_ONLY")
     state.benchBackgroundOnly = environmentIsSet("KIRA_GLASS_BENCH_BACKGROUND_ONLY")
     state.benchNoBackground = environmentIsSet("KIRA_GLASS_BENCH_NO_BACKGROUND")
@@ -495,4 +496,3 @@ function uiBatchCreate(graphics: borrow Graphics) -> RawPtr {
     let storage = nativeState(state)
     return nativeUserData(storage)
 }
-

@@ -98,6 +98,19 @@ function uiBatchDrawStream(batchPtr: RawPtr, encoder: borrow mut RenderEncoder, 
     while modeStream < state.streams.count && state.streams[modeStream].vertsGroupId != vertsGroupId {
         modeStream = modeStream + 1
     }
+    if state.probeGlassDebug && modeStream == 1 {
+        var direct = 0
+        if state.directBackdropLayer0 {
+            direct = 1
+        }
+        print(747475)
+        print(Int(externalGroupId))
+        print(direct)
+        print(Int(state.directBackdropSharpGroupId))
+        print(Int(state.glassLayers[0].sceneSharpGroupId))
+        print(Int(state.externalBindGroupId))
+        print(Int(state.externalTextureId))
+    }
     var completeModes = false
     if modeStream < state.streams.count {
         completeModes = state.streams[modeStream].quadModes.count >= quadCount
@@ -404,7 +417,10 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
         // capture a layer refracts must not contain the layer itself — and a target
         // cannot be sampled by the pass that writes it, which an accumulating
         // capture would need.
-        if directSourceId == 0 {
+        // A requested Metal scene dump keeps the direct source for the actual
+        // glass draw, but also records the otherwise-skipped capture target so
+        // it can be compared with the swapchain from this same frame.
+        if directSourceId == 0 || environmentIsSet("KIRA_METAL_GLASS_SCENE_DUMP") {
             var sceneEncoder = frame.beginRenderPass(uiGlassTexturePass("kira-ui-glass-scene-pass", state.glassLayers[layer].sceneTextureId, bgR, bgG, bgB, bgA))
             let boundsStream = layer + 1
             let boundCount = state.streams[boundsStream].glassBoundCount
@@ -557,6 +573,8 @@ function uiBatchPresent(batchPtr: RawPtr, frame: borrow mut GraphicsFrame, graph
     }
     uiBatchDrawHud(batchPtr, state, mainEncoder)
     frame.endPass()
+    if layers > 0 {
+        frame.dumpTextureIfRequested(Int(state.glassLayers[0].sceneTextureId), state.glassTexW, state.glassTexH)
+    }
     return
 }
-

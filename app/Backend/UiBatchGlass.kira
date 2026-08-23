@@ -79,6 +79,26 @@ function uiBatchPushGlass(
     if state.streamIndex == 0 {
         return
     }
+    if state.probeGlassDebug && w == 480.0 && h == 300.0 {
+        let halfWProbe = w / 2.0
+        let halfHProbe = h / 2.0
+        let cxProbe = x + halfWProbe
+        let cyProbe = y + halfHProbe
+        print(747474)
+        print(Int(x * 1000.0)); print(Int(y * 1000.0))
+        print(Int(w * 1000.0)); print(Int(h * 1000.0)); print(Int(radius * 1000.0))
+        print(Int(state.viewportW * 1000.0)); print(Int(state.viewportH * 1000.0))
+        print(Int(state.scale * 1000.0)); print(state.glassTexW); print(state.glassTexH)
+        print(Int(cxProbe / state.viewportW * 1000000.0))
+        print(Int(cyProbe / state.viewportH * 1000000.0))
+        print(Int(halfWProbe / state.viewportW * 1000000.0))
+        print(Int(halfHProbe / state.viewportH * 1000000.0))
+        print(Int(material.borderSpread * 1000000.0))
+        print(Int(material.borderSideOffset * 1000000.0))
+        print(Int(material.borderSideSpread * 1000000.0))
+        print(Int(material.borderGrey * 1000000.0))
+        print(Int(material.borderSideGrey * 1000000.0))
+    }
     // Record the only capture pixels this surface can sample. The lens may reach
     // outside its own shape by lensMaxBend; border/shadow sampling needs the small
     // emitted-quad pad as well. Arrays retain capacity across frames.
@@ -434,4 +454,3 @@ function uiGlassEmitPatch(
     )
     return
 }
-

@@ -365,6 +365,7 @@ struct UiBatchState {
     var probeBatch: Bool = false
     var probeGlassLayers: Bool = false
     var probeGlassLayerOpen: Bool = false
+    var probeGlassDebug: Bool = false
     var benchFinalOnly: Bool = false
     var benchBackgroundOnly: Bool = false
     var benchNoBackground: Bool = false
@@ -645,7 +646,6 @@ function uiBatchEndHud(batchPtr: RawPtr) {
     state.quadCount = state.streams[back].quadCount
     return
 }
-
 
 
 
