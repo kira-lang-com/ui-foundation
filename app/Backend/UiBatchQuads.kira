@@ -29,6 +29,16 @@ extend UiBatch {
         // 3 corner to corner). A flat quad leaves them at zero.
         gradR: Float = 0.0, gradG: Float = 0.0, gradB: Float = 0.0, gradA: Float = 0.0,
         gradAxis: Float = 0.0,
+        // The second shape a liquid-glass surface is fusing with, in this
+        // quad's own space, and the smooth minimum's reach. A reach of zero is
+        // a surface that is one shape, which is every quad but the ones in a
+        // morph — and the only value any other mode ever passes.
+        morphX: Float = 0.0, morphY: Float = 0.0,
+        morphHalfW: Float = 0.0, morphHalfH: Float = 0.0,
+        morphRadius: Float = 0.0, morphBlend: Float = 0.0,
+        // 0 for a circular rounded rectangle, 1 for a squircle's continuous
+        // superellipse corner.
+        shapeKind: Float = 0.0,
     ) {
         var state = nativeRecover<UiBatchState>(self.storage)
         if state.quadCount >= maxQuadsPerBatch() {
@@ -110,6 +120,11 @@ extend UiBatch {
         // Written for every quad, flat ones included: the slot is reused, and an
         // unwritten block carries whatever gradient last occupied it.
         writeQuadGradient(contents, U64(base), gradR, gradG, gradB, gradA, gradAxis)
+        // Unconditional for the same reason the gradient is: the slot is reused
+        // and an unwritten morph block is a second shape left over from
+        // whatever quad held this slot last.
+        writeQuadMorph(contents, U64(base), morphX, morphY, morphHalfW, morphHalfH, morphRadius, morphBlend)
+        writeQuadShapeKind(contents, U64(base), shapeKind)
         if writesMaterial {
             writeQuadMaterial(
                 contents, U64(base),
@@ -163,14 +178,32 @@ extend UiBatch {
         // corner). One quad either way — the blend is per corner.
         gradient: borrow Color = Color { a: 0.0 },
         gradientAxis: Float = 0.0,
+        // The touch highlight, in the same coordinates as `x`/`y`. Strength
+        // zero is no highlight, which is every quad but the one under a finger.
+        glowX: Float = 0.0,
+        glowY: Float = 0.0,
+        glowStrength: Float = 0.0,
     ) {
         if w <= 0.0 || h <= 0.0 {
             return
         }
         // A gradient can start transparent and end opaque, so what decides
         // whether there is anything to draw is BOTH ends of the fill.
-        if fill.a <= 0.0 && gradient.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) {
+        // A quad that paints no fill, no gradient and no border still has
+        // something to draw if it is carrying a touch highlight: the light is
+        // ADDED to what is already there, so it needs no fill of its own. This
+        // is how the highlight reaches a glass surface, whose fill the glass
+        // shader owns and whose fill quad is therefore suppressed.
+        if fill.a <= 0.0 && gradient.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) && glowStrength <= 0.0 {
             return
+        }
+        if h < 2.0 {
+            print(717171)
+            print(Int(x))
+            print(Int(y))
+            print(Int(w))
+            print(Int(h))
+            print(Int(fill.a * 1000.0))
         }
         let pad = 1.0
         let halfW = w / 2.0
@@ -195,7 +228,11 @@ extend UiBatch {
             clipMinX, clipMinY, clipMaxX, clipMaxY,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+            // The last three material slots are the spares, and in this mode
+            // they carry the highlight. Handed over in the quad's OWN space,
+            // which is what the fragment measures distance in.
+            glowX - cx, glowY - cy, glowStrength,
             gradient.r, gradient.g, gradient.b, gradient.a, gradientAxis
         )
         return

@@ -45,6 +45,12 @@ function Expanded(child: FoundationView, flex: Int) -> FoundationView {
     }
 }
 
+// The collision-free host spelling. Higher layers commonly expose an
+// `Expanded` widget of their own while still needing this lowered view helper.
+function FoundationExpanded(child: FoundationView, flex: Int) -> FoundationView {
+    return Expanded(move child, flex)
+}
+
 function Frame(
     child: FoundationView,
     width: SizeMode,

@@ -1,5 +1,6 @@
 import Foundation
 import KiraLayout
+import KiraUIMotion
 
 // Scrolling: a window onto content taller than itself.
 //
@@ -11,11 +12,16 @@ import KiraLayout
 // scrolled out from under the pointer stops being clickable without either of
 // them knowing that scrolling exists.
 //
-// The offset a view asks for is CLAMPED here, and the clamped value is what is
-// stored: the two numbers that bound it — how tall the content came out, how
-// tall the window is — exist only once layout has run. Clamping at the wheel
-// instead is how a list keeps counting past its own end and then needs the same
-// number of turns back before it moves.
+// WHAT the offset does over time is not decided here. A throw coasting to a
+// stop, an edge that gives and springs back, a list that lands on an item —
+// those are `KiraUIMotion`, which owns the time domain and draws nothing. This
+// file owns the seam: it measures what the layout came out as, hands those
+// numbers to the motion state, and applies whatever offset comes back.
+//
+// The bounds travel WITH the state rather than being passed to every call,
+// because they are only known once layout has run and input arrives before it
+// does. A wheel notch is answered against the extent the last frame measured,
+// which is the same extent the user was looking at when they turned the wheel.
 
 // Where a scrolling region is held.
 function foundationScrollSlotKey(key: Int) -> String {
@@ -23,25 +29,84 @@ function foundationScrollSlotKey(key: Int) -> String {
 }
 
 struct FoundationScrollState {
-    var offset: Float = 0.0
+    // The motion, and the extent it is moving within.
+    var motion: MotionScrollState = MotionScrollState {}
+    var bounds: MotionScrollBounds = MotionScrollBounds {}
+    // Whether layout has measured this region yet. Until it has, the extent is
+    // zero and every offset would clamp to nothing — so a wheel turned on the
+    // very first frame is applied once the measurement arrives rather than
+    // being thrown away.
+    var measured: Bool = false
+}
+
+// Every region that has been touched this run, so the frame tick knows which
+// ones to advance without walking the view tree.
+function foundationScrollKeysSlot() -> String {
+    return "kirauifoundation.scroll.keys"
+}
+
+struct FoundationScrollKeys {
+    var keys: [Int] = []
+}
+
+function foundationScrollKeysEnsure() {
+    if stateSlotHas(foundationScrollKeysSlot()) == false {
+        stateSlotPut(foundationScrollKeysSlot(), nativeUserData(nativeState(FoundationScrollKeys {})))
+    }
+    return
+}
+
+function foundationScrollRemember(key: Int) {
+    foundationScrollKeysEnsure()
+    var known = nativeRecover<FoundationScrollKeys>(stateSlotGet(foundationScrollKeysSlot()))
+    for index in 0..known.keys.count {
+        if known.keys[index] == key {
+            return
+        }
+    }
+    known.keys.append(key)
+    return
 }
 
 function foundationScrollEnsure(key: Int) {
     if stateSlotHas(foundationScrollSlotKey(key)) == false {
         stateSlotPut(foundationScrollSlotKey(key), nativeUserData(nativeState(FoundationScrollState {})))
+        foundationScrollRemember(key)
     }
     return
 }
 
 // How far the region under `key` is scrolled.
+//
+// This is the SHOWN offset, so while a region is held past its end it is
+// outside the range layout allows — that overhang is the rubber band, and the
+// caller applies it exactly as it applies any other offset.
 function foundationScrollOffset(key: Int) -> Float {
     foundationScrollEnsure(key)
     let state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
-    return state.offset
+    return state.motion.offset
+}
+
+// What layout last measured this region as: how tall its content came out, and
+// how tall the window onto it is. A host sizing a scrollbar asks for these.
+function foundationScrollContentLength(key: Int) -> Float {
+    foundationScrollEnsure(key)
+    let state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    return state.bounds.contentLength
+}
+
+function foundationScrollViewportLength(key: Int) -> Float {
+    foundationScrollEnsure(key)
+    let state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    return state.bounds.viewportLength
 }
 
 // Scrolls the region by a wheel delta. Positive moves the content up, which is
 // what turning the wheel away from you does to a list.
+//
+// A wheel notch is a displacement and not a gesture: it cannot be released, so
+// it starts no throw and it clamps rather than stretching. There is no lift
+// coming to spring a wheel-stretched region back.
 //
 // The write recovers the stored value rather than a reader's copy of it: a
 // recovered value handed back by a function is a copy, and a wheel that writes
@@ -49,19 +114,95 @@ function foundationScrollOffset(key: Int) -> Float {
 function foundationScrollBy(key: Int, delta: Float) {
     foundationScrollEnsure(key)
     var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
-    var next = state.offset + delta
-    if next < 0.0 {
-        next = 0.0
-    }
-    state.offset = next
+    motionScrollWheel(state.motion, delta, state.bounds)
     return
 }
 
 function foundationScrollSet(key: Int, offset: Float) {
     foundationScrollEnsure(key)
     var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
-    state.offset = offset
+    state.motion.offset = offset
+    state.motion.rawOffset = offset
     return
+}
+
+// --- the gesture -----------------------------------------------------------
+
+// A finger or a held pointer takes hold of the region.
+function foundationScrollDragBegin(key: Int, pointer: Float) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    motionScrollDragBegin(state.motion, pointer, state.bounds)
+    return
+}
+
+function foundationScrollDragMove(key: Int, pointer: Float, delta: Float) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    motionScrollDragMove(state.motion, pointer, delta, state.bounds)
+    return
+}
+
+// The hold ends. What happens next — a throw, a spring back from an edge, a
+// snap onto an item — is decided by the motion state from where the region is
+// and how fast it is going.
+function foundationScrollDragEnd(key: Int, reducedMotion: Bool) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    motionScrollDragEnd(state.motion, state.bounds, reducedMotion)
+    return
+}
+
+// Sends a region to an offset under a spring — a "scroll to top", a focus
+// change, a keyboard shortcut.
+function foundationScrollTo(key: Int, offset: Float, reducedMotion: Bool) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    motionScrollTo(state.motion, offset, state.bounds, reducedMotion)
+    return
+}
+
+// Makes a region snap to a pitch instead of coasting freely. Zero turns it off.
+function foundationScrollSnapTo(key: Int, pitch: Float) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    state.motion.snapPitch = pitch
+    return
+}
+
+// Whether a region may be pulled past its ends at all.
+function foundationScrollSetBounces(key: Int, bounces: Bool) {
+    foundationScrollEnsure(key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+    state.motion.bounces = bounces
+    return
+}
+
+// --- the frame -------------------------------------------------------------
+
+// Advances every scrolling region by one frame.
+//
+// Answers whether any of them is still moving, which is what the interactive
+// runner asks to decide whether to draw another frame. A run of regions that
+// all answered true would hold the display awake over a list nobody is
+// touching; one that answered false too early would stop a throw mid-flight.
+function foundationScrollAdvance(delta: Float, reducedMotion: Bool) -> Bool {
+    foundationScrollKeysEnsure()
+    let known = nativeRecover<FoundationScrollKeys>(stateSlotGet(foundationScrollKeysSlot()))
+    var moving = false
+    for index in 0..known.keys.count {
+        let key = known.keys[index]
+        if stateSlotHas(foundationScrollSlotKey(key)) {
+            var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(key)))
+            // A region layout has not reached yet has no extent to move within,
+            // and advancing it against a zero one would clamp a pending throw
+            // away before the first measurement arrives.
+            if state.measured && motionScrollAdvance(state.motion, delta, state.bounds, reducedMotion) {
+                moving = true
+            }
+        }
+    }
+    return moving
 }
 
 // Applies every scrolling view's offset to the tree it was laid out into.
@@ -86,6 +227,11 @@ function foundationApplyScrollIn(view: borrow FoundationView, tree: borrow mut L
 }
 
 // One scrolling view: what it holds, how far that can move, and the move.
+//
+// This is where the two halves meet. The extent is measured from the placed
+// children — the only place it exists — and stored on the motion state, so
+// every wheel notch, drag and throw between now and the next layout is answered
+// against a real measurement instead of a guess.
 function foundationScrollNode(view: borrow FoundationView, tree: borrow mut LayoutTree, nodeIndex: Int) {
     var t = tree
     let frame = layoutFrame(t, nodeIndex)
@@ -101,19 +247,27 @@ function foundationScrollNode(view: borrow FoundationView, tree: borrow mut Layo
         }
         childOffset = childOffset + 1
     }
-    var limit = content - frame.height
-    if limit < 0.0 {
-        limit = 0.0
+
+    foundationScrollEnsure(view.key)
+    var state = nativeRecover<FoundationScrollState>(stateSlotGet(foundationScrollSlotKey(view.key)))
+    state.bounds = MotionScrollBounds { contentLength: content, viewportLength: frame.height }
+    state.measured = true
+
+    // A region that shrank under a resting offset is pulled back inside its new
+    // extent. Only while nothing is animating: a throw or a spring back is
+    // already heading somewhere legal, and clamping it here would cut it short
+    // every frame it was in flight.
+    if state.motion.phase == .Idle {
+        let settled = motionScrollClamp(state.motion.offset, state.bounds)
+        state.motion.offset = settled
+        state.motion.rawOffset = settled
     }
-    var offset = foundationScrollOffset(view.key)
-    if offset > limit {
-        offset = limit
-    }
-    if offset < 0.0 {
-        offset = 0.0
-    }
-    foundationScrollSet(view.key, offset)
-    if offset > 0.0 {
+
+    let offset = state.motion.offset
+    // Not `> 0.0`: a region held past its start has a NEGATIVE offset, and that
+    // overhang is the rubber band. Skipping it would make a surface answer a
+    // downward pull by doing nothing.
+    if offset != 0.0 {
         foundationScrollShift(t, nodeIndex, 0.0 - offset)
     }
     return

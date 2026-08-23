@@ -48,11 +48,19 @@ class UiBatch {
 //   fillR fillG fillB fillA   borderR borderG borderB borderA
 //   clipMinX clipMinY clipMaxX clipMaxY
 //   + the 24-float material block, mode 3 only
+//   + the five-float gradient block
+//   + the six-float MORPH block (mode 3 only): the second shape this surface is
+//     fusing with and the smooth minimum's reach. Zero reach is a surface that
+//     is one shape, which is nearly all of them. See `writeQuadMorph`.
+//   + one float for the CORNER KIND: circular, or the continuous superellipse a
+//     squircle is. The generic pipeline reads this off `mode` (0.25 is a
+//     squircle rect), which the glass pipelines cannot — their `mode` says
+//     which region patch this is. See `writeQuadShapeKind`.
 // The twelve leading floats are the corner-varying values at their two extremes;
 // the vertex stage picks per corner. Eighteen shared floats used to be written
 // once per vertex, so a quad cost 192 floats where it now costs 54 — 30 for
 // everything but liquid glass, which is every glyph on screen.
-function quadFloatCount() -> Int { return 59 }
+function quadFloatCount() -> Int { return 66 }
 // Where the material block starts inside a record.
 function quadMaterialOffset() -> Int { return 30 }
 function quadVertexCount() -> Int { return 4 }

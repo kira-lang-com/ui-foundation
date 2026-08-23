@@ -82,9 +82,9 @@ function schemeCycleSeconds() -> Float {
 // this — dark mode is not a tint applied over a light UI, it is the other table.
 function appScheme(dark: Bool) -> FoundationScheme {
     if dark {
-        return FoundationScheme.Dark
+        return .Dark
     }
-    return FoundationScheme.Light
+    return .Light
 }
 
 // How long the crossfade takes, in SECONDS.
@@ -197,8 +197,8 @@ function mixColor(from: borrow Color, to: borrow Color, t: Float) -> Color {
 // them. Ink has no blend mode to worry about, so unlike the materials it really can
 // travel the whole way as a colour.
 function schemeInk(level: Int, at: Float, alpha: Float) -> Color {
-    let light = foundationVibrantLabel(level, FoundationScheme.Light)
-    let dark = foundationVibrantLabel(level, FoundationScheme.Dark)
+    let light = foundationVibrantLabel(level, .Light)
+    let dark = foundationVibrantLabel(level, .Dark)
     return withAlpha(mixColor(light, dark, at), alpha)
 }
 
@@ -230,12 +230,12 @@ function frostKey(level: Int) -> Int {
 }
 
 function frostForLevel(level: Int) -> FoundationFrost {
-    if level == 0 { return FoundationFrost.Translucent }
-    if level == 1 { return FoundationFrost.Light }
-    if level == 2 { return FoundationFrost.Medium }
-    if level == 3 { return FoundationFrost.High }
-    if level == 5 { return FoundationFrost.Max }
-    return FoundationFrost.XHigh
+    if level == 0 { return .Translucent }
+    if level == 1 { return .Light }
+    if level == 2 { return .Medium }
+    if level == 3 { return .High }
+    if level == 5 { return .Max }
+    return .XHigh
 }
 
 function ignoreAction() {
@@ -274,11 +274,11 @@ function glassInputForeground(at: Float) -> Color {
 // sits over it.
 // `blur` is last because Kira binds defaults POSITIONALLY: a parameter in the
 // middle cannot be skipped, and every call here wants the step's own blur.
-function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = FoundationBlur.Step, at: Float = 0.0) -> FoundationView {
+function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = .Step, at: Float = 0.0) -> FoundationView {
     return glassSurfaceSized(
         children: move children,
-        width: SizeMode.Fixed(w),
-        height: SizeMode.Fixed(h),
+        width: .Fixed(w),
+        height: .Fixed(h),
         radius: radius,
         frost: move frost,
         edgeRefraction: edgeRefraction,
@@ -292,7 +292,7 @@ function glassSurface(children: [FoundationView], w: Float, h: Float, radius: Fl
 // out. Anything that should be as big as the space it is given asks for Fill and
 // lets the parent's padding decide — a height computed from the window is still a
 // hardcoded height, it just recomputes its mistake every frame.
-function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: SizeMode, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = FoundationBlur.Step, at: Float = 0.0) -> FoundationView {
+function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: SizeMode, radius: Float, frost: FoundationFrost, edgeRefraction: Float = 1.0, edgeLighting: Bool = true, blur: FoundationBlur = .Step, at: Float = 0.0) -> FoundationView {
     return LiquidGlassSurface(
         children: move children,
         width: move width,
@@ -316,7 +316,7 @@ function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: 
         // mix is monotone in `at`. Handing it the nearer scheme and a distance
         // measured from the midpoint instead made the mix run 1 -> 0 -> 1 while the
         // position ran 0 -> 1, which played the whole crossfade twice.
-        scheme: FoundationScheme.Dark,
+        scheme: .Dark,
         schemeMix: at
     )
 }
@@ -324,10 +324,10 @@ function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: 
 function centered(child: FoundationView) -> FoundationView {
     return Frame(
         child: move child,
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.Center,
+        alignment: .Center,
         padding: EdgeInsets {}
     )
 }
@@ -416,25 +416,25 @@ function sidebarRow(index: Int, svg: String, label: String, selected: Bool, hove
             spacing: 13.0,
             padding: EdgeInsets {}
         ),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.Leading,
+        alignment: .Leading,
         padding: EdgeInsets { leading: 14.0 }
     )
     // One surface whatever the state: the fill is what changes, so a row never
     // moves or resizes as it is selected, and every label starts on the same x.
     let surface = Surface(
         children: [move content],
-        width: SizeMode.Fixed(sidebarRowWidth()),
-        height: SizeMode.Fixed(42.0),
+        width: .Fixed(sidebarRowWidth()),
+        height: .Fixed(42.0),
         flex: 0,
         fill: sidebarRowFill(selected, hovered, at),
         border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 14.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets {},
         clipContent: true
@@ -453,10 +453,10 @@ function sidebarRow(index: Int, svg: String, label: String, selected: Bool, hove
 function sidebarSection(label: String, at: Float) -> FoundationView {
     return Frame(
         child: AdaptiveText(move label, schemeInk(2, at, 0.75), 11.0, 700.0),
-        width: SizeMode.Fixed(sidebarRowWidth()),
-        height: SizeMode.Fixed(26.0),
+        width: .Fixed(sidebarRowWidth()),
+        height: .Fixed(26.0),
         flex: 0,
-        alignment: Alignment.Leading,
+        alignment: .Leading,
         padding: EdgeInsets { top: 8.0 leading: 14.0 }
     )
 }
@@ -527,10 +527,10 @@ function glassSidebar(context: borrow FoundationUiContext, demoUser: RawPtr, sel
                     spacing: 6.0,
                     padding: EdgeInsets {}
                 ),
-                width: SizeMode.Fill,
-                height: SizeMode.Fill,
+                width: .Fill,
+                height: .Fill,
                 flex: 0,
-                alignment: Alignment.TopLeading,
+                alignment: .TopLeading,
                 padding: EdgeInsets {
                     top: 26.0
                     trailing: sidebarPadding()
@@ -539,9 +539,8 @@ function glassSidebar(context: borrow FoundationUiContext, demoUser: RawPtr, sel
                 }
             )
         ],
-        width: SizeMode.Fixed(sidebarWidth()), height: SizeMode.Fill, radius: 40.0,
-        frost: FoundationFrost.XHigh, edgeRefraction: 1.0,
-        edgeLighting: true, blur: FoundationBlur.Step, at: at
+        width: .Fixed(sidebarWidth()), height: .Fill, radius: 40.0,
+        frost: .XHigh, edgeRefraction: 1.0,
+        edgeLighting: true, blur: .Step, at: at
     )
 }
-

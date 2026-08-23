@@ -335,3 +335,47 @@ function writeQuadGradient(
     writeF32(ptr, bytes + U64(16), axis)
     return
 }
+
+// The morph block that ends a record: the SECOND shape a liquid-glass surface
+// is fusing with, and how hard.
+//
+// A glass surface is one rounded rectangle and its quad is sized to it, which
+// is enough right up until two of them are supposed to become one body. The
+// fused surface between them is not inside either rectangle — it is the neck,
+// and it exists in the gap — so the shape that grows it has to travel with the
+// quad that is going to rasterize it. `x`/`y` are its centre in the surface's
+// own local space (the quad's centre is the origin), `halfW`/`halfH` its half
+// extent and `radius` its corner; `blend` is the smooth minimum's reach in
+// points, and zero there means this surface is a single shape and the shader
+// never looks at the rest.
+//
+// Written for every glass quad rather than only the morphing ones, for the same
+// reason the gradient block is: a ring slot is reused, and an unwritten block
+// carries whatever the last quad to occupy it left there — which for this one
+// would be a phantom second shape.
+function writeQuadMorph(
+    ptr: RawPtr, baseFloats: U64,
+    x: Float, y: Float, halfW: Float, halfH: Float, radius: Float, blend: Float,
+) {
+    let bytes = (baseFloats + U64(59)) * U64(4)
+    writeF32(ptr, bytes, x)
+    writeF32(ptr, bytes + U64(4), y)
+    writeF32(ptr, bytes + U64(8), halfW)
+    writeF32(ptr, bytes + U64(12), halfH)
+    writeF32(ptr, bytes + U64(16), radius)
+    writeF32(ptr, bytes + U64(20), blend)
+    return
+}
+
+// The corner kind that ends a record: 0 is a circular rounded rectangle, 1 the
+// continuous superellipse a squircle is.
+//
+// A float and not a flag because that is what a vertex record carries, and its
+// own field rather than a bit stolen from `mode`: the generic pipeline does
+// encode the squircle in `mode` (0.25), but a glass surface's `mode` already
+// says which of the five region pipelines the patch belongs to, and there is no
+// room left in it for what SHAPE the surface is.
+function writeQuadShapeKind(ptr: RawPtr, baseFloats: U64, kind: Float) {
+    writeF32(ptr, (baseFloats + U64(65)) * U64(4), kind)
+    return
+}

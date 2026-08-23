@@ -78,6 +78,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -91,11 +104,15 @@ type VertexOut {
 
     let local: Float2
     let px: Float2
-    let hsize: Float2
-    let radius: Float
-    let borderWidth: Float
-    let mode: Float
-    let edgeRefraction: Float
+    // Half extent (xy), and the anti-aliasing band in the quad's own units (z).
+    // A `Float2` varying already costs a whole four-component slot.
+    let hsize: Float4
+    // Radius, border width, draw mode and edge refraction in one interpolant.
+    // A vertex output costs a whole SLOT whatever it carries, and this record
+    // sat at the sixteen a fragment stage is guaranteed — a seventeenth does
+    // not fail to compile, it fails to LINK, and the pipeline then draws
+    // nothing at all. Packing frees the slots the highlight rides in.
+    let shape: Float4
     let fill: Float4
     let border: Float4
     let clip: Float4
@@ -104,7 +121,20 @@ type VertexOut {
     let borderStack: Float4
     let borderInk: Float4
     let wash: Float4
-    let washBlend: Float2
+    // The two wash blend modes, and the morph's radius and reach riding in the
+    // components a `Float2` was already paying for: a vertex output costs a
+    // whole four-component SLOT whatever it declares, and this record sits one
+    // under the sixteen a fragment stage is guaranteed. A seventeenth does not
+    // fail to compile — it fails to LINK, and the pipeline then draws nothing.
+    let washMorph: Float4
+    // The second shape this surface fuses with: centre and half extent, in this
+    // quad's own space. Its radius and the fusion reach are above.
+    let morph: Float4
+    // The touch highlight: centre in this quad's space, and how hard it burns.
+    // The touch highlight (xyz) and the surface's corner kind (w). A `Float3`
+    // varying already costs a whole four-component slot, so the fourth rides
+    // free — and this record has no slot to spare.
+    let glow: Float4
 }
 
 type FragmentOut {
@@ -151,11 +181,8 @@ shader UiGlassFull {
             )
             out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
             out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
-            out.hsize = Float2(v.halfW, v.halfH)
-            out.radius = v.radius
-            out.borderWidth = v.borderWidth
-            out.mode = v.mode
-            out.edgeRefraction = v.edgeRefraction
+            out.hsize = Float4(v.halfW, v.halfH, v.materialSpare2, 0.0)
+            out.shape = Float4(v.radius, v.borderWidth, v.mode, v.edgeRefraction)
             out.fill = Float4(v.fillR, v.fillG, v.fillB, v.fillA)
             out.border = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
             out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
@@ -164,7 +191,9 @@ shader UiGlassFull {
             out.borderStack = Float4(v.borderSpread, v.borderSideOffset, v.borderSideSpread, v.borderGrey)
             out.borderInk = Float4(v.borderGrey, v.borderSideGrey, v.innerRimStrength, v.innerRimWidth)
             out.wash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperAlpha)
-            out.washBlend = Float2(v.washBlend, v.washUpperBlend)
+            out.washMorph = Float4(v.washBlend, v.washUpperBlend, v.morphRadius, v.morphBlend)
+            out.morph = Float4(v.morphX, v.morphY, v.morphHalfW, v.morphHalfH)
+            out.glow = Float4(v.gradientR, v.gradientG, v.gradientB, v.shapeKind)
             return out
         }
     }
@@ -193,22 +222,39 @@ shader UiGlassFull {
                 return out
             }
 
-            let distancePx = GlassCommon.sdRound(input.local, input.hsize, input.radius)
+            // The fused field, not this quad's own rectangle: where a morph is
+            // live the surface between the two shapes belongs to neither, and
+            // coverage, the lens, the stroke and the sheen all read off this.
+            // `morphK` at zero — every surface that is one shape — collapses
+            // this back to the plain rounded-rect distance.
+            let morphK = input.washMorph.w
+            let morphR = input.washMorph.z
+            let corner = input.glow.w
+            // The anti-aliasing band, in this quad's units. `clamp(0.5 - d)`
+            // ramps over one POINT, which is one device pixel at 1x and three
+            // at 3x — an edge that gets softer the denser the display, and the
+            // reason a surface looked crisp in a 1x example and smeared in a 3x
+            // screenshot of the same code. `edgeBand` is carried for exactly
+            // this and was never read.
+            // ONE device pixel. `edgeBand` is two, so half of it — a coverage
+            // ramp is an anti-aliasing band and belongs on a single pixel. At
+            // 1x that is exactly the one point the ramp already spanned, so
+            // nothing rendered at 1x moves; what changes is 2x and 3x, where a
+            // one-POINT ramp was two and three pixels of smear.
+            let aa = max(input.hsize.z * 0.5, 0.0001)
+            let distancePx = GlassCommon.morphedDistance(input.local, Float2(input.hsize.x, input.hsize.y), input.shape.x, input.morph, morphR, morphK, corner)
             let shadowAlpha = 0.0
             let shadowRgb = Float3(0.0, 0.0, 0.0)
             if distancePx > -0.5 {
             let ringSpread = input.borderStack.x
             let sideReach = input.borderStack.y
-            let ringHalf = input.hsize + Float2(ringSpread, ringSpread)
-            let ringDistance = GlassCommon.sdRound(input.local, ringHalf, max(input.radius + ringSpread, 0.0))
-            let ring = clamp(0.5 - ringDistance, 0.0, 1.0)
+            let ringDistance = GlassCommon.morphedDistanceInflated(input.local, Float2(input.hsize.x, input.hsize.y), input.shape.x, input.morph, morphR, morphK, ringSpread, corner)
+            let ring = clamp(0.5 - ringDistance / aa, 0.0, 1.0)
             let sideSpread = input.borderStack.z
-            let sideHalf = input.hsize - Float2(sideSpread, sideSpread)
-            let sideRadius = max(input.radius - sideSpread, 0.0)
-            let leftDistance = GlassCommon.sdRound(input.local + Float2(sideReach, 0.0), sideHalf, sideRadius)
-            let rightDistance = GlassCommon.sdRound(input.local - Float2(sideReach, 0.0), sideHalf, sideRadius)
-            let leftBand = clamp(0.5 - leftDistance, 0.0, 1.0)
-            let rightBand = clamp(0.5 - rightDistance, 0.0, 1.0)
+            let leftDistance = GlassCommon.morphedDistanceInflated(input.local + Float2(sideReach, 0.0), Float2(input.hsize.x, input.hsize.y), input.shape.x, input.morph, morphR, morphK, 0.0 - sideSpread, corner)
+            let rightDistance = GlassCommon.morphedDistanceInflated(input.local - Float2(sideReach, 0.0), Float2(input.hsize.x, input.hsize.y), input.shape.x, input.morph, morphR, morphK, 0.0 - sideSpread, corner)
+            let leftBand = clamp(0.5 - leftDistance / aa, 0.0, 1.0)
+            let rightBand = clamp(0.5 - rightDistance / aa, 0.0, 1.0)
             let stacked = 1.0 - (1.0 - ring) * (1.0 - leftBand) * (1.0 - rightBand)
             let ringGrey = input.borderInk.x
             let pairBand = max(leftBand, rightBand)
@@ -222,7 +268,7 @@ shader UiGlassFull {
             shadowAlpha = hairline
             let coveredArea = max(stacked, 0.0001)
             let inkLevel = (inkOnce * (onlyRing + onlyPair) + inkTwice * bothBands) / coveredArea
-            let gpOutside = input.local / input.hsize
+            let gpOutside = input.local / Float2(input.hsize.x, input.hsize.y)
             let uvOutside = Float2(
                 input.border.x + gpOutside.x * input.border.z,
                 input.border.y + gpOutside.y * input.border.w
@@ -239,11 +285,11 @@ shader UiGlassFull {
                 out.color = Float4(shadowRgb.x, shadowRgb.y, shadowRgb.z, shadowAlpha)
                 return out
             }
-            let cov = clamp(0.5 - distancePx, 0.0, 1.0)
-            let minHalf = max(min(input.hsize.x, input.hsize.y), 1.0)
+            let cov = clamp(0.5 - distancePx / aa, 0.0, 1.0)
+            let minHalf = max(min(Float2(input.hsize.x, input.hsize.y).x, Float2(input.hsize.x, input.hsize.y).y), 1.0)
             let inside = max(0.0 - distancePx, 0.0)
 
-            let gp = input.local / input.hsize
+            let gp = input.local / Float2(input.hsize.x, input.hsize.y)
             let uvFrag = Float2(
                 input.border.x + gp.x * input.border.z,
                 input.border.y + gp.y * input.border.w
@@ -252,9 +298,9 @@ shader UiGlassFull {
             let coord = uvFrag
             if inside < 72.0 {
                 let ref = GlassCommon.refractionCurve(inside / max(input.lens.z, 1.0))
-                n = GlassCommon.sdRoundNormal(input.local, input.hsize, input.radius)
+                n = GlassCommon.morphedNormal(input.local, Float2(input.hsize.x, input.hsize.y), input.shape.x, input.morph, morphR, morphK, corner)
                 let bend = (1.0 - ref) * min(minHalf, input.lens.y)
-                let uvScale = Float2(input.border.z / input.hsize.x, input.border.w / input.hsize.y)
+                let uvScale = Float2(input.border.z / Float2(input.hsize.x, input.hsize.y).x, input.border.w / Float2(input.hsize.x, input.hsize.y).y)
                 coord = uvFrag - n * bend * uvScale
             }
 
@@ -288,12 +334,12 @@ shader UiGlassFull {
                 )
             }
 
-            let washA = clamp(input.borderWidth, 0.0, GlassCommon.washCeiling)
-            rgb = GlassCommon.blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washBlend.x)
+            let washA = clamp(input.shape.y, 0.0, GlassCommon.washCeiling)
+            rgb = GlassCommon.blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washMorph.x)
             let washUpperA = clamp(input.wash.w, 0.0, 1.0)
-            rgb = GlassCommon.blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washBlend.y)
+            rgb = GlassCommon.blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washMorph.y)
 
-            let lighting = clamp(input.edgeRefraction, 0.0, 2.0)
+            let lighting = clamp(input.shape.w, 0.0, 2.0)
             let peak = input.edge.z
             let stroke = 0.0
             if inside < max(input.edge.w, peak + 0.01) {
@@ -318,7 +364,13 @@ shader UiGlassFull {
             let over = 1.0 - cov
             let outRgb = glassRgb * cov + shadowRgb * over
             let outAlpha = cov + shadowAlpha * over
-            out.color = Float4(outRgb.x, outRgb.y, outRgb.z, outAlpha)
+            // The touch light, ADDED on top of the finished material and masked
+            // by its own coverage: glass energizes from within under a finger,
+            // it is not a white sheet laid over it. Two halves — straight from
+            // full to half across the inner half of the radius, then eased to
+            // nothing — matching `motionGlowFalloff` on the Kira side.
+            let lit = GlassCommon.touchGlow(input.local, Float3(input.glow.x, input.glow.y, input.glow.z), cov)
+            out.color = Float4(outRgb.x + lit, outRgb.y + lit, outRgb.z + lit, min(outAlpha + lit, 1.0))
             return out
         }
     }

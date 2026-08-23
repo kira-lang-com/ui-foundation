@@ -72,13 +72,13 @@ function pinnedNote(at: Float) -> FoundationView {
             children: [
                 centered(AdaptiveText("Pinned", glassForeground(at), 14.0, 600.0))
             ],
-            w: 132.0, h: 54.0, radius: 20.0, frost: FoundationFrost.XHigh, edgeRefraction: 0.9,
-            edgeLighting: true, blur: FoundationBlur.Step, at: at
+            w: 132.0, h: 54.0, radius: 20.0, frost: .XHigh, edgeRefraction: 0.9,
+            edgeLighting: true, blur: .Step, at: at
         ),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.BottomTrailing,
+        alignment: .BottomTrailing,
         padding: EdgeInsets {
             trailing: 26.0
             bottom: 26.0
@@ -105,7 +105,7 @@ function glassCard(selected: Int, notePinned: Bool, frostLevel: Int, at: Float) 
     return glassSurface(
         children: move layers,
         w: 480.0, h: 300.0, radius: 44.0, frost: frostForLevel(frostLevel), edgeRefraction: 1.0,
-        edgeLighting: true, blur: FoundationBlur.Step, at: at
+        edgeLighting: true, blur: .Step, at: at
     )
 }
 
@@ -156,9 +156,9 @@ function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query:
     }
     let searchFocused = context.focusedKey == searchKey()
     let buttonHot = context.hoveredKey == addKey() || context.pressedKey == addKey() || notePinned
-    var buttonFrost = FoundationFrost.XHigh
+    var buttonFrost: FoundationFrost = .XHigh
     if buttonHot {
-        buttonFrost = FoundationFrost.Max
+        buttonFrost = .Max
     }
     let button = GestureHitArea(
         key: addKey(),
@@ -169,13 +169,13 @@ function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query:
             glassSurface(
                 children: [centered(addIcon(at))],
                 w: 44.0, h: 44.0, radius: 22.0, frost: move buttonFrost, edgeRefraction: 1.0,
-                edgeLighting: true, blur: FoundationBlur.Step, at: at
+                edgeLighting: true, blur: .Step, at: at
             )
         ]
     )
-    var pillFrost = FoundationFrost.XHigh
+    var pillFrost: FoundationFrost = .XHigh
     if searchFocused {
-        pillFrost = FoundationFrost.Max
+        pillFrost = .Max
     }
     let pill = InteractiveHitArea(
         key: searchKey(),
@@ -192,10 +192,10 @@ function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query:
                 children: [
                     Frame(
                         child: AdaptiveText(searchText(query, searchFocused), searchTint(query, searchFocused, at), 15.0, 500.0),
-                        width: SizeMode.Fill,
-                        height: SizeMode.Fill,
+                        width: .Fill,
+                        height: .Fill,
                         flex: 0,
-                        alignment: Alignment.Leading,
+                        alignment: .Leading,
                         padding: EdgeInsets {
                             top: 0.0
                             trailing: 0.0
@@ -205,7 +205,7 @@ function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query:
                     )
                 ],
                 w: 330.0, h: 44.0, radius: 22.0, frost: move pillFrost, edgeRefraction: 1.0,
-                edgeLighting: true, blur: FoundationBlur.Step, at: at
+                edgeLighting: true, blur: .Step, at: at
             )
         ]
     )
@@ -246,7 +246,7 @@ function frostSwatch(demoUser: RawPtr, level: Int, label: String, frost: Foundat
                     centered(AdaptiveText(move label, glassForeground(at), 12.0, weight))
                 ],
                 w: 122.0, h: 74.0, radius: 22.0, frost: move frost, edgeRefraction: 1.0,
-                edgeLighting: true, blur: FoundationBlur.Step, at: at
+                edgeLighting: true, blur: .Step, at: at
             )
         ]
     )
@@ -257,12 +257,12 @@ function frostSwatch(demoUser: RawPtr, level: Int, label: String, frost: Foundat
 function frostStrip(demoUser: RawPtr, selectedLevel: Int, at: Float) -> FoundationView {
     return HStack(
         children: [
-            frostSwatch(demoUser, 0, "Translucent", FoundationFrost.Translucent, selectedLevel == 0, at),
-            frostSwatch(demoUser, 1, "Light", FoundationFrost.Light, selectedLevel == 1, at),
-            frostSwatch(demoUser, 2, "Medium", FoundationFrost.Medium, selectedLevel == 2, at),
-            frostSwatch(demoUser, 3, "High", FoundationFrost.High, selectedLevel == 3, at),
-            frostSwatch(demoUser, 4, "XHigh", FoundationFrost.XHigh, selectedLevel == 4, at),
-            frostSwatch(demoUser, 5, "Max", FoundationFrost.Max, selectedLevel == 5, at)
+            frostSwatch(demoUser, 0, "Translucent", .Translucent, selectedLevel == 0, at),
+            frostSwatch(demoUser, 1, "Light", .Light, selectedLevel == 1, at),
+            frostSwatch(demoUser, 2, "Medium", .Medium, selectedLevel == 2, at),
+            frostSwatch(demoUser, 3, "High", .High, selectedLevel == 3, at),
+            frostSwatch(demoUser, 4, "XHigh", .XHigh, selectedLevel == 4, at),
+            frostSwatch(demoUser, 5, "Max", .Max, selectedLevel == 5, at)
         ],
         spacing: 11.0,
         padding: EdgeInsets {}
@@ -285,8 +285,8 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     if textureId > 0 {
         layers.append(TextureView(
             texture: textureId,
-            width: SizeMode.Fill,
-            height: SizeMode.Fill,
+            width: .Fill,
+            height: .Fill,
             flex: 0,
             opacity: 1.0,
             radius: 0.0,
@@ -299,10 +299,10 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         // that asked for no backdrop (KIRA_GLASS_BG="") skips the notice.
         layers.append(Frame(
             child: Text("assets/background-cubes-cool.rgba could not be read — run from the example package directory, or set KIRA_GLASS_BG to a 1600x900 RGBA8 blob", glassForeground(at), 16.0, 600.0),
-            width: SizeMode.Fill,
-            height: SizeMode.Fill,
+            width: .Fill,
+            height: .Fill,
             flex: 0,
-            alignment: Alignment.TopLeading,
+            alignment: .TopLeading,
             padding: EdgeInsets {
                 top: 24.0
                 trailing: 24.0
@@ -315,10 +315,10 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     // that leaves it — the layout works the height out, nobody writes it down.
     layers.append(Frame(
         child: glassSidebar(context, demoUser, selected, at),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.Leading,
+        alignment: .Leading,
         padding: EdgeInsets {
             top: sidebarInset()
             trailing: 0.0
@@ -329,10 +329,10 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     // The headline starts past the sidebar island, not under it.
     layers.append(Frame(
         child: headline(at),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.TopLeading,
+        alignment: .TopLeading,
         padding: EdgeInsets {
             top: 44.0
             trailing: 0.0
@@ -345,10 +345,10 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     // surfaces that differ only in the material their FoundationFrost step names.
     layers.append(Frame(
         child: frostStrip(demoUser, frostLevel, at),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.Bottom,
+        alignment: .Bottom,
         padding: EdgeInsets {
             top: 0.0
             trailing: 0.0
@@ -358,10 +358,10 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     ))
     layers.append(Frame(
         child: glassDock(context, demoUser, move query, notePinned, at),
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
-        alignment: Alignment.TopTrailing,
+        alignment: .TopTrailing,
         padding: EdgeInsets {
             top: sidebarInset()
             trailing: sidebarInset()
@@ -385,15 +385,15 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     }
     return Surface(
         children: move layers,
-        width: SizeMode.Fill,
-        height: SizeMode.Fill,
+        width: .Fill,
+        height: .Fill,
         flex: 0,
         fill: move page,
         border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
-        shape: FoundationShape.RegularRoundedRect,
-        material: FoundationMaterial.Flat,
+        shape: .RegularRoundedRect,
+        material: .Flat,
         effects: [],
         padding: EdgeInsets {},
         clipContent: false

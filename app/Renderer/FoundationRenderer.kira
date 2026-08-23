@@ -1,9 +1,19 @@
 import KiraLayout
 import KiraGraphics
 import Foundation
+
+// Turning a laid-out tree into draw calls.
+//
+// The walk carries a `FoundationDeform` down with it. Every rectangle it
+// computes passes through that transform on the way to the backend, so a view
+// being pressed or pulled moves with everything it contains rather than sliding
+// out from under its own label. On the overwhelmingly common path the transform
+// is the identity and costs a comparison per view.
+
 function foundationRender(root: borrow FoundationView, tree: borrow LayoutTree, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
     var current = backend
-    let rendered = foundationRenderView(root, tree, 0, current)
+    // The root draws under the identity: nothing encloses it to deform it.
+    let rendered = foundationRenderView(root, tree, 0, current, FoundationDeform {})
     if current.batch.layoutDebugEnabled() {
         return rendered + foundationRenderDebugView(root, tree, 0, current)
     }
@@ -39,27 +49,61 @@ function foundationSurfaceFill(view: borrow FoundationView, windowTransparent: B
     return view.fill
 }
 
-function foundationRenderChildren(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+function foundationRenderChildren(
+    view: borrow FoundationView,
+    tree: borrow LayoutTree,
+    nodeIndex: Int,
+    backend: borrow mut KiraGraphicsFoundationBackend,
+    deform: borrow FoundationDeform,
+) -> Int {
     // Read only the scalar we need through the array (borrow-elided) instead of
     // cloning the whole ~40-field node per rendered container.
     let firstChild = tree.nodes[nodeIndex].firstChild
     var current = backend
     var rendered = 0
-        for childOffset in 0..view.children.count {
-        rendered = rendered + foundationRenderView(view.children[childOffset], tree, firstChild + childOffset, current)
-            }
+    for childOffset in 0..view.children.count {
+        rendered = rendered + foundationRenderView(view.children[childOffset], tree, firstChild + childOffset, current, deform)
+    }
     return rendered
 }
 
-function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, backend: borrow mut KiraGraphicsFoundationBackend) -> Int {
+// The transform this view draws under: what it inherited, with its own applied
+// first.
+//
+// The view's own is built from the frame layout gave it — untransformed — so it
+// scales about where it actually sits rather than about where an enclosing
+// deformation has already moved it to.
+function foundationRenderDeform(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, inherited: borrow FoundationDeform) -> FoundationDeform {
+    if view.deform.scaleX == 1.0 && view.deform.scaleY == 1.0 && view.deform.pressScale == 1.0 && view.deform.x == 0.0 && view.deform.y == 0.0 {
+        return FoundationDeform {
+            scaleX: inherited.scaleX
+            scaleY: inherited.scaleY
+            translateX: inherited.translateX
+            translateY: inherited.translateY
+        }
+    }
+    let own = foundationDeformFor(view.deform, layoutFrame(tree, nodeIndex))
+    return foundationDeformCompose(inherited, own)
+}
+
+function foundationRenderView(
+    view: borrow FoundationView,
+    tree: borrow LayoutTree,
+    nodeIndex: Int,
+    backend: borrow mut KiraGraphicsFoundationBackend,
+    inherited: borrow FoundationDeform,
+) -> Int {
     var current = backend
+    let deform = foundationRenderDeform(view, tree, nodeIndex, inherited)
     // `frame` (the node's laid-out Rect) is only needed by the kinds that draw or
     // register a hit region; pure layout containers (Row/Column/Frame/...) just
     // recurse, so building the Rect for them is wasted per-view work. Compute it
     // inside the branches that use it.
     match view.kind {
         Surface -> {
-            let frame = layoutFrame(tree, nodeIndex)
+            let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
+            let radius = foundationDeformLength(view.radius, deform)
+            let borderWidth = foundationDeformLength(view.borderWidth, deform)
             // The backdrop is OPEN for the whole subtree, not just for its own
             // effects. What a surface washes over is state its content has to read —
             // adaptive text measures the material it is sitting on — and closing the
@@ -71,7 +115,28 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             // the WINDOW, which this compositor has never seen.
             let hasBackdrop = (view.material != .Flat && view.material != .WindowBackdrop) || view.effects.count > 0
             if hasBackdrop {
-                current.beginBackdrop(frame, view.material, view.radius, view.blur, view.edgeRefraction, view.fill, view.glassMaterial)
+                let glowRaw = layoutFrame(tree, nodeIndex)
+                // The shape this surface fuses with, through the SAME transform
+                // the surface itself took. A pressed panel that swells toward a
+                // finger has to grow its neck toward where the other shape is
+                // now, not toward where layout left it.
+                let morphRect = foundationDeformRect(
+                    Rect { x: view.morph.x, y: view.morph.y, width: view.morph.width, height: view.morph.height },
+                    deform,
+                )
+                current.beginBackdrop(
+                    frame, view.material, radius, view.blur, view.edgeRefraction, view.fill, view.glassMaterial,
+                    foundationDeformPointX(glowRaw.x + view.glow.x, deform),
+                    foundationDeformPointY(glowRaw.y + view.glow.y, deform),
+                    view.glow.opacity,
+                    morphRect.x, morphRect.y, morphRect.width, morphRect.height,
+                    foundationDeformLength(view.morph.radius, deform),
+                    foundationDeformLength(view.morphBlend, deform),
+                    // The glass body takes the same corner the fill quad below
+                    // does: a squircle surface whose glass had circular corners
+                    // is two shapes drawn over each other.
+                    view.shape == .Squircle ? 1.0 : 0.0,
+                )
                 var effectIndex = 0
                 while effectIndex < view.effects.count {
                     current.applyBackdropEffect(frame, view.effects[effectIndex])
@@ -85,18 +150,27 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             // the surface holds still draws over it, crisp.
             let surfaceFill = foundationSurfaceFill(view, current.windowTransparent)
             if view.shape == .Squircle {
-                current.drawSquircleSurfaceFields(frame, surfaceFill, view.border, view.borderWidth, view.radius)
+                current.drawSquircleSurfaceFields(frame, surfaceFill, view.border, borderWidth, radius)
             } else {
-                current.drawSurfaceFields(frame, surfaceFill, view.border, view.borderWidth, view.radius, view.fillEnd, view.gradient)
+                // The highlight's centre is carried in the view's own space, so
+                // it is placed against the frame LAYOUT gave the view and then
+                // pushed through the same transform every other point takes.
+                let raw = layoutFrame(tree, nodeIndex)
+                current.drawSurfaceFields(
+                    frame, surfaceFill, view.border, borderWidth, radius, view.fillEnd, view.gradient,
+                    foundationDeformPointX(raw.x + view.glow.x, deform),
+                    foundationDeformPointY(raw.y + view.glow.y, deform),
+                    view.glow.opacity
+                )
             }
 
             var childRendered = 0
             if view.radius > 0.0 || view.clipContent {
-                current.pushClip(frame, view.radius)
-                childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
+                current.pushClip(frame, radius)
+                childRendered = foundationRenderChildren(view, tree, nodeIndex, current, deform)
                 current.popClip()
             } else {
-                childRendered = foundationRenderChildren(view, tree, nodeIndex, current)
+                childRendered = foundationRenderChildren(view, tree, nodeIndex, current, deform)
             }
 
             if hasBackdrop {
@@ -106,35 +180,43 @@ function foundationRenderView(view: borrow FoundationView, tree: borrow LayoutTr
             return childRendered + 1
         }
         Text -> {
-            let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextFields(frame, view.content, view.color, view.size, view.weight, view.adaptiveInk, view.inkLeft, view.inkRight, view.inkTop, view.inkBottom)
+            let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
+            // The glyphs are rasterized at the transformed size rather than the
+            // laid-out one, so a control that swells under a press carries
+            // readable text with it instead of a label rattling around inside a
+            // grown box. A volume-preserving squash leaves the size untouched —
+            // see `foundationDeformTextScale`.
+            let size = view.size * foundationDeformTextScale(deform)
+            current.drawTextFields(frame, view.content, view.color, size, view.weight, view.adaptiveInk, view.inkLeft, view.inkRight, view.inkTop, view.inkBottom)
             return 1
         }
         HitArea -> {
-            let frame = layoutFrame(tree, nodeIndex)
+            let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
             // Paint the optional background (default transparent) behind the
             // children — the default-hover highlight rides on this.
             if view.backgroundFill.a > 0.0 {
-                current.drawSurfaceFields(frame, view.backgroundFill, view.border, view.borderWidth, view.radius)
+                current.drawSurfaceFields(frame, view.backgroundFill, view.border, foundationDeformLength(view.borderWidth, deform), foundationDeformLength(view.radius, deform))
             }
+            // The DEFORMED rectangle, so a control that has swelled toward the
+            // finger is pressable where it now looks, not where layout left it.
             current.registerHitRegion(view.key, frame, view.disabled, view.focusable, view.autofocus, view.onPress, view.onTextInput, view.onTextCodepoint, view.onBackspace, view.onSubmit, view.onKey, view.onScroll, view.wheel, view.interaction)
-            return foundationRenderChildren(view, tree, nodeIndex, current)
+            return foundationRenderChildren(view, tree, nodeIndex, current, deform)
         }
         TextureView -> {
-            let frame = layoutFrame(tree, nodeIndex)
-            current.drawTextureFields(frame, view.texture, view.secondaryTexture, view.textureTransition, view.textureOpacity, view.radius)
+            let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
+            current.drawTextureFields(frame, view.texture, view.secondaryTexture, view.textureTransition, view.textureOpacity, foundationDeformLength(view.radius, deform))
             return 1
         }
         Icon -> {
-            let frame = layoutFrame(tree, nodeIndex)
+            let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
             current.drawIconFields(frame, view.content, view.color, view.weightGrowth)
             return 1
         }
-        Row -> return foundationRenderChildren(view, tree, nodeIndex, current);
-        Column -> return foundationRenderChildren(view, tree, nodeIndex, current);
-        Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current);
-        Frame -> return foundationRenderChildren(view, tree, nodeIndex, current);
-        Spacer -> return foundationRenderChildren(view, tree, nodeIndex, current);
-        LayoutPriority -> return foundationRenderChildren(view, tree, nodeIndex, current);
+        Row -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        Column -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        Frame -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        Spacer -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        LayoutPriority -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
     }
 }

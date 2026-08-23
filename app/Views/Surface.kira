@@ -1,3 +1,4 @@
+import KiraUIMotion
 import KiraGraphics
 import Foundation
 import KiraLayout
@@ -18,12 +19,27 @@ function Surface(
     blur: Float = 1.0,
     edgeRefraction: Float = 1.0,
     glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
+    // Drawing state a surface can be in, forwarded because a FoundationView has
+    // it and this helper is how most callers build one: without these, nothing
+    // that goes through `Surface` can be pressed, lit or fused.
+    //
+    // LAST, and anything added later belongs after them: arguments bind
+    // POSITIONALLY and a parameter inserted above silently rebinds every
+    // existing call.
+    deform: MotionDeformation = MotionDeformation {},
+    glow: MotionGlowState = MotionGlowState {},
+    morph: MotionShape = MotionShape {},
+    morphBlend: Float = 0.0,
 ) -> FoundationView {
     return FoundationView {
         kind: .Surface
         blur: blur
         edgeRefraction: edgeRefraction
         glassMaterial: glassMaterial
+        deform: deform
+        glow: glow
+        morph: morph
+        morphBlend: morphBlend
         children: move children
         width: width
         height: height
@@ -83,6 +99,15 @@ function LiquidGlassSurface(
     // at 0.5 (see foundationTintStackCrossfade — the blend modes cannot be mixed,
     // so the opacities are what travel).
     schemeMix: Float = 1.0,
+    // The corner. `.RegularRoundedRect` is a circular arc; `.Squircle` is the
+    // continuous superellipse the platform's own panels are, where the
+    // curvature runs into the straight edges instead of meeting them at a
+    // point where it jumps. The glass body takes it too, not just the fill.
+    shape: FoundationShape = .RegularRoundedRect,
+    deform: MotionDeformation = MotionDeformation {},
+    glow: MotionGlowState = MotionGlowState {},
+    morph: MotionShape = MotionShape {},
+    morphBlend: Float = 0.0,
 ) -> FoundationView {
     let arriving = foundationFrostStack(frost, scheme)
     let leaving = foundationFrostStack(frost, foundationSchemeOther(scheme))
@@ -99,14 +124,18 @@ function LiquidGlassSurface(
         border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
         borderWidth: 1.0,
         radius: radius,
-        shape: .RegularRoundedRect,
+        shape: move shape,
         material: .LiquidGlass,
         effects: [],
         padding: move padding,
         clipContent: clipContent,
         blur: foundationBlurAmount(blur, frost),
         edgeRefraction: foundationEdgeLightingScale(edgeLighting, edgeRefraction),
-        glassMaterial: foundationGlassMaterialWithTint(glassMaterial, stack)
+        glassMaterial: foundationGlassMaterialWithTint(foundationGlassMaterialEdgeLit(glassMaterial, edgeLighting), stack),
+        deform: move deform,
+        glow: move glow,
+        morph: move morph,
+        morphBlend: morphBlend
     )
 }
 
