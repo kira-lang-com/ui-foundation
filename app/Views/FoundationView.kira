@@ -1,6 +1,7 @@
 import KiraGraphics
 import Foundation
 import KiraLayout
+import KiraUIMotion
 enum FoundationViewKind {
     Row
     Column
@@ -205,6 +206,39 @@ struct FoundationView {
     let onScroll: (Float, Float) -> Void = foundationNoopScroll
     // Whether this view is a window onto content taller than itself. The offset
     // is held per `key` and applied after placement — see FoundationScroll.kira.
+    // How this view is being deformed while it is drawn — the swell of a press,
+    // the lean of a pull, the squash of a throw. It carries down the SUBTREE, so
+    // a pressed button takes its label with it.
+    //
+    // Drawing state, not geometry: layout has already run and does not see this,
+    // which is what stops a press on a row reflowing the list it is in. The
+    // default is the identity, and the renderer skips the whole transform when
+    // every view on the path has one.
+    let deform: MotionDeformation = MotionDeformation {}
+    // The light a touch is energizing this surface with. Its centre is in the
+    // view's OWN coordinates — the light comes from where the finger landed,
+    // not from the middle of what was touched — and it travels through the same
+    // deformation the surface does.
+    //
+    // One touch's light, because that is what it is: two fingers are two views
+    // carrying two of these, and they add up where they overlap.
+    let glow: MotionGlowState = MotionGlowState {}
+    // The shape this surface is FUSING with, and how hard.
+    //
+    // Two liquid-glass shapes near each other are still two shapes. Give one of
+    // them the other's rectangle here with a non-zero `morphBlend` and they stop
+    // being two: the field between them dips below the surface and grows a neck,
+    // and what is on screen is one body with a pinched waist. Nothing draws the
+    // neck — it is what the smooth minimum of the two distance fields leaves
+    // behind, evaluated per pixel.
+    //
+    // The rectangle is in the same coordinates layout works in, so it is
+    // wherever the other shape actually is; the surface carrying this one is
+    // what rasterizes both, so it is the one whose quad grows to cover them.
+    // Twenty points of reach is the figure the reference implementation uses for
+    // shapes that should read as one body — `motionMetaballBlend()`.
+    let morph: MotionShape = MotionShape {}
+    let morphBlend: Float = 0.0
     let scrolls: Bool = false
     // Whether a wheel turn over this region belongs to it. A row inside a list
     // is under the pointer too, and the list is what a wheel over the row
@@ -342,7 +376,18 @@ function foundationIconWidth(view: borrow FoundationView) -> Float {
     if view.iconWidth > 0.0 {
         return view.iconWidth
     }
-    return view.size
+    // The drawing's own width at this height, which is what the descriptor
+    // above says an icon is: "as wide as its drawing is at that height".
+    //
+    // It returned `view.size` — a SQUARE — so every symbol laid out square
+    // whatever it was, and a symbol is rasterized trimmed to its ink into
+    // exactly the box it was given. A wide one was therefore squeezed into a
+    // square quad and lost what did not fit: MonitorPlay's screen loses its
+    // right edge, SlidersHorizontal loses the ends of both bars, and the ink
+    // measures aspect 1.000 for all of them against references of 1.087, 1.185
+    // and 1.200. `foundationIconInkAspect` is the number that was missing, and
+    // it was already here.
+    return view.size * foundationIconInkAspect(view.content)
 }
 
 function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDescriptor {
@@ -403,10 +448,18 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             }
         }
         Spacer -> {
+            // The size the SPACER was given, not `.Fill` regardless.
+            //
+            // `Spacer()` builds one that fills — that is what a spacer without
+            // a size is — but a spacer handed `.Fixed(120)` is a hundred and
+            // twenty points of gap, the way `Spacer().frame(width: 120)` is.
+            // Forcing `.Fill` here made every authored size a lie: two of them
+            // holding a panel at (120, 300) swallowed the leftover space
+            // instead and put the panel in the bottom-right corner.
             let ignored = view.minLength
             return LayoutDescriptor {
-                width: .Fill
-                height: .Fill
+                width: view.width
+                height: view.height
                 flex: view.flex
                 arrange: .Fill
                 axis: .Vertical

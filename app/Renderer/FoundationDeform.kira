@@ -1,0 +1,131 @@
+import Foundation
+import KiraLayout
+import KiraUIMotion
+
+// A deformation carried down a subtree while it is drawn.
+//
+// A pressed control does not move on its own — it takes its label, its icon and
+// its background with it. So the deformation is not a property of one quad: it
+// is a transform the renderer descends WITH, and every rectangle it computes on
+// the way down passes through.
+//
+// Nothing here touches layout. A deformed control occupies exactly the space it
+// was given — what changes is only where its pixels land, which is why pressing
+// a row in a list cannot reflow the list. That is also what lets the transform
+// be composed and thrown away per frame: it is drawing state, not geometry.
+//
+// `KiraUIMotion` decides the numbers (see `MotionDeformation`); this decides
+// what a rectangle does with them.
+
+// A scale and a translation, in laid-out coordinates.
+//
+// Canonical rather than stated as "scale about a pivot, then move": a scale
+// about a pivot IS a scale plus a translation, and composing two of the
+// pivoted form needs the pivots reconciled while composing two of this form is
+// four multiplications. The pivot is folded in when the transform is built.
+struct FoundationDeform {
+    let scaleX: Float = 1.0
+    let scaleY: Float = 1.0
+    let translateX: Float = 0.0
+    let translateY: Float = 0.0
+}
+
+// Whether this transform would leave every rectangle exactly where it is.
+//
+// Worth asking because the overwhelmingly common case is that it would: a
+// window full of controls has at most one under a finger, and the walk should
+// not pay for a transform on any of the others.
+function foundationDeformIsIdentity(deform: borrow FoundationDeform) -> Bool {
+    if deform.scaleX != 1.0 || deform.scaleY != 1.0 {
+        return false
+    }
+    return deform.translateX == 0.0 && deform.translateY == 0.0
+}
+
+// The transform a motion deformation makes for a view of a given frame.
+//
+// It scales about the view's own CENTRE, which is what makes a press look like
+// the control swelling in place rather than growing out of its top-left corner.
+// The centre comes from the frame layout gave it, so the same press on a wide
+// panel and a small button each grow around themselves.
+function foundationDeformFor(shape: borrow MotionDeformation, frame: borrow Rect) -> FoundationDeform {
+    // The press lift multiplies the squash rather than replacing it: an element
+    // being pulled while held is doing both, and they are independent.
+    let scaleX = shape.scaleX * shape.pressScale
+    let scaleY = shape.scaleY * shape.pressScale
+    let pivotX = frame.x + frame.width * 0.5
+    let pivotY = frame.y + frame.height * 0.5
+    return FoundationDeform {
+        scaleX: scaleX
+        scaleY: scaleY
+        // `p·(1 - s)` is the pivot folded into the translation: it is what puts
+        // the scaled rectangle back so that `p` did not move.
+        translateX: pivotX * (1.0 - scaleX) + shape.x
+        translateY: pivotY * (1.0 - scaleY) + shape.y
+    }
+}
+
+// `inner` applied first, then `outer` — a control deformed inside a panel that
+// is itself deformed.
+//
+// Both are `x·s + t`, so the composition is one too and no accuracy is lost by
+// keeping only four numbers: substituting gives `x·(sᵢ·sₒ) + (tᵢ·sₒ + tₒ)`.
+function foundationDeformCompose(outer: borrow FoundationDeform, inner: borrow FoundationDeform) -> FoundationDeform {
+    return FoundationDeform {
+        scaleX: inner.scaleX * outer.scaleX
+        scaleY: inner.scaleY * outer.scaleY
+        translateX: inner.translateX * outer.scaleX + outer.translateX
+        translateY: inner.translateY * outer.scaleY + outer.translateY
+    }
+}
+
+// A laid-out rectangle as it should be drawn.
+function foundationDeformRect(rect: borrow Rect, deform: borrow FoundationDeform) -> Rect {
+    if foundationDeformIsIdentity(deform) {
+        return Rect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+    }
+    return Rect(
+        x: rect.x * deform.scaleX + deform.translateX,
+        y: rect.y * deform.scaleY + deform.translateY,
+        width: rect.width * deform.scaleX,
+        height: rect.height * deform.scaleY
+    )
+}
+
+// A single point through the transform — the centre a touch highlight is drawn
+// around, which moves with the control it is lighting.
+function foundationDeformPointX(x: Float, deform: borrow FoundationDeform) -> Float {
+    return x * deform.scaleX + deform.translateX
+}
+
+function foundationDeformPointY(y: Float, deform: borrow FoundationDeform) -> Float {
+    return y * deform.scaleY + deform.translateY
+}
+
+// A length that has to stay inside the rectangle it belongs to — a corner
+// radius, a border's width.
+//
+// Taken from the SMALLER axis rather than either one or an average. A radius
+// scaled by the larger axis of a squashed element exceeds half of the shorter
+// side, and a rounded rectangle whose radius is more than that stops being a
+// rounded rectangle: the corners meet and the edge bulges.
+function foundationDeformLength(length: Float, deform: borrow FoundationDeform) -> Float {
+    return length * min(deform.scaleX, deform.scaleY)
+}
+
+// The scale text is rasterized at under this transform.
+//
+// The geometric mean of the two axes, so a volume-preserving squash — which
+// multiplies one axis by exactly what it divides the other by — leaves text
+// alone entirely. Only a real change of size changes the size text is drawn at.
+//
+// Quantized, and that is the whole reason this is not just the mean. Glyphs are
+// rasterized per size into an atlas, so an animation that asked for a new size
+// every frame would fill the atlas with two hundred barely-different faces of
+// the same font over the course of one press. Rounding to a quarter of a point
+// bounds that to a handful of entries while staying far below what an eye
+// resolves.
+function foundationDeformTextScale(deform: borrow FoundationDeform) -> Float {
+    let uniform = sqrt(max(deform.scaleX * deform.scaleY, 0.0001))
+    return round(uniform * 4.0) / 4.0
+}

@@ -246,7 +246,12 @@ class KiraGraphicsFoundationBackend {
         // The far end of a gradient fill and the direction it runs. A flat
         // surface leaves them alone and draws exactly as it did.
         fillEnd: borrow Color = Color { a: 0.0 },
-        gradient: borrow FoundationGradient = FoundationGradient.None,
+        gradient: borrow FoundationGradient = .None,
+        // The light a touch is energizing this surface with, in the same
+        // coordinates as `bounds`.
+        glowX: Float = 0.0,
+        glowY: Float = 0.0,
+        glowStrength: Float = 0.0,
     ) {
         self.drewVisibleUi = true
         if environmentIsSet("KIRA_UI_DUMP_LAYOUT") {
@@ -264,7 +269,18 @@ class KiraGraphicsFoundationBackend {
                 b: 0.0
                 a: 0.0
             }
-            self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
+            // The fill is suppressed because the glass shader applies it — but
+            // the touch highlight is not the fill. It is a light laid OVER the
+            // material, exactly as the platform draws it, so it still travels
+            // on a quad of its own here even though that quad paints nothing
+            // else.
+            self.batch.pushRect(
+                bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius,
+                self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY,
+                0.0,
+                Color { a: 0.0 }, 0.0,
+                glowX, glowY, glowStrength
+            )
             return
         }
         // Rounded-clip realization: the batch clip is rectangular, so a square
@@ -285,7 +301,8 @@ class KiraGraphicsFoundationBackend {
             fill, border, borderWidth, effectiveRadius,
             self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY,
             0.0,
-            fillEnd, foundationGradientAxis(gradient)
+            fillEnd, foundationGradientAxis(gradient),
+            glowX, glowY, glowStrength
         )
         return
     }
@@ -317,6 +334,22 @@ class KiraGraphicsFoundationBackend {
                 "paint squircle x=" + String(bounds.x) + " y=" + String(bounds.y)
                     + " w=" + String(bounds.width) + " h=" + String(bounds.height)
             )
+        }
+        // A glass surface's fill belongs to the glass SHADER, and `beginBackdrop`
+        // says so by setting this. Reading it here is not an optimization: the
+        // flag is consumed by whichever surface paints next, so a squircle that
+        // ignored it painted its own wash a second time on top of the material
+        // AND left the flag standing for the first child that painted — which
+        // lost its fill instead. In a menu that child is the first separator,
+        // and the rule simply was not there.
+        if self.suppressNextFill {
+            self.suppressNextFill = false
+            let noFill = Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+            self.batch.pushRect(
+                bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius,
+                self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, 0.25
+            )
+            return
         }
         self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, fill, border, borderWidth, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, 0.25)
         return
@@ -410,7 +443,29 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function beginBackdrop(bounds: borrow Rect, material: borrow FoundationMaterial, radius: Float, blur: Float, edgeRefraction: Float, fill: borrow Color, glassMaterial: borrow FoundationGlassMaterial) {
+    function beginBackdrop(
+        bounds: borrow Rect,
+        material: borrow FoundationMaterial,
+        radius: Float,
+        blur: Float,
+        edgeRefraction: Float,
+        fill: borrow Color,
+        glassMaterial: borrow FoundationGlassMaterial,
+        glowX: Float = 0.0,
+        glowY: Float = 0.0,
+        glowStrength: Float = 0.0,
+        // The shape this surface is fusing with, in the same coordinates as
+        // `bounds`, and how hard. Zero reach is a surface that is one shape.
+        morphX: Float = 0.0,
+        morphY: Float = 0.0,
+        morphW: Float = 0.0,
+        morphH: Float = 0.0,
+        morphRadius: Float = 0.0,
+        morphBlend: Float = 0.0,
+        // 0 circular, 1 squircle. The glass body has to agree with the fill
+        // quad drawn over it about what shape the surface is.
+        shapeKind: Float = 0.0,
+    ) {
         self.backdropDepth = self.backdropDepth + 1
         self.glassWashStack.append(self.glassWash)
         self.glassWashLumaStack.append(self.glassWashLuma)
@@ -458,7 +513,12 @@ class KiraGraphicsFoundationBackend {
             // The surface's fill IS the glass wash: the shader applies it
             // adaptively (stronger over dark backdrop, near invisible over light),
             // so the separate fill quad is suppressed for this surface.
-            self.batch.pushGlass(bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, glassMaterial)
+            self.batch.pushGlass(
+                bounds.x, bounds.y, bounds.width, bounds.height, radius, fill, blur, edgeRefraction,
+                self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, glassMaterial,
+                glowX, glowY, glowStrength,
+                morphX, morphY, morphW, morphH, morphRadius, morphBlend, shapeKind,
+            )
             self.suppressNextFill = true
             return
         }

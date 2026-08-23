@@ -82,6 +82,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -107,6 +120,13 @@ type VertexOut {
     // Upper wash colour: blend mode in w; its alpha rides in upperA.
     let upperWash: Float4
     let upperA: Float
+    // The touch highlight: centre in this quad's own space, strength in z. It
+    // rides the gradient block, which the glass pipelines carry for stride and
+    // never read — all three material spares are already spoken for.
+    // The touch highlight (xyz) and the surface's corner kind (w). A `Float3`
+    // varying already costs a whole four-component slot, so the fourth rides
+    // free — and this record has no slot to spare.
+    let glow: Float4
 }
 
 type FragmentOut {
@@ -167,6 +187,7 @@ shader UiGlassLens {
             out.fillWash = Float4(v.fillR, v.fillG, v.fillB, v.washBlend)
             out.upperWash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperBlend)
             out.upperA = clamp(v.washUpperAlpha, 0.0, 1.0)
+            out.glow = Float4(v.gradientR, v.gradientG, v.gradientB, v.shapeKind)
             return out
         }
     }
@@ -198,7 +219,7 @@ shader UiGlassLens {
 
             let hsize = Float2(input.shape.x, input.shape.y)
             let radius = input.shape.z
-            let distancePx = GlassCommon.sdRound(input.local, hsize, radius)
+            let distancePx = GlassCommon.shapeDistance(input.local, hsize, radius, input.glow.w)
             let minHalf = max(min(hsize.x, hsize.y), 1.0)
             let inside = max(0.0 - distancePx, 0.0)
 
@@ -210,7 +231,7 @@ shader UiGlassLens {
             let coord = uvFrag
             if inside < 72.0 {
                 let ref = GlassCommon.refractionCurve(inside / max(input.lensPack.y, 1.0))
-                let n = GlassCommon.sdRoundNormal(input.local, hsize, radius)
+                let n = GlassCommon.shapeNormal(input.local, hsize, radius, input.glow.w)
                 let bend = (1.0 - ref) * min(minHalf, input.lensPack.x)
                 let uvScale = Float2(input.uvmap.z / hsize.x, input.uvmap.w / hsize.y)
                 coord = uvFrag - n * bend * uvScale
@@ -248,7 +269,12 @@ shader UiGlassLens {
             rgb = GlassCommon.blendLayer(rgb, Float3(input.upperWash.x, input.upperWash.y, input.upperWash.z), input.upperA, input.upperWash.w)
 
             let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
-            out.color = Float4(glassRgb.x, glassRgb.y, glassRgb.z, 1.0)
+            // The touch light, added over the finished material: glass
+            // energizes from within under a finger rather than having a white
+            // sheet laid over it. The lens covers the interior, so coverage is
+            // one here.
+            let lit = GlassCommon.touchGlow(input.local, Float3(input.glow.x, input.glow.y, input.glow.z), 1.0)
+            out.color = Float4(min(glassRgb.x + lit, 1.0), min(glassRgb.y + lit, 1.0), min(glassRgb.z + lit, 1.0), 1.0)
             return out
         }
     }

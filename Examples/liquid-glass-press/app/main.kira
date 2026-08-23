@@ -1,0 +1,241 @@
+import Foundation
+import KiraLayout
+import KiraUIFoundation
+import KiraUIMotion
+
+// Press the card and pull it.
+//
+// It lifts toward the finger, leans after it, squashes along the direction it
+// is thrown, lights from the point you touched, and springs back loose when you
+// let go. Every one of those is `KiraUIMotion` driving two fields on an
+// ordinary `FoundationView` — `deform` and `glow` — and nothing else in the
+// tree knows any of it is happening.
+//
+// The numbers are not this example's. The press and release springs, the twenty
+// points of lift, the highlight's tenth of an opacity and its two fade
+// durations all come from the library, which took them from a shipping
+// implementation of the same material.
+
+function pageFill() -> Color {
+    return Color { r: 0.07 g: 0.08 b: 0.10 a: 1.0 }
+}
+
+function cardTint() -> FoundationTintStack {
+    return foundationLiquidGlassTint(FoundationScheme.Dark)
+}
+
+function cardKey() -> Int {
+    return 4201
+}
+
+function cardWidth() -> Float {
+    return 340.0
+}
+
+function cardHeight() -> Float {
+    return 200.0
+}
+
+// What the card is doing right now. Held in a state slot because the builder
+// runs fresh every frame and the motion is what carries between them.
+struct CardMotion {
+    var pull: MotionPullState = MotionPullState { reach: 140.0 }
+    var glow: MotionGlowState = MotionGlowState {}
+    // Where the press landed, so the drag's deltas can be turned back into a
+    // pointer position.
+    var pressX: Float = 0.0
+    var pressY: Float = 0.0
+    // The card's own origin at the moment of the press, so the highlight can be
+    // placed in the card's coordinates rather than the window's.
+    var originX: Float = 0.0
+    var originY: Float = 0.0
+    var shape: MotionDeformation = MotionDeformation {}
+}
+
+function cardSlot() -> String {
+    return "liquidglasspress.card"
+}
+
+function cardEnsure() {
+    if stateSlotHas(cardSlot()) == false {
+        stateSlotPut(cardSlot(), nativeUserData(nativeState(CardMotion {})))
+    }
+    return
+}
+
+// Deliberately NOT a `cardState()` helper that hands the recovered value back.
+// A recovered value returned from a function is a COPY, so every write to it is
+// discarded — which is why each function below recovers inline instead.
+function cardRead() -> CardMotion {
+    cardEnsure()
+    return nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+}
+
+// The window is fixed, so where the card sits is arithmetic rather than a
+// question for the layout tree — which is what lets the press be placed in the
+// card's own space without reading geometry back out of the renderer.
+function cardOriginX() -> Float {
+    return (900.0 - cardWidth()) * 0.5
+}
+
+function cardOriginY() -> Float {
+    return (600.0 - cardHeight()) * 0.5
+}
+
+function onPressBegin(x: Float, y: Float) {
+    cardEnsure()
+    var state = nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+    state.pressX = x
+    state.pressY = y
+    state.originX = cardOriginX()
+    state.originY = cardOriginY()
+    motionPullPress(state.pull, x, y, false)
+    // The light is centred where the finger landed, in the card's coordinates.
+    motionGlowPress(state.glow, x - cardOriginX(), y - cardOriginY())
+    return
+}
+
+function onPressMove(dx: Float, dy: Float) {
+    cardEnsure()
+    var state = nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+    let x = state.pressX + dx
+    let y = state.pressY + dy
+    // One frame at sixty, which is what this window runs at. The library itself
+    // takes the frame's real duration; an example that is only ever driven by a
+    // hand does not need to measure it.
+    motionPullMove(state.pull, x, y, 1.0 / 60.0)
+    motionGlowMove(state.glow, x - state.originX, y - state.originY)
+    return
+}
+
+function onPressEnd(x: Float, y: Float) {
+    cardEnsure()
+    var state = nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+    motionPullRelease(state.pull, false)
+    motionGlowRelease(state.glow)
+    return
+}
+
+// A tap that never moved still has to answer. The press is taken and released
+// on the same frame, so the light comes up and drains on its own clock rather
+// than never arriving.
+function onTap() {
+    cardEnsure()
+    var state = nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+    motionPullPress(state.pull, cardOriginX() + cardWidth() * 0.5, cardOriginY() + cardHeight() * 0.5, false)
+    motionGlowPress(state.glow, cardWidth() * 0.5, cardHeight() * 0.5)
+    motionPullRelease(state.pull, false)
+    motionGlowRelease(state.glow)
+    return
+}
+
+// Advances both channels and answers what to draw.
+function advance() -> CardMotion {
+    cardEnsure()
+    var state = nativeRecover<CardMotion>(stateSlotGet(cardSlot()))
+    state.shape = motionPullAdvance(state.pull, 1.0 / 60.0, false)
+    let ignored = motionGlowAdvance(state.glow, 1.0 / 60.0)
+    return cardRead()
+}
+
+function stillMoving() -> Bool {
+    let state = cardRead()
+    if motionPullMoving(state.pull) {
+        return true
+    }
+    return motionGlowLit(state.glow)
+}
+
+function card(state: borrow CardMotion) -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fixed(cardWidth())
+        height: .Fixed(cardHeight())
+        radius: 28.0
+        fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.10 }
+        material: .LiquidGlass
+        blur: foundationBlurMix(FoundationBlur.Step)
+        edgeRefraction: 1.0
+        glassMaterial: foundationGlassMaterialWithTint(FoundationGlassMaterial {}, cardTint())
+        // The two fields this whole example exists to set.
+        deform: state.shape
+        glow: state.glow
+    }
+}
+
+// Something for the glass to be glass ABOUT.
+//
+// A card over a flat page is invisible: the material's whole job is to bend and
+// blur what is behind it, and a single colour bent and blurred is the same
+// colour. The bars are what make the lens, the edge and the highlight legible —
+// and what makes a press read as the material flexing over them.
+function backdrop() -> FoundationView {
+    return FoundationView {
+        kind: .Row
+        width: .Fill
+        height: .Fill
+        children: [
+            FoundationView { kind: .Surface, width: .Fixed(150.0), height: .Fill, fill: Color { r: 0.90 g: 0.24 b: 0.35 a: 1.0 } },
+            FoundationView { kind: .Surface, width: .Fixed(150.0), height: .Fill, fill: Color { r: 0.98 g: 0.72 b: 0.20 a: 1.0 } },
+            FoundationView { kind: .Surface, width: .Fixed(150.0), height: .Fill, fill: Color { r: 0.30 g: 0.80 b: 0.45 a: 1.0 } },
+            FoundationView { kind: .Surface, width: .Fixed(150.0), height: .Fill, fill: Color { r: 0.20 g: 0.55 b: 0.95 a: 1.0 } },
+            FoundationView { kind: .Surface, width: .Fixed(150.0), height: .Fill, fill: Color { r: 0.60 g: 0.35 b: 0.90 a: 1.0 } },
+            FoundationView { kind: .Surface, width: .Fill, height: .Fill, fill: Color { r: 0.95 g: 0.95 b: 0.97 a: 1.0 } }
+        ]
+    }
+}
+
+function rootView(state: borrow CardMotion) -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fill
+        height: .Fill
+        fill: pageFill()
+        alignment: .Center
+        children: [
+            backdrop(),
+            // A Frame that fills and centres, so the card keeps its own size:
+            // a view dropped straight into a surface is STRETCHED to it.
+            Frame(
+                child: GestureHitArea(
+                key: cardKey(),
+                disabled: false,
+                onPress: onTap,
+                interaction: FoundationInteraction {
+                    onDragStart: onPressBegin
+                    onDragMove: onPressMove
+                    onDragEnd: onPressEnd
+                },
+                    children: [card(state)]
+                ),
+                width: SizeMode.Fill,
+                height: SizeMode.Fill,
+                flex: 0,
+                alignment: Alignment.Center,
+                padding: EdgeInsets {}
+            )
+        ]
+    }
+}
+
+@Main
+function main() {
+    RunFoundationInteractiveApp(
+        title: "Liquid Glass — press and pull",
+        width: 900,
+        height: 600,
+        rootBuilder: { ui in
+            let ignored = ui.frameCount
+            let state = advance()
+            return rootView(state)
+        },
+        engineFrame: { frame in
+            return
+        },
+        // The card keeps moving after the finger has gone, so the window has to
+        // keep drawing after the last event.
+        needsRebuild: stillMoving,
+        showFpsOverlay: false
+    )
+    return
+}

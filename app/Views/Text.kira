@@ -130,7 +130,20 @@ function foundationTextMeasure(content: borrow String, size: Float, weight: Floa
         width = foundationTextIntrinsicWidth(size: size, characterCount: content.count)
     }
 
+    // The height is the box the RASTERIZER treats as a full line, and that box
+    // is `ascent + descent` — the two metrics it places the baseline from. The
+    // face's reported line height is a different number, and where it is the
+    // smaller of the two the rasterizer decides the box is tighter than a line
+    // and falls back to centring the run's INK instead. That fallback exists for
+    // a leaf deliberately sized under a line; reaching it by accident is how
+    // "Hide" ends up a point below "Copy" beside it, because one of them has a
+    // descender and the other does not. Ask for whichever is larger and the
+    // fallback is only ever reached on purpose.
     var height = foundationTextRunLineHeight(size: size, weight: weight)
+    let lineBox = foundationTextAscent(size, weight) + foundationTextDescent(size, weight)
+    if lineBox > height {
+        height = lineBox
+    }
     if height <= 0.0 {
         height = foundationTextIntrinsicHeight(size: size)
     }

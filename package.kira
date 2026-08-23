@@ -7,6 +7,10 @@ Package KiraUIFoundation {
     let allowThinFfiShim = true
     let dependencies = [
         Dependency { name: "KiraLayout", path: "../kira-layout" },
+        // The time domain: springs, fling decay, rubber banding, snapping.
+        // Depends on nothing that draws, which is what lets scrolling here be
+        // built on it without a cycle.
+        Dependency { name: "KiraUIMotion", path: "../ui-motion" },
         Dependency { name: "KiraGraphics", path: "../kira-graphics" }
     ]
     let nativeLibraries = [

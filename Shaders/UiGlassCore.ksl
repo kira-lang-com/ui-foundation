@@ -82,6 +82,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -107,6 +120,13 @@ type VertexOut {
     let fillWash: Float4
     // Upper wash colour, and its blend mode in w.
     let upperWash: Float4
+    // The quad's own coordinates, and the touch highlight: centre in xy of that
+    // same space, strength in z.
+    let local: Float2
+    // The touch highlight (xyz) and the surface's corner kind (w). A `Float3`
+    // varying already costs a whole four-component slot, so the fourth rides
+    // free — and this record has no slot to spare.
+    let glow: Float4
 }
 
 type FragmentOut {
@@ -162,6 +182,8 @@ shader UiGlassCore {
             )
             out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
             out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
+            out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
+            out.glow = Float4(v.gradientR, v.gradientG, v.gradientB, v.shapeKind)
             out.dials = Float4(
                 clamp(v.fillA, 0.0, 1.0),
                 clamp(v.blurNearSplit, 0.01, 0.99),
@@ -235,7 +257,10 @@ shader UiGlassCore {
             rgb = GlassCommon.blendLayer(rgb, Float3(input.upperWash.x, input.upperWash.y, input.upperWash.z), input.dials.w, input.upperWash.w)
 
             let glassRgb = clamp(rgb, Float3(0.0, 0.0, 0.0), Float3(1.0, 1.0, 1.0))
-            out.color = Float4(glassRgb.x, glassRgb.y, glassRgb.z, 1.0)
+            // The touch light, added on top of the finished material. The core
+            // covers the interior fully, so its coverage is one.
+            let lit = GlassCommon.touchGlow(input.local, Float3(input.glow.x, input.glow.y, input.glow.z), 1.0)
+            out.color = Float4(min(glassRgb.x + lit, 1.0), min(glassRgb.y + lit, 1.0), min(glassRgb.z + lit, 1.0), 1.0)
             return out
         }
     }

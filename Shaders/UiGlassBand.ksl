@@ -78,6 +78,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -92,10 +105,10 @@ type VertexOut {
     let local: Float2
     let px: Float2
     let hsize: Float2
-    let radius: Float
-    let borderWidth: Float
-    let mode: Float
-    let edgeRefraction: Float
+    // Radius, border width, draw mode and edge refraction in one interpolant.
+    // A vertex output costs a whole SLOT whatever it carries, and this record
+    // sat at the sixteen a fragment stage is guaranteed.
+    let shape: Float4
     let fill: Float4
     let border: Float4
     let clip: Float4
@@ -105,6 +118,13 @@ type VertexOut {
     let borderInk: Float4
     let wash: Float4
     let washBlend: Float2
+    // The touch highlight: centre in this quad's own space, strength in z. It
+    // rides the gradient block, which the glass pipelines carry for stride and
+    // never read.
+    // The touch highlight (xyz) and the surface's corner kind (w). A `Float3`
+    // varying already costs a whole four-component slot, so the fourth rides
+    // free — and this record has no slot to spare.
+    let glow: Float4
 }
 
 type FragmentOut {
@@ -152,10 +172,7 @@ shader UiGlassBand {
             out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
             out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
             out.hsize = Float2(v.halfW, v.halfH)
-            out.radius = v.radius
-            out.borderWidth = v.borderWidth
-            out.mode = v.mode
-            out.edgeRefraction = v.edgeRefraction
+            out.shape = Float4(v.radius, v.borderWidth, v.mode, v.edgeRefraction)
             out.fill = Float4(v.fillR, v.fillG, v.fillB, v.fillA)
             out.border = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
             out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
@@ -165,6 +182,7 @@ shader UiGlassBand {
             out.borderInk = Float4(v.borderGrey, v.borderSideGrey, v.innerRimStrength, v.innerRimWidth)
             out.wash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperAlpha)
             out.washBlend = Float2(v.washBlend, v.washUpperBlend)
+            out.glow = Float4(v.gradientR, v.gradientG, v.gradientB, v.shapeKind)
             return out
         }
     }
@@ -194,7 +212,7 @@ shader UiGlassBand {
             }
 
 
-            let distancePx = GlassCommon.sdRound(input.local, input.hsize, input.radius)
+            let distancePx = GlassCommon.shapeDistance(input.local, input.hsize, input.shape.x, input.glow.w)
             let shadowAlpha = 0.0
             let shadowRgb = Float3(0.0, 0.0, 0.0)
             let cov = clamp(0.5 - distancePx, 0.0, 1.0)
@@ -210,7 +228,7 @@ shader UiGlassBand {
             let coord = uvFrag
             if inside < 72.0 {
                 let ref = GlassCommon.refractionCurve(inside / max(input.lens.z, 1.0))
-                n = GlassCommon.sdRoundNormal(input.local, input.hsize, input.radius)
+                n = GlassCommon.shapeNormal(input.local, input.hsize, input.shape.x, input.glow.w)
                 let bend = (1.0 - ref) * min(minHalf, input.lens.y)
                 let uvScale = Float2(input.border.z / input.hsize.x, input.border.w / input.hsize.y)
                 coord = uvFrag - n * bend * uvScale
@@ -247,12 +265,12 @@ shader UiGlassBand {
                 )
             }
 
-            let washA = clamp(input.borderWidth, 0.0, GlassCommon.washCeiling)
+            let washA = clamp(input.shape.y, 0.0, GlassCommon.washCeiling)
             rgb = GlassCommon.blendLayer(rgb, Float3(input.fill.x, input.fill.y, input.fill.z), washA, input.washBlend.x)
             let washUpperA = clamp(input.wash.w, 0.0, 1.0)
             rgb = GlassCommon.blendLayer(rgb, Float3(input.wash.x, input.wash.y, input.wash.z), washUpperA, input.washBlend.y)
 
-            let lighting = clamp(input.edgeRefraction, 0.0, 2.0)
+            let lighting = clamp(input.shape.w, 0.0, 2.0)
             let peak = input.edge.z
             let stroke = 0.0
             if inside < max(input.edge.w, peak + 0.01) {
@@ -277,7 +295,10 @@ shader UiGlassBand {
             let over = 1.0 - cov
             let outRgb = glassRgb * cov + shadowRgb * over
             let outAlpha = cov + shadowAlpha * over
-            out.color = Float4(outRgb.x, outRgb.y, outRgb.z, outAlpha)
+            // The touch light, added over the finished material and masked by
+            // its coverage: glass energizes from within under a finger.
+            let lit = GlassCommon.touchGlow(input.local, Float3(input.glow.x, input.glow.y, input.glow.z), cov)
+            out.color = Float4(outRgb.x + lit, outRgb.y + lit, outRgb.z + lit, min(outAlpha + lit, 1.0))
             return out
         }
     }

@@ -52,6 +52,17 @@ function RunFoundationInteractiveApp(
     // none reads the environment exactly as before; a caller that provides one
     // (a screenshot tool, a driven test) needs no environment at all.
     harness: HarnessConfig = HarnessConfig {},
+    // The content-owned titlebar region, if the host has one. Without one, the
+    // graphics layer's narrow invisible top-edge fallback keeps the undecorated
+    // window movable.
+    //
+    // LAST, and every parameter added after it belongs here too: a call binds
+    // its arguments by POSITION and a label on one is decorative, so a
+    // parameter inserted in the middle of this list silently rebinds every
+    // existing call — `engineFrame:` becomes this, `needsRebuild:` becomes
+    // `engineFrame`, and the compiler reports a type error at best and nothing
+    // at all at worst.
+    windowDragRegion: borrow (Float, Float) -> Bool = graphicsApplicationFallbackWindowDragRegion,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView()
@@ -61,6 +72,17 @@ function RunFoundationInteractiveApp(
         transparent: transparent
     })
     let runtimeUser = nativeUserData(runtimeStorage)
+
+    let declaredWindowDragRegion: borrow (Float, Float) -> Bool = windowDragRegion
+    let resolvedWindowDragRegion: (Float, Float) -> Bool = { x, y in
+        if declaredWindowDragRegion(x, y) == false {
+            return false
+        }
+        // Toolbar controls keep their clicks. Only otherwise-empty toolbar
+        // surface is window furniture, matching a native titlebar.
+        let current = nativeRecover<FoundationAppState>(runtimeUser)
+        return foundationHitRegionIndexAtPoint(current.hitRegions, x, y) < 0
+    }
 
     var app = GraphicsApplication {
         title: title
@@ -76,6 +98,7 @@ function RunFoundationInteractiveApp(
         // already dispatches on the frame's own backend.
         backend: graphicsDefaultBackend()
         harness: harness
+        windowDragRegion: resolvedWindowDragRegion
     }
 
     app.onEvent { event in
@@ -157,7 +180,21 @@ function RunFoundationInteractiveApp(
             state.hudRefreshElapsed = state.hudRefreshElapsed + foundationFrameDuration(frame)
         }
         let hudNeedsRefresh = overlayEnabled && state.hudRefreshElapsed >= foundationHudRefreshSeconds()
+        // Momentum runs on the frame clock, not on input. A thrown list keeps
+        // moving after the finger has gone and an edge springs back after the
+        // pull that stretched it, so every scrolling region is advanced here —
+        // on frames no event arrived on, which is most of the frames a throw
+        // lasts for.
+        //
+        // The motion preference travels as an argument rather than being read
+        // here, because this package has no platform to ask; a host that knows
+        // one threads it in the same way it threads `needsRebuild`.
+        let scrollMoving = foundationScrollAdvance(foundationFrameDuration(frame), false)
         if state.hasPresentedFrame &&
+            // A region still in motion has a new offset this frame, and the
+            // offset is applied during layout — so the frame that skips layout
+            // is the frame that freezes the throw.
+            !scrollMoving &&
             !hostNeedsRebuild() &&
             state.batchReady &&
             state.ui.eventCount == state.lastPresentedEventCount &&

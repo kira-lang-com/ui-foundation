@@ -1,0 +1,352 @@
+import Foundation
+import KiraLayout
+import KiraUIFoundation
+import KiraUIMotion
+
+// Two pieces of liquid glass that stop being two.
+//
+// A pill-shaped toolbar and a round badge, on a photograph. Drag the badge and
+// nothing interesting happens until it comes near the toolbar — and then the
+// gap between them fills in. Not with a shape anybody draws: the two distance
+// fields are combined with a smooth minimum, the field between them dips below
+// the surface, and what appears is a neck with a pinched waist that the edge
+// stroke runs continuously through. Keep dragging and the neck thins, snaps,
+// and there are two shapes again.
+//
+// One glass surface renders BOTH. The fused body is not inside either
+// rectangle — the waist is in the gap — so it belongs to whichever quad is
+// large enough to rasterize it, and that is the toolbar's, grown to cover the
+// badge and the reach between them. The badge is a shape, not a view.
+
+function panelWidth() -> Float { return 300.0 }
+function panelHeight() -> Float { return 72.0 }
+function panelX() -> Float { return 120.0 }
+function panelY() -> Float { return 300.0 }
+
+function badgeSize() -> Float { return 76.0 }
+
+// Where the badge sits when nothing is dragging it: clear of the toolbar, far
+// enough that the two are visibly separate.
+function badgeHomeX() -> Float { return 620.0 }
+function badgeHomeY() -> Float { return panelY() + (panelHeight() - badgeSize()) * 0.5 }
+
+// --- what the badge is doing -------------------------------------------------
+
+struct MorphState {
+    // The badge's top-left, one spring per axis. A spring rather than the
+    // pointer's own position because a blob of liquid has weight: it arrives
+    // where the finger is a moment after the finger does, and overshoots a
+    // little when the finger stops.
+    var x: MotionSpringState = MotionSpringState {}
+    var y: MotionSpringState = MotionSpringState {}
+    var started: Bool = false
+    // Where the badge was when this drag began, so a delta means something.
+    var grabX: Float = 0.0
+    var grabY: Float = 0.0
+    var dragging: Bool = false
+}
+
+function morphSlot() -> String {
+    return "liquidglassmorph.state"
+}
+
+function morphEnsure() {
+    if stateSlotHas(morphSlot()) == false {
+        stateSlotPut(morphSlot(), nativeUserData(nativeState(MorphState {})))
+    }
+    return
+}
+
+// Read-only. Every mutation below recovers INLINE: a recovered value handed
+// back through a function is a copy, and a spring advanced on a copy is a
+// spring that never moved.
+function morphRead() -> MorphState {
+    morphEnsure()
+    return nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+}
+
+function morphSpring(from: Float, to: Float) -> MotionSpringState {
+    return motionSpringStart(motionCurveFor(.Interactive, to, false), from, 0.0)
+}
+
+function morphStartIfNeeded() {
+    morphEnsure()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    if state.started {
+        return
+    }
+    state.x = morphSpring(badgeHomeX(), badgeHomeX())
+    state.y = morphSpring(badgeHomeY(), badgeHomeY())
+    state.started = true
+    return
+}
+
+function onMorphDragStart(x: Float, y: Float) {
+    morphStartIfNeeded()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    state.grabX = motionSpringSample(state.x, state.x.elapsed).value
+    state.grabY = motionSpringSample(state.y, state.y.elapsed).value
+    state.dragging = true
+    return
+}
+
+function onMorphDragMove(dx: Float, dy: Float) {
+    morphStartIfNeeded()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    // Retarget rather than restart: the spring keeps the velocity it already
+    // has, so a badge already travelling does not stop dead when the finger
+    // turns a corner.
+    motionSpringRetarget(state.x, state.grabX + dx)
+    motionSpringRetarget(state.y, state.grabY + dy)
+    return
+}
+
+function onMorphDragEnd(x: Float, y: Float) {
+    morphStartIfNeeded()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    state.dragging = false
+    return
+}
+
+// A click with no drag sends the badge home, so the effect can be watched
+// without a hand on the mouse.
+function onMorphTap() {
+    morphStartIfNeeded()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    motionSpringRetarget(state.x, badgeHomeX())
+    motionSpringRetarget(state.y, badgeHomeY())
+    return
+}
+
+function morphAdvance() -> MorphState {
+    morphStartIfNeeded()
+    var state = nativeRecover<MorphState>(stateSlotGet(morphSlot()))
+    let ignoredX = motionSpringAdvance(state.x, 1.0 / 60.0)
+    let ignoredY = motionSpringAdvance(state.y, 1.0 / 60.0)
+    return morphRead()
+}
+
+function morphMoving() -> Bool {
+    let state = morphRead()
+    if state.dragging {
+        return true
+    }
+    let sx = motionSpringSample(state.x, state.x.elapsed)
+    if motionSpringSettled(state.x, sx, motionSpringEpsilon()) == false {
+        return true
+    }
+    let sy = motionSpringSample(state.y, state.y.elapsed)
+    return motionSpringSettled(state.y, sy, motionSpringEpsilon()) == false
+}
+
+// The badge, as the shape the toolbar is fusing with. A circle is a rounded
+// rectangle whose radius is half its shorter side.
+function badgeShape(state: borrow MorphState) -> MotionShape {
+    return MotionShape {
+        x: motionSpringSample(state.x, state.x.elapsed).value
+        y: motionSpringSample(state.y, state.y.elapsed).value
+        width: badgeSize()
+        height: badgeSize()
+        radius: badgeSize() * 0.5
+    }
+}
+
+// --- the surface -------------------------------------------------------------
+
+function pad(l: Float, t: Float, r: Float, b: Float) -> EdgeInsets {
+    return EdgeInsets { leading: l, top: t, trailing: r, bottom: b }
+}
+
+function dot() -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fixed(7.0)
+        height: .Fixed(7.0)
+        radius: 3.5
+        fill: Color { r: 0.12 g: 0.12 b: 0.14 a: 0.85 }
+    }
+}
+
+function toolbar(state: borrow MorphState) -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fixed(panelWidth())
+        height: .Fixed(panelHeight())
+        // A pill: the radius is half the height, so the ends are semicircles.
+        radius: panelHeight() * 0.5
+        fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.55 }
+        material: .LiquidGlass
+        blur: foundationBlurMix(FoundationBlur.Step)
+        edgeRefraction: 1.0
+        glassMaterial: foundationGlassMaterialWithTint(FoundationGlassMaterial {}, foundationLiquidGlassTint(FoundationScheme.Light))
+        morph: badgeShape(state)
+        morphBlend: motionMetaballBlend()
+        children: [
+            Row(
+                children: [dot(), dot(), dot()],
+                SizeMode.Fill,
+                SizeMode.Fill,
+                9.0,
+                pad(30.0, 0.0, 0.0, 0.0),
+                CrossAlignment.Center
+            )
+        ]
+    }
+}
+
+// Something for the glass to be glass about.
+//
+// Horizontal bands for large colour, and fine vertical stripes over them so the
+// lens has an edge to bend: a surface over flat colour refracts flat colour and
+// looks like a rectangle of paint. The stripes are what make the neck legible
+// as GLASS — they compress into its waist and splay out the other side.
+function rule(dark: Bool, vertical: Bool) -> FoundationView {
+    var ink = Color { r: 1.0 g: 1.0 b: 1.0 a: 0.17 }
+    if dark {
+        ink = Color { r: 0.0 g: 0.0 b: 0.0 a: 0.17 }
+    }
+    if vertical {
+        return FoundationView { kind: .Surface, width: .Fixed(11.0), height: .Fill, fill: ink }
+    }
+    return FoundationView { kind: .Surface, width: .Fill, height: .Fixed(11.0), fill: ink }
+}
+
+// A GRID, not stripes.
+//
+// Refraction at the rim is perpendicular to the edge: vertical along the top
+// and bottom, horizontal at the ends. Vertical stripes are invariant under a
+// vertical displacement, so a striped backdrop shows a bend at the caps and
+// nothing at all along the length — which reads exactly like a lens that is
+// switched off. Ruled both ways, every part of the rim has a line across it to
+// bend.
+function grid() -> FoundationView {
+    var columns: [FoundationView] = []
+    for index in 0..40 {
+        columns.append(rule(index - (index / 2) * 2 == 0, true))
+    }
+    var rows: [FoundationView] = []
+    for index in 0..28 {
+        rows.append(rule(index - (index / 2) * 2 == 0, false))
+    }
+    return FoundationView {
+        kind: .Surface
+        width: .Fill
+        height: .Fill
+        // A surface PAINTS, and its fill defaults to opaque white — so a
+        // surface used as a bare container hides everything under it. This one
+        // exists only to hold two overlaid rulings.
+        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+        children: [
+            Row(
+                move columns,
+                SizeMode.Fill,
+                SizeMode.Fill,
+                11.0,
+                pad(0.0, 0.0, 0.0, 0.0),
+                CrossAlignment.Stretch
+            ),
+            Column(
+                move rows,
+                SizeMode.Fill,
+                SizeMode.Fill,
+                11.0,
+                pad(0.0, 0.0, 0.0, 0.0),
+                CrossAlignment.Stretch
+            )
+        ]
+    }
+}
+
+function backdrop() -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fill
+        height: .Fill
+        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+        children: [
+            Column(
+                [
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(170.0), fill: Color { r: 0.16 g: 0.42 b: 0.72 a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(120.0), fill: Color { r: 0.86 g: 0.55 b: 0.28 a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(150.0), fill: Color { r: 0.93 g: 0.86 b: 0.72 a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fill, fill: Color { r: 0.20 g: 0.30 b: 0.24 a: 1.0 } }
+                ],
+                SizeMode.Fill,
+                SizeMode.Fill,
+                0.0,
+                pad(0.0, 0.0, 0.0, 0.0),
+                CrossAlignment.Stretch
+            ),
+            grid()
+        ]
+    }
+}
+
+// The toolbar is placed by hand rather than by a stack, because the badge's
+// position is a number this file owns and the two have to agree about where the
+// toolbar is.
+//
+// Padding rather than spacers: a spacer absorbs whatever is left over, which is
+// the opposite of what a fixed offset is — the first version of this put the
+// pill in the bottom-right corner because both spacers took the free space and
+// pushed it there.
+function placedToolbar(state: borrow MorphState) -> FoundationView {
+    return Column(
+        [
+            Row(
+                [toolbar(state)],
+                SizeMode.Fill,
+                SizeMode.Fixed(panelHeight()),
+                0.0,
+                pad(panelX(), 0.0, 0.0, 0.0),
+                CrossAlignment.Start
+            )
+        ],
+        SizeMode.Fill,
+        SizeMode.Fill,
+        0.0,
+        pad(0.0, panelY(), 0.0, 0.0),
+        CrossAlignment.Start
+    )
+}
+
+function rootView(state: borrow MorphState) -> FoundationView {
+    return FoundationView {
+        kind: .Surface
+        width: .Fill
+        height: .Fill
+        fill: Color { r: 0.08 g: 0.09 b: 0.11 a: 1.0 }
+        children: [
+            backdrop(),
+            GestureHitArea(
+                key: 9200,
+                disabled: false,
+                onPress: onMorphTap,
+                interaction: FoundationInteraction {
+                    onDragStart: onMorphDragStart
+                    onDragMove: onMorphDragMove
+                    onDragEnd: onMorphDragEnd
+                },
+                children: [placedToolbar(state)]
+            )
+        ]
+    }
+}
+
+@Main
+function main() {
+    RunFoundationInteractiveApp(
+        title: "Liquid Glass — morph",
+        900,
+        600,
+        { ui in
+            let ignored = ui.frameCount
+            let state = morphAdvance()
+            return rootView(state)
+        },
+        foundationNoopEngineFrame,
+        morphMoving,
+        false
+    )
+    return
+}

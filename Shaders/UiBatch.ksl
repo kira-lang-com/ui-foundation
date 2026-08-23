@@ -116,6 +116,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -130,10 +143,14 @@ type VertexOut {
     let local: Float2
     let px: Float2
     let hsize: Float2
-    let radius: Float
-    let borderWidth: Float
-    let mode: Float
-    let edgeRefraction: Float
+    // Four scalars in one interpolant: radius, border width, draw mode, edge
+    // refraction. Packed rather than declared loose because a vertex output
+    // costs a whole SLOT whatever it carries, and this record sat at the
+    // sixteen a fragment stage is guaranteed. A seventeenth did not fail to
+    // compile — it failed to LINK, and the pipeline drew nothing at all, which
+    // is a much worse way to find out. The three slots freed here are what the
+    // touch highlight and the morph are carried in.
+    let shape: Float4
     let fill: Float4
     let border: Float4
     let clip: Float4
@@ -149,10 +166,59 @@ type VertexOut {
     let wash: Float4
     // The two layers' blend modes: lower in x, upper in y.
     let washBlend: Float2
+    // The touch highlight: where it is centred in this quad's own space, and
+    // how strongly it burns. Zero strength is no highlight.
+    let glow: Float3
 }
 
 type FragmentOut {
     let color: Float4
+}
+
+// How strongly the touch highlight lights a point `distance` from its centre.
+//
+// The same two halves as `motionGlowFalloff` on the Kira side: straight from
+// full strength to half across the inner half of the radius, then eased away
+// over the outer half, so the light meets the material on a curve and leaves no
+// ring. The radius is pinned to `motionGlowDiameter()`.
+function glowFalloff(distance: Float) -> Float {
+    let r = distance / 150.0
+    if r >= 1.0 {
+        return 0.0
+    }
+    if r <= 0.5 {
+        return 1.0 - r
+    }
+    let t = (r - 0.5) * 2.0
+    if t < 0.5 {
+        return 0.5 * (1.0 - 4.0 * t * t * t)
+    }
+    let inv = 2.0 - 2.0 * t
+    return 0.5 * (inv * inv * inv * 0.5)
+}
+
+// The highlight's contribution at this fragment.
+function glowStrength(input: VertexOut, coverage: Float) -> Float {
+    if input.glow.z <= 0.0 {
+        return 0.0
+    }
+    let offset = Float2(input.local.x - input.glow.x, input.local.y - input.glow.y)
+    return input.glow.z * glowFalloff(length(offset)) * coverage
+}
+
+// The quadratic smooth minimum: two distance fields fused so that the surface
+// grows a NECK between them as they approach instead of the two simply
+// overlapping.
+//
+// This is what makes a menu collapsing into its button read as one liquid mass
+// rather than two shapes crossfading. `k` is the reach of the fusion in points:
+// at zero this is a plain union, and the neck thickens with it.
+function smoothUnion(d1: Float, d2: Float, k: Float) -> Float {
+    if k <= 0.0 {
+        return min(d1, d2)
+    }
+    let e = max(k - abs(d1 - d2), 0.0)
+    return min(d1, d2) - e * e * 0.25 / k
 }
 // Adaptive text: the composite luminance either side of which a run inks itself
 // dark or light, and the dark ink (the light one is white).
@@ -231,10 +297,7 @@ shader UiBatch {
             out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
             out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
             out.hsize = Float2(v.halfW, v.halfH)
-            out.radius = v.radius
-            out.borderWidth = v.borderWidth
-            out.mode = v.mode
-            out.edgeRefraction = v.edgeRefraction
+            out.shape = Float4(v.radius, v.borderWidth, v.mode, v.edgeRefraction)
             // The corner's own fill: the near colour, or its mix with the far
             // one at this corner's position along the gradient's axis.
             let mixT = 0.0
@@ -258,6 +321,7 @@ shader UiBatch {
             out.borderInk = Float4(v.borderGrey, v.borderSideGrey, v.innerRimStrength, v.innerRimWidth)
             out.wash = Float4(v.washUpperR, v.washUpperG, v.washUpperB, v.washUpperAlpha)
             out.washBlend = Float2(v.washBlend, v.washUpperBlend)
+            out.glow = Float3(v.materialSpare0, v.materialSpare1, v.materialSpare2)
             return out
         }
     }
@@ -288,7 +352,7 @@ shader UiBatch {
             }
 
             // --- mode 4: adaptive glyph ---
-            if input.mode > 3.5 {
+            if input.shape.z > 3.5 {
                 let cov = sample(atlas, atlasSmp, input.local).x
                 if cov <= 0.002 {
                     out.color = Float4(0.0, 0.0, 0.0, 0.0)
@@ -298,7 +362,7 @@ shader UiBatch {
                 let behindLuma = dot(Float3(behind.x, behind.y, behind.z), lumaWeights())
                 // The capture holds what is UNDER the glass, not the glass, so the
                 // surface's wash is mixed back in before the decision.
-                let lit = mix(behindLuma, input.edgeRefraction, clamp(input.borderWidth, 0.0, 1.0))
+                let lit = mix(behindLuma, input.shape.w, clamp(input.shape.y, 0.0, 1.0))
                 let ink = smoothstep(inkDarkAbove, inkLightBelow, lit)
                 let inkRgb = mix(inkDark(), Float3(1.0, 1.0, 1.0), ink)
                 // Same correction as mode 1, with the ink this run just chose.
@@ -320,19 +384,19 @@ shader UiBatch {
             // this shader DECLARING the near-blur tap and the second backdrop
             // photograph it no longer read, which every GL driver eliminated
             // and then reported missing at every link.
-            if input.mode > 2.5 {
+            if input.shape.z > 2.5 {
                 out.color = Float4(0.0, 0.0, 0.0, 0.0)
                 return out
             }
             // --- mode 2: external texture ---
-            if input.mode > 1.5 {
-                let transition = clamp(input.edgeRefraction, 0.0, 1.0)
+            if input.shape.z > 1.5 {
+                let transition = clamp(input.shape.w, 0.0, 1.0)
                 // TextureView's local coordinates are UVs, while the shared SDF
                 // expects point-space offsets from the quad centre. Keep the
                 // engine target's corners inside the same self-contained mask as
                 // every other Foundation surface.
                 let textureLocal = (input.local - Float2(0.5, 0.5)) * Float2(input.hsize.x * 2.0, input.hsize.y * 2.0)
-                let textureDistance = surfaceDistance(textureLocal, input.hsize, input.radius, 0.0)
+                let textureDistance = surfaceDistance(textureLocal, input.hsize, input.shape.x, 0.0)
                 let textureCoverage = clamp(0.5 - textureDistance, 0.0, 1.0)
                 // Steady light/dark mode samples exactly one 4K source. Sampling
                 // both and mixing by a compile-time-unknown 0 or 1 doubled the
@@ -358,7 +422,7 @@ shader UiBatch {
             }
 
             // --- mode 1: glyph / icon coverage ---
-            if input.mode > 0.5 {
+            if input.shape.z > 0.5 {
                 let cov = sample(atlas, atlasSmp, input.local).x
                 let inkLuma = dot(Float3(input.fill.x, input.fill.y, input.fill.z), lumaWeights())
                 let shaped = pow(cov, inkCoverageGamma(inkLuma))
@@ -368,21 +432,26 @@ shader UiBatch {
             }
 
             // --- mode 0 / 0.25: SDF surface with an optional border ---
-            let d = surfaceDistance(input.local, input.hsize, input.radius, input.mode)
+            let d = surfaceDistance(input.local, input.hsize, input.shape.x, input.shape.z)
             let fillCov = clamp(0.5 - d, 0.0, 1.0)
-            if input.borderWidth > 0.0 {
+            if input.shape.y > 0.0 {
                 if input.border.w > 0.0 {
-                    let innerHalf = input.hsize - Float2(input.borderWidth, input.borderWidth)
-                    let di = surfaceDistance(input.local, innerHalf, max(input.radius - input.borderWidth, 0.0), input.mode)
+                    let innerHalf = input.hsize - Float2(input.shape.y, input.shape.y)
+                    let di = surfaceDistance(input.local, innerHalf, max(input.shape.x - input.shape.y, 0.0), input.shape.z)
                     let innerCov = clamp(0.5 - di, 0.0, 1.0)
                     let mixed = mix(Float3(input.border.x, input.border.y, input.border.z), Float3(input.fill.x, input.fill.y, input.fill.z), innerCov)
                     let mixedA = mix(input.border.w, input.fill.w, innerCov) * fillCov
-                    out.color = Float4(mixed.x * mixedA, mixed.y * mixedA, mixed.z * mixedA, mixedA)
+                    let litBordered = glowStrength(input, fillCov)
+                    out.color = Float4(mixed.x * mixedA + litBordered, mixed.y * mixedA + litBordered, mixed.z * mixedA + litBordered, min(mixedA + litBordered, 1.0))
                     return out
                 }
             }
             let plainA = input.fill.w * fillCov
-            out.color = Float4(input.fill.x * plainA, input.fill.y * plainA, input.fill.z * plainA, plainA)
+            // ADDED, not blended: the material lights from within under a
+            // finger, it is not a white sheet laid over it. Masked by the
+            // surface's own coverage so the light cannot spill past a corner.
+            let lit = glowStrength(input, fillCov)
+            out.color = Float4(input.fill.x * plainA + lit, input.fill.y * plainA + lit, input.fill.z * plainA + lit, min(plainA + lit, 1.0))
             return out
         }
     }

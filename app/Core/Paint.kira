@@ -1,5 +1,15 @@
 import KiraGraphics
 import Foundation
+
+// A collision-free spelling for hosts that also expose their own design-token
+// `Color`. Package imports are flat in Kira, so the distinct name is the type
+// boundary rather than a module qualifier.
+type FoundationColor = Color
+
+function foundationRgba(r: Float, g: Float, b: Float, a: Float) -> FoundationColor {
+    return Color { r: r g: g b: b a: a }
+}
+
 struct Glow {
     let color: Color = Color {
         r: 0.0
@@ -171,7 +181,12 @@ struct FoundationGlassMaterial {
     let edgeStrokeDarken: Float = 0.62
     let edgeStrokePeak: Float = 0.9
     let edgeStrokeFade: Float = 2.0
-    // The sheen along the upper rim — off for the same reason.
+    // The sheen along the upper rim — off, and measured to be off. Crossing the
+    // top edge of the reference menu the value drifts about sixteen levels over
+    // fifty pixels, monotonically, with no band: there is no specular line on
+    // this material. A sheen of 0.35 was tried here and adds eighty-nine levels,
+    // which is a white bar along the upper rim and down into both top corners,
+    // exactly where the normal still has an upward component.
     let sheenStrength: Float = 0.0
     // How far the lens bends what it samples, and how far in from the edge the
     // refraction curve reaches.
@@ -208,7 +223,17 @@ struct FoundationGlassMaterial {
     // reads 199 and the pixel behind it 228 over a white interior — a touch
     // under half a pixel of the same ink, which is what stops the edge ending
     // abruptly. Device pixels, like the border block above.
-    let innerRimStrength: Float = 0.0
+    //
+    // A DEFAULT, not zero. Every glass surface that named no material of its own
+    // — which is nearly all of them, including the ones in this package's own
+    // examples — drew no rim at all, and a rim is what stops the edge ending
+    // abruptly: without it the silhouette of whatever is behind the surface is
+    // sliced dead straight by its boundary, and the surface reads as a shape cut
+    // out of the backdrop rather than as a thickness laid over it.
+    //
+    // The value is the one the paragraph above measures: 199 against 228 behind
+    // it is a touch under half the same ink.
+    let innerRimStrength: Float = 0.48
     let innerRimWidth: Float = 2.0
     // The wash, as the platform writes it: two fills, each with its own colour,
     // opacity and blend mode (app/Core/Materials.kira). The LOWER layer's colour
@@ -255,6 +280,67 @@ function foundationGlassMaterialWithTint(
         washUpperB: stack.upper.color.b
         washUpperAlpha: stack.upper.alpha
         washUpperBlend: foundationBlendId(stack.upper.blend)
+    }
+}
+
+// A material with its rim taken OFF, for a surface that asked for no edge
+// lighting.
+//
+// The rim now lives in `FoundationGlassMaterial`'s defaults, which is where it
+// belongs: a surface that names no material still has an edge. `edgeRefraction`
+// scales the stroke and the sheen in the shader but never touched the inner rim,
+// so `edgeLighting: false` could not remove it — this is what does.
+function foundationGlassMaterialEdgeLit(
+    base: borrow FoundationGlassMaterial,
+    enabled: Bool,
+) -> FoundationGlassMaterial {
+    if enabled {
+        return FoundationGlassMaterial {
+            edgeStrokeStrength: base.edgeStrokeStrength
+            edgeStrokeDarken: base.edgeStrokeDarken
+            edgeStrokePeak: base.edgeStrokePeak
+            edgeStrokeFade: base.edgeStrokeFade
+            sheenStrength: base.sheenStrength
+            lensMaxBend: base.lensMaxBend
+            refractionReach: base.refractionReach
+            blurNearSplit: base.blurNearSplit
+            borderSpread: base.borderSpread
+            borderSideOffset: base.borderSideOffset
+            borderSideSpread: base.borderSideSpread
+            borderGrey: base.borderGrey
+            borderSideGrey: base.borderSideGrey
+            innerRimStrength: base.innerRimStrength
+            innerRimWidth: base.innerRimWidth
+            washBlend: base.washBlend
+            washUpperR: base.washUpperR
+            washUpperG: base.washUpperG
+            washUpperB: base.washUpperB
+            washUpperAlpha: base.washUpperAlpha
+            washUpperBlend: base.washUpperBlend
+        }
+    }
+    return FoundationGlassMaterial {
+        edgeStrokeStrength: base.edgeStrokeStrength
+        edgeStrokeDarken: base.edgeStrokeDarken
+        edgeStrokePeak: base.edgeStrokePeak
+        edgeStrokeFade: base.edgeStrokeFade
+        sheenStrength: 0.0
+        lensMaxBend: base.lensMaxBend
+        refractionReach: base.refractionReach
+        blurNearSplit: base.blurNearSplit
+        borderSpread: base.borderSpread
+        borderSideOffset: base.borderSideOffset
+        borderSideSpread: base.borderSideSpread
+        borderGrey: base.borderGrey
+        borderSideGrey: base.borderSideGrey
+        innerRimStrength: 0.0
+        innerRimWidth: base.innerRimWidth
+        washBlend: base.washBlend
+        washUpperR: base.washUpperR
+        washUpperG: base.washUpperG
+        washUpperB: base.washUpperB
+        washUpperAlpha: base.washUpperAlpha
+        washUpperBlend: base.washUpperBlend
     }
 }
 

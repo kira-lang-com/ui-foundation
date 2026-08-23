@@ -88,6 +88,19 @@ type UiQuad {
     let gradientB: Float
     let gradientA: Float
     let gradientAxis: Float
+    // The morph block: the SECOND shape this surface fuses with, in the quad's
+    // own local space, and the smooth minimum's reach in points. `UiGlassFull`
+    // is the only shader that reads it — every other one declares it because a
+    // storage pull reads by the record's STRIDE, and a shader that stops six
+    // fields short reads the next quad from the wrong offset.
+    let morphX: Float
+    let morphY: Float
+    let morphHalfW: Float
+    let morphHalfH: Float
+    let morphRadius: Float
+    let morphBlend: Float
+    // 0 circular, 1 the continuous superellipse a squircle is.
+    let shapeKind: Float
 }
 
 type VertexIn {
@@ -106,6 +119,10 @@ type VertexOut {
     let fill: Float4
     let border: Float4
     let clip: Float4
+    // The touch highlight: where it is centred in this quad's own space, and
+    // how strongly it burns. Zero strength is no highlight and costs the
+    // fragment one comparison.
+    let glow: Float3
 }
 
 type FragmentOut {
@@ -119,6 +136,43 @@ function sdRound(point: Float2, halfSize: Float2, radius: Float) -> Float {
     )
     let outside = Float2(max(q.x, 0.0), max(q.y, 0.0))
     return min(max(q.x, q.y), 0.0) + length(outside)
+}
+
+// How strongly the touch highlight lights a point `distance` from its centre.
+//
+// Two halves, matching `motionGlowFalloff` on the Kira side exactly. The inner
+// half runs straight from full strength down to half; the outer half eases the
+// remaining half away to nothing, so the light meets the material on a curve
+// and leaves no ring where the two touch.
+//
+// The radius is fixed here rather than carried per quad because the highlight
+// is the size of a fingertip's influence and not of what was touched. It is
+// pinned to `motionGlowDiameter()` by `MotionGlowRadiusMatchesTheShader`; the
+// two must move together.
+function glowFalloff(distance: Float) -> Float {
+    let r = distance / 150.0
+    if r >= 1.0 {
+        return 0.0
+    }
+    if r <= 0.5 {
+        return 1.0 - r
+    }
+    let t = (r - 0.5) * 2.0
+    if t < 0.5 {
+        return 0.5 * (1.0 - 4.0 * t * t * t)
+    }
+    let inv = 2.0 - 2.0 * t
+    return 0.5 * (inv * inv * inv * 0.5)
+}
+
+// The highlight's contribution at this fragment, already masked by the
+// surface's own coverage so it cannot spill past a rounded corner.
+function glowAt(input: VertexOut, coverage: Float) -> Float {
+    if input.glow.z <= 0.0 {
+        return 0.0
+    }
+    let offset = Float2(input.local.x - input.glow.x, input.local.y - input.glow.y)
+    return input.glow.z * glowFalloff(length(offset)) * coverage
 }
 
 shader UiRect {
@@ -166,6 +220,7 @@ shader UiRect {
             )
             out.border = Float4(v.borderR, v.borderG, v.borderB, v.borderA)
             out.clip = Float4(v.clipMinX, v.clipMinY, v.clipMaxX, v.clipMaxY)
+            out.glow = Float3(v.materialSpare0, v.materialSpare1, v.materialSpare2)
             return out
         }
     }
@@ -204,12 +259,18 @@ shader UiRect {
                     let inner = clamp(0.5 - di, 0.0, 1.0)
                     let rgb = mix(input.border.xyz, input.fill.xyz, inner)
                     let a = mix(input.border.w, input.fill.w, inner) * fillCov
-                    result.color = Float4(rgb.x * a, rgb.y * a, rgb.z * a, a)
+                    let litB = glowAt(input, fillCov)
+                    result.color = Float4(rgb.x * a + litB, rgb.y * a + litB, rgb.z * a + litB, min(a + litB, 1.0))
                     return result
                 }
             }
             let a = input.fill.w * fillCov
-            result.color = Float4(input.fill.x * a, input.fill.y * a, input.fill.z * a, a)
+            let lit = glowAt(input, fillCov)
+            // Added rather than blended: this is the material lighting from
+            // within, not a white layer laid over it. The coverage mask is what
+            // keeps the light inside the rounded corners instead of showing the
+            // quad it is carried on.
+            result.color = Float4(input.fill.x * a + lit, input.fill.y * a + lit, input.fill.z * a + lit, min(a + lit, 1.0))
             return result
         }
     }

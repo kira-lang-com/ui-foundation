@@ -1,0 +1,9 @@
+Package liquid_glass_press {
+    let version = "0.1.0"
+    let kira = "0.1.0"
+    let kind = PackageKind.App
+    let defaults = Defaults { executionMode: Backend.Llvm, buildTarget: BuildTarget.Host }
+    let dependencies = [
+        Dependency { name: "KiraUIFoundation", path: "../.." }
+    ]
+}
