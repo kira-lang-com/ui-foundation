@@ -9,7 +9,7 @@ import Foundation
 // 700 lines is the hard ceiling for every `.kira` and `.ksl` file. The number
 // is written here rather than left to the runner's default so it is the same
 // one this repo's AGENTS.md states, in the file that enforces it.
-Lint FileLength {
+construct FileLength() extends Lint {
     let code: String = "KLINT003"
     let severity: String = "warning"
     let enabled: Bool = true
@@ -19,7 +19,7 @@ Lint FileLength {
 // A variant written with the type it already belongs to. Kira resolves a
 // leading dot against the expected type, and `x == .Red` compiles to a tag
 // compare with no throwaway enum, so the qualified spelling does more work.
-Lint QualifiedVariant {
+construct QualifiedVariant() extends Lint {
     let code: String = "KLINT001"
     let severity: String = "warning"
     let enabled: Bool = true
@@ -27,7 +27,7 @@ Lint QualifiedVariant {
 
 // A `while` counting an index by hand, where a `for` does it for you. Reported
 // only when the rewrite is safe, and it carries the fix.
-Lint ManualIndexLoop {
+construct ManualIndexLoop() extends Lint {
     let code: String = "KLINT002"
     let severity: String = "warning"
     let enabled: Bool = true
