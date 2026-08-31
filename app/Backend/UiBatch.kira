@@ -60,7 +60,7 @@ class UiBatch {
 // the vertex stage picks per corner. Eighteen shared floats used to be written
 // once per vertex, so a quad cost 192 floats where it now costs 54 — 30 for
 // everything but liquid glass, which is every glyph on screen.
-function quadFloatCount() -> Int { return 66 }
+function quadFloatCount() -> Int { return 68 }
 // Where the material block starts inside a record.
 function quadMaterialOffset() -> Int { return 30 }
 function quadVertexCount() -> Int { return 4 }
@@ -429,9 +429,15 @@ extend UiBatch {
         if drawableH <= 0 {
             state.drawableH = 1
         }
-        // Interior cache: keys are matched by push order, so the cursor restarts
-        // with the frame; ranges list this frame's dirty interiors only.
+        // Interior cache: entries are matched by content and claimed at most
+        // once each, so the claims are what restarts with the frame. Ranges list
+        // this frame's dirty interiors only.
         state.glassSurfaceCursor = 0
+        var claimSlot = 0
+        while claimSlot < state.glassCacheClaimed.count {
+            state.glassCacheClaimed[claimSlot] = 0
+            claimSlot = claimSlot + 1
+        }
         state.glassCacheRangeCount = 0
         uiGlassStatsResetEmission(state)
         return

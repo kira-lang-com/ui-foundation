@@ -137,10 +137,8 @@ function foundationRenderView(
                     // is two shapes drawn over each other.
                     view.shape == .Squircle ? 1.0 : 0.0,
                 )
-                var effectIndex = 0
-                while effectIndex < view.effects.count {
+                for effectIndex in 0..view.effects.count {
                     current.applyBackdropEffect(frame, view.effects[effectIndex])
-                    effectIndex = effectIndex + 1
                 }
             }
 
@@ -209,7 +207,7 @@ function foundationRenderView(
         }
         Icon -> {
             let frame = foundationDeformRect(layoutFrame(tree, nodeIndex), deform)
-            current.drawIconFields(frame, view.content, view.color, view.weightGrowth)
+            current.drawIconFields(frame, view.content, view.color, view.weightGrowth, view.rotation)
             return 1
         }
         Row -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);

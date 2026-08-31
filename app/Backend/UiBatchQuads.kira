@@ -39,6 +39,11 @@ extend UiBatch {
         // 0 for a circular rounded rectangle, 1 for a squircle's continuous
         // superellipse corner.
         shapeKind: Float = 0.0,
+        // The quad turned about its own centre, as cosine and sine. See
+        // `writeQuadRotation`; (1, 0) is a quad that is not turned, which is
+        // almost all of them.
+        rotCos: Float = 1.0,
+        rotSin: Float = 0.0,
     ) {
         var state = nativeRecover<UiBatchState>(self.storage)
         if state.quadCount >= maxQuadsPerBatch() {
@@ -125,6 +130,7 @@ extend UiBatch {
         // whatever quad held this slot last.
         writeQuadMorph(contents, U64(base), morphX, morphY, morphHalfW, morphHalfH, morphRadius, morphBlend)
         writeQuadShapeKind(contents, U64(base), shapeKind)
+        writeQuadRotation(contents, U64(base), rotCos, rotSin)
         if writesMaterial {
             writeQuadMaterial(
                 contents, U64(base),
@@ -197,14 +203,6 @@ extend UiBatch {
         if fill.a <= 0.0 && gradient.a <= 0.0 && (border.a <= 0.0 || borderWidth <= 0.0) && glowStrength <= 0.0 {
             return
         }
-        if h < 2.0 {
-            print(717171)
-            print(Int(x))
-            print(Int(y))
-            print(Int(w))
-            print(Int(h))
-            print(Int(fill.a * 1000.0))
-        }
         let pad = 1.0
         let halfW = w / 2.0
         let halfH = h / 2.0
@@ -254,13 +252,11 @@ function externalCacheEnsure(state: borrow mut UiBatchState, graphics: borrow Gr
     if textureId <= 0 {
         return
     }
-    var index = 0
-    while index < state.externalCacheIds.count {
+        for index in 0..state.externalCacheIds.count {
         if state.externalCacheIds[index] == textureId {
             return
         }
-        index = index + 1
-    }
+            }
     let texture = sampledTextureFromViewId(U32(textureId))
     let group = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-external-cached"), "external cache group")
     glassAddSharpBackdrop(graphics, group, texture, texture, state.sampler, state.backdropBlend)
@@ -270,14 +266,13 @@ function externalCacheEnsure(state: borrow mut UiBatchState, graphics: borrow Gr
 }
 
 function externalCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
-    var index = 0
-    while index < state.externalCacheIds.count {
+        for index in 0..state.externalCacheIds.count {
         if state.externalCacheIds[index] == textureId {
             return state.externalCacheGroups[index]
         }
-        index = index + 1
-    }
-    return emptyBindGroup()
+            }
+    // The miss case is read only through `.id != 0`, so it carries no box.
+    return unboundBindGroup()
 }
 
 // The group a crossfading quad reads its TARGET through.
@@ -291,13 +286,11 @@ function secondaryCacheEnsure(state: borrow mut UiBatchState, graphics: borrow G
     if textureId <= 0 {
         return
     }
-    var index = 0
-    while index < state.secondaryCacheIds.count {
+        for index in 0..state.secondaryCacheIds.count {
         if state.secondaryCacheIds[index] == textureId {
             return
         }
-        index = index + 1
-    }
+            }
     let texture = sampledTextureFromViewId(U32(textureId))
     let group = bindGroupOrReport(graphics.beginBindGroup("kira-ui-batch-secondary-cached"), "secondary cache group")
     graphics.bindGroupAddTexture(group, backdropTextureSlot(), texture)
@@ -310,14 +303,13 @@ function secondaryCacheEnsure(state: borrow mut UiBatchState, graphics: borrow G
 }
 
 function secondaryCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
-    var index = 0
-    while index < state.secondaryCacheIds.count {
+        for index in 0..state.secondaryCacheIds.count {
         if state.secondaryCacheIds[index] == textureId {
             return state.secondaryCacheGroups[index]
         }
-        index = index + 1
-    }
-    return emptyBindGroup()
+            }
+    // The miss case is read only through `.id != 0`, so it carries no box.
+    return unboundBindGroup()
 }
 
 // The texture a given quad crossfades towards, or 0 for one that does not.
@@ -371,7 +363,10 @@ extend UiBatch {
         if !secondaryMatches && state.secondaryExternalBindReady {
             graphics.destroyBindGroup(state.secondaryExternalGroup)
             state.secondaryExternalTextureId = 0
-            state.secondaryExternalGroup = emptyBindGroup()
+            // Unbound, not empty: nothing rebinds through this slot until a
+            // real group replaces it, and an empty group's state box would be
+            // orphaned by that replacement.
+            state.secondaryExternalGroup = unboundBindGroup()
             state.secondaryExternalBindReady = false
         }
         if secondaryTextureId > 0 && !secondaryMatches {

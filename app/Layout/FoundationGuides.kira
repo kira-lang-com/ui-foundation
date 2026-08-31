@@ -29,14 +29,12 @@ struct FoundationGuideScope {
 
 function foundationGuideScopePut(scope: borrow mut FoundationGuideScope, tag: Int, value: Float) {
     var out = scope
-    var index = 0
-    while index < out.tags.count {
+        for index in 0..out.tags.count {
         if out.tags[index] == tag {
             out.values[index] = value
             return
         }
-        index = index + 1
-    }
+            }
     out.tags.append(tag)
     out.values.append(value)
     return
@@ -44,13 +42,11 @@ function foundationGuideScopePut(scope: borrow mut FoundationGuideScope, tag: In
 
 // The answer for `tag`, or `fallback` when nothing published one.
 function foundationGuideScopeValue(scope: borrow FoundationGuideScope, tag: Int, fallback: Float) -> Float {
-    var index = 0
-    while index < scope.tags.count {
+        for index in 0..scope.tags.count {
         if scope.tags[index] == tag {
             return scope.values[index]
         }
-        index = index + 1
-    }
+            }
     return fallback
 }
 
@@ -76,15 +72,13 @@ function foundationResolveGuidesIn(
     // What this view publishes is measured against its own resolved size, then
     // carried in the root's coordinates so anything enclosing it can use the
     // answer without knowing where the publisher sits.
-    var published = 0
-    while published < view.guides.count {
+        for published in 0..view.guides.count {
         let publication = view.guides[published]
         if publication.tag != 0 {
             let resolve = publication.resolve
             foundationGuideScopePut(visible, publication.tag, frame.x + resolve(frame.width, frame.height))
         }
-        published = published + 1
-    }
+            }
 
     // What it reads. A guide names an absolute position, so the leading edge
     // moves to it and the width closes the difference; a missing answer leaves
@@ -103,10 +97,8 @@ function foundationResolveGuidesIn(
     // Children are walked in order and share ONE scope, which is what makes a
     // publication apply to the siblings after it and not to the ones before.
     let firstChild = t.nodes[nodeIndex].firstChild
-    var childOffset = 0
-    while childOffset < view.children.count {
+        for childOffset in 0..view.children.count {
         foundationResolveGuidesIn(view.children[childOffset], t, firstChild + childOffset, visible)
-        childOffset = childOffset + 1
-    }
+            }
     return
 }

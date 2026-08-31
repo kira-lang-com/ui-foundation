@@ -467,6 +467,7 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
     }
     state.glassCacheKeys = cacheKeySeed
     state.glassCacheKeySet = zeroedInts(glassCacheMaxSurfaces())
+    state.glassCacheClaimed = zeroedInts(glassCacheMaxSurfaces())
     state.glyphHashKeys = zeroedInts(glyphCacheCapacity())
     state.glyphHashVals = zeroedInts(glyphCacheCapacity())
 

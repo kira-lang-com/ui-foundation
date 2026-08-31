@@ -23,6 +23,9 @@ extend UiBatch {
         // outward growth. It is the symbol's weight, and it is part of the atlas
         // key: the same folder at two weights is two different pictures.
         weightGrowth: Float = 0.0,
+        // Turned about its own centre, as cosine and sine.
+        rotCos: Float = 1.0,
+        rotSin: Float = 0.0,
     ) {
         var state = nativeRecover<UiBatchState>(self.storage)
         var scale = state.scale
@@ -186,7 +189,8 @@ extend UiBatch {
                         0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                         color.r, color.g, color.b, color.a,
                         0.0, 0.0, 0.0, 0.0,
-                        clipMinX, clipMinY, clipMaxX, clipMaxY
+                        clipMinX, clipMinY, clipMaxX, clipMaxY,
+                        rotCos, rotSin
                     )
                     state.quadCount = state.quadCount + 1
                 }

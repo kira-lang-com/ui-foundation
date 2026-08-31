@@ -127,5 +127,22 @@ function foundationDeformLength(length: Float, deform: borrow FoundationDeform) 
 // resolves.
 function foundationDeformTextScale(deform: borrow FoundationDeform) -> Float {
     let uniform = sqrt(max(deform.scaleX * deform.scaleY, 0.0001))
-    return round(uniform * 4.0) / 4.0
+    // Quantised so a run being scaled does not ask the glyph atlas for a new
+    // entry on every frame of a transition — but THIRTY-SECONDS, not quarters.
+    //
+    // Quarters were chosen against the press squash, where the scale is a couple
+    // of percent and rounds to 1.0: the text simply does not scale, and at that
+    // size nobody can tell. Anything that scales a subtree by a real amount is a
+    // different matter. A menu receding to 0.90 rounded to 1.0, so the card was
+    // drawn at nine tenths with its type at full size — the gap between the
+    // card's edge and its first line measured 12 pixels where a uniform scale
+    // wants 16, and every row inside it sat wrong by a growing margin. That is
+    // not a slightly-off transform, it is the layout visibly coming apart, and
+    // it is the same for any caller of `.scaleEffect`.
+    //
+    // A thirty-second step holds the error under one percent — below a pixel for
+    // any type this draws — and the atlas is keyed by the rasterized PIXEL size,
+    // which rounds to whole pixels anyway, so most neighbouring steps share an
+    // entry rather than adding one.
+    return round(uniform * 32.0) / 32.0
 }

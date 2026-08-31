@@ -145,6 +145,9 @@ struct UiBatchState {
     // shape proven to persist across frames in native state.
     var glassCacheKeys: [GlassSurfaceKey] = []
     var glassCacheKeySet: [Int] = []
+    // Which slots this frame has already handed out, so two surfaces cannot
+    // settle on the same cached interior.
+    var glassCacheClaimed: [Int] = []
     var glassCacheEpochValue: Int = 0
     // Backdrop key at the last cache render vs. this frame: a mismatch means
     // the cached interiors were shaded against a different backdrop, and every

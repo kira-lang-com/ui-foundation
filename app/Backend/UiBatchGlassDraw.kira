@@ -106,7 +106,9 @@ function glassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borr
     }
     if state.glassCacheGroup.id != 0 {
         glassDestroyBindGroup(graphics, state.glassCacheGroup)
-        state.glassCacheGroup = emptyBindGroup()
+        // Unbound, not empty: the slot is rebuilt below or left unread, and an
+        // empty group's state box would be orphaned by that rebuild.
+        state.glassCacheGroup = unboundBindGroup()
     }
     if state.glassCacheTexture.id != 0 {
         glassDestroyTexture(graphics, state.glassCacheTexture)

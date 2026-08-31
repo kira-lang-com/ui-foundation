@@ -1,0 +1,98 @@
+import Foundation
+import KiraLayout
+import KiraGraphics
+
+// Where a keyed view actually landed.
+//
+// Layout is the only thing that knows. A widget is built BEFORE the pass that
+// places it, so nothing it can compute at build time is its own rectangle — and
+// the whole family of effects that need one (a popover anchored to its button, a
+// drawer that reveals its natural height, an element that animates from where it
+// was to where it now is) had no way to ask.
+//
+// The answers are recorded once per frame, straight after layout, and read on
+// the NEXT frame's build. That one frame of lag is not a compromise; it is what
+// the question is. "Where is this" can only ever mean "where did this last come
+// out", because the frame being built has not been placed yet.
+//
+// Only KEYED nodes are recorded. A key is what gives a view identity across
+// rebuilds — the retained tree reconciles by it and hit regions are found by it
+// — so it is exactly the set of views it is meaningful to ask about, and the
+// walk skips the great majority of the tree that carries none.
+
+struct FoundationGeometryRecord {
+    let key: Int = 0
+    let bounds: Rect
+}
+
+struct FoundationGeometrySink {
+    var records: [FoundationGeometryRecord] = []
+}
+
+function foundationGeometrySlotKey() -> String {
+    return "foundation.geometry"
+}
+
+function foundationGeometrySinkEnsure() {
+    if stateSlotHas(foundationGeometrySlotKey()) == false {
+        stateSlotPut(foundationGeometrySlotKey(), nativeUserData(nativeState(FoundationGeometrySink {})))
+    }
+    return
+}
+
+// Record where every keyed view in this tree came out.
+//
+// Called by the runner once the layout pass has placed everything and before
+// anything is drawn from it, so what it stores is this frame's geometry exactly
+// as the renderer is about to use it.
+function foundationRecordGeometry(root: borrow FoundationView, tree: borrow LayoutTree) {
+    foundationGeometrySinkEnsure()
+    var sink = nativeRecover<FoundationGeometrySink>(stateSlotGet(foundationGeometrySlotKey()))
+    var fresh: [FoundationGeometryRecord] = []
+    foundationCollectGeometry(root, tree, 0, fresh)
+    sink.records = move fresh
+    return
+}
+
+function foundationCollectGeometry(
+    view: borrow FoundationView,
+    tree: borrow LayoutTree,
+    nodeIndex: Int,
+    into: borrow mut [FoundationGeometryRecord],
+) {
+    if view.key != 0 {
+        into.append(FoundationGeometryRecord {
+            key: view.key
+            bounds: layoutFrame(tree, nodeIndex)
+        })
+    }
+    let firstChild = tree.nodes[nodeIndex].firstChild
+    for childOffset in 0..view.children.count {
+        foundationCollectGeometry(view.children[childOffset], tree, firstChild + childOffset, into)
+    }
+    return
+}
+
+// Where the view with this key came out last frame, or a zero rectangle if it
+// carried no key, was not in the tree, or has not been laid out yet.
+//
+// A zero WIDTH is the "no answer" signal rather than a separate flag: a view
+// that was not placed has no extent, and every caller has to handle the first
+// frame of a view's life anyway, when there genuinely is no previous rectangle.
+function foundationGeometryFor(key: Int) -> Rect {
+    if stateSlotHas(foundationGeometrySlotKey()) == false {
+        return Rect {}
+    }
+    let sink = nativeRecover<FoundationGeometrySink>(stateSlotGet(foundationGeometrySlotKey()))
+    for index in 0..sink.records.count {
+        if sink.records[index].key == key {
+            return sink.records[index].bounds
+        }
+    }
+    return Rect {}
+}
+
+// Whether this key was placed last frame at all.
+function foundationGeometryKnown(key: Int) -> Bool {
+    return foundationGeometryFor(key).width > 0.0
+}

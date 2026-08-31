@@ -374,9 +374,11 @@ class KiraGraphicsFoundationBackend {
         return
     }
 
-    function drawIconFields(bounds: borrow Rect, svg: borrow String, color: borrow Color, weightGrowth: Float = 0.0) {
+    function drawIconFields(bounds: borrow Rect, svg: borrow String, color: borrow Color, weightGrowth: Float = 0.0, rotation: Float = 0.0) {
         self.drewVisibleUi = true
-        self.batch.pushIcon(self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, weightGrowth)
+        // The angle is resolved to its cosine and sine once here, per icon,
+        // rather than per vertex in the shader.
+        self.batch.pushIcon(self.graphics, svg, bounds.x, bounds.y, bounds.width, bounds.height, color, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, weightGrowth, cos(rotation), sin(rotation))
         return
     }
 

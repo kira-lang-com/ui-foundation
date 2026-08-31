@@ -129,6 +129,13 @@ type UiQuad {
     let morphBlend: Float
     // 0 circular, 1 the continuous superellipse a squircle is.
     let shapeKind: Float
+    // The quad turned about its own centre, as cosine and sine — see
+    // `writeQuadRotation`. Only `UiBatch` acts on it; every other shader
+    // declares it because a storage pull reads by the record's STRIDE, and a
+    // shader that stops two fields short reads the next quad from the wrong
+    // offset.
+    let rotCos: Float
+    let rotSin: Float
 }
 
 type VertexIn {
@@ -288,14 +295,53 @@ shader UiBatch {
             let right = Float((corner + UInt(1)) % UInt(4) / UInt(2))
             let bottom = Float(corner / UInt(2))
             let out: VertexOut
-            out.clip_position = Float4(
-                mix(v.posX0, v.posX1, right),
-                mix(v.posY0, v.posY1, bottom),
-                0.0,
-                1.0,
-            )
+            let clipX = mix(v.posX0, v.posX1, right)
+            let clipY = mix(v.posY0, v.posY1, bottom)
+            let pxX = mix(v.pxX0, v.pxX1, right)
+            let pxY = mix(v.pxY0, v.pxY1, bottom)
+
+            // Turned about its own centre.
+            //
+            // The rotation happens in PIXELS and is carried back into clip space
+            // through this quad's own scale, because clip space is not square:
+            // rotating the clip offset directly shears the quad by the viewport's
+            // aspect, which is a chevron that turns into a lozenge on its way
+            // round. The record already holds both extremes in both spaces, so
+            // the scale is a division rather than anything the host has to send.
+            //
+            // Branched on the identity rather than multiplied through it: an
+            // unturned quad is almost every quad, and this way it emits the
+            // number the host wrote instead of one that has been through four
+            // multiplies and rounds a unit in the last place away from it.
+            if v.rotSin != 0.0 || v.rotCos != 1.0 {
+                let pxCx = (v.pxX0 + v.pxX1) * 0.5
+                let pxCy = (v.pxY0 + v.pxY1) * 0.5
+                let dx = pxX - pxCx
+                let dy = pxY - pxCy
+                let rx = dx * v.rotCos - dy * v.rotSin
+                let ry = dx * v.rotSin + dy * v.rotCos
+                let spanX = v.pxX1 - v.pxX0
+                let spanY = v.pxY1 - v.pxY0
+                // A quad with no extent on an axis has no scale to recover on it,
+                // and nothing to rotate either.
+                if spanX != 0.0 && spanY != 0.0 {
+                    let scaleX = (v.posX1 - v.posX0) / spanX
+                    let scaleY = (v.posY1 - v.posY0) / spanY
+                    clipX = (v.posX0 + v.posX1) * 0.5 + rx * scaleX
+                    clipY = (v.posY0 + v.posY1) * 0.5 + ry * scaleY
+                    pxX = pxCx + rx
+                    pxY = pxCy + ry
+                }
+            }
+
+            out.clip_position = Float4(clipX, clipY, 0.0, 1.0)
+            // `local` is NOT turned. For a glyph it is the atlas uv, and a uv that
+            // turned with the quad would sample a rotated window of the atlas and
+            // leave the glyph upright; for a surface it is the offset the SDF is
+            // evaluated at, and leaving it be is what carries the shape round with
+            // the quad rather than spinning a hole inside a fixed one.
             out.local = Float2(mix(v.localX0, v.localX1, right), mix(v.localY0, v.localY1, bottom))
-            out.px = Float2(mix(v.pxX0, v.pxX1, right), mix(v.pxY0, v.pxY1, bottom))
+            out.px = Float2(pxX, pxY)
             out.hsize = Float2(v.halfW, v.halfH)
             out.shape = Float4(v.radius, v.borderWidth, v.mode, v.edgeRefraction)
             // The corner's own fill: the near colour, or its mix with the far

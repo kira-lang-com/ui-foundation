@@ -155,6 +155,12 @@ struct FoundationView {
     let material: FoundationMaterial = .Flat
     let effects: [FoundationEffect] = []
     let clipContent: Bool = false
+    // This view exists to PAINT, not to size: it wraps content it draws behind
+    // (a background, an overlay) and takes that content's size. Layout treats it
+    // like any other frame; the flag is read by the layer that builds these
+    // views, so a size stated AFTER a background reaches the content rather than
+    // stopping at the wrapper the background put around it.
+    let sizingProxy: Bool = false
     let content: String = ""
     let color: Color = Color {
         r: 0.08
@@ -239,6 +245,14 @@ struct FoundationView {
     // shapes that should read as one body — `motionMetaballBlend()`.
     let morph: MotionShape = MotionShape {}
     let morphBlend: Float = 0.0
+    // How far this view is turned about its own centre, in RADIANS.
+    //
+    // Drawing state, like the deformation above: the view occupies the box
+    // layout gave it whatever angle it is drawn at, so a turning chevron cannot
+    // reflow the row it is in. That is also what makes it safe to animate — an
+    // angle that changed the layout would re-resolve the tree every frame of the
+    // turn.
+    let rotation: Float = 0.0
     let scrolls: Bool = false
     // Whether a wheel turn over this region belongs to it. A row inside a list
     // is under the pointer too, and the list is what a wheel over the row

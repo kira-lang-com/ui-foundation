@@ -67,21 +67,62 @@ struct GlassSurfaceKey {
 // Records the key either way: a miss is what the next frame compares against.
 // The comparison is `eq_GlassSurfaceKey`, generated from the declaration, so a
 // field added above is compared without this function changing.
+// Whether this surface's interior is already in the cache, unchanged.
+//
+// Matched by CONTENT, not by the order surfaces are pushed in.
+//
+// A slot handed out by a per-frame cursor makes a surface's identity its
+// position in the frame's list of glass surfaces — so the moment one appears or
+// goes, every surface after it shifts a slot and is compared against a DIFFERENT
+// surface's key. The comparison then answers about the wrong surface: a stale
+// interior is presented over one that has moved, and a surface that did not
+// change is re-rendered. What that looks like is a panel flashing to another
+// panel's interior on the frames where the count changes, which is every frame
+// of anything opening or closing.
+//
+// The key already holds everything that decides the interior's pixels — where
+// the surface is, how big, its tint, its wash, its light. Two surfaces with the
+// same key have the same interior by definition, so content IS identity here and
+// the scan needs nothing the key does not already carry.
 function glassCacheKeyMatch(state: borrow mut UiBatchState, fresh: borrow GlassSurfaceKey) -> Bool {
-    let slot = state.glassSurfaceCursor
-    state.glassSurfaceCursor = state.glassSurfaceCursor + 1
-    if slot >= glassCacheMaxSurfaces() {
+    var slot = 0
+    var hit = -1
+    var free = -1
+    while slot < glassCacheMaxSurfaces() && slot < state.glassCacheKeySet.count {
+        if state.glassCacheClaimed[slot] == 0 {
+            if state.glassCacheKeySet[slot] != 0 && eq_GlassSurfaceKey(state.glassCacheKeys[slot], fresh) {
+                hit = slot
+                slot = glassCacheMaxSurfaces()
+            } else if free < 0 {
+                free = slot
+            }
+        }
+        slot = slot + 1
+    }
+    if hit >= 0 {
+        state.glassCacheClaimed[hit] = 1
+        if state.probeGlassLayers {
+            print(686868)
+            print(hit)
+            print(1)
+        }
+        return true
+    }
+    // Not cached. Take an unclaimed slot and record what is about to be drawn
+    // into it; with none left the surface simply renders every frame, which is
+    // correct and merely slower.
+    if free < 0 {
         return false
     }
-    let same = state.glassCacheKeySet[slot] != 0 && eq_GlassSurfaceKey(state.glassCacheKeys[slot], fresh)
-    state.glassCacheKeys[slot] = clone_GlassSurfaceKey(fresh)
-    state.glassCacheKeySet[slot] = 1
+    state.glassCacheKeys[free] = clone_GlassSurfaceKey(fresh)
+    state.glassCacheKeySet[free] = 1
+    state.glassCacheClaimed[free] = 1
     if state.probeGlassLayers {
         print(686868)
-        print(slot)
-        if same { print(1) } else { print(0) }
+        print(free)
+        print(0)
     }
-    return same
+    return false
 }
 
 // Remember a dirty surface's interior quads so the cache pass re-renders them.

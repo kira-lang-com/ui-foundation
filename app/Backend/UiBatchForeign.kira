@@ -63,8 +63,16 @@ function writeQuadRecord(
     fr: Float, fg: Float, fb: Float, fa: Float,
     br: Float, bg: Float, bb: Float, ba: Float,
     clipMinX: Float, clipMinY: Float, clipMaxX: Float, clipMaxY: Float,
+    // The quad turned about its own centre. Written HERE, with the identity as
+    // its default, rather than left to the callers that want it: the buffer is
+    // reused frame to frame, so a field a path forgets is not zero — it is
+    // whatever quad occupied that slot last, and a glyph inherits the angle of
+    // something else that has since gone.
+    rotCos: Float = 1.0,
+    rotSin: Float = 0.0,
 ) {
     let bytes = baseFloats * U64(4)
+    writeQuadRotation(ptr, baseFloats, rotCos, rotSin)
     writeF32(ptr, bytes, px0 / vw * 2.0 - 1.0)
     writeF32(ptr, bytes + U64(4), 1.0 - py0 / vh * 2.0)
     writeF32(ptr, bytes + U64(8), px1 / vw * 2.0 - 1.0)
@@ -377,5 +385,20 @@ function writeQuadMorph(
 // room left in it for what SHAPE the surface is.
 function writeQuadShapeKind(ptr: RawPtr, baseFloats: U64, kind: Float) {
     writeF32(ptr, (baseFloats + U64(65)) * U64(4), kind)
+    return
+}
+
+// How far the quad is turned about its own centre, as the COSINE and SINE of the
+// angle rather than the angle.
+//
+// Resolved on the host because it is one value per quad and would otherwise be
+// two transcendentals per vertex — four times the work for the same number. It
+// also keeps the vertex stage free of a maths library it otherwise never needs.
+//
+// The identity is (1, 0), which is what every quad that is not turned carries,
+// and the rotation below reduces to exactly the unrotated corner for it.
+function writeQuadRotation(ptr: RawPtr, baseFloats: U64, cosine: Float, sine: Float) {
+    writeF32(ptr, (baseFloats + U64(66)) * U64(4), cosine)
+    writeF32(ptr, (baseFloats + U64(67)) * U64(4), sine)
     return
 }

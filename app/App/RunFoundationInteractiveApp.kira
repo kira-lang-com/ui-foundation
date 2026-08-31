@@ -92,10 +92,10 @@ function RunFoundationInteractiveApp(
         windowMode: windowMode
         transparent: transparent
         opacity: opacity
-        // Platform-aware default: Metal on Apple hosts, Sokol everywhere else
-        // (including Web/WASM, where the host-platform probe honestly reports
-        // Unknown and Sokol/WebGPU is the only backend). The per-frame path
-        // already dispatches on the frame's own backend.
+        // Platform-aware default: Metal on Apple hosts, Dawn on some platforms
+        // and Sokol on everything else (including Web/WASM, where the host-platform
+        // probe honestly reports Unknown and Sokol/WebGPU is the only backend).
+        // The per-frame path already dispatches on the frame's own backend.
         backend: graphicsDefaultBackend()
         harness: harness
         windowDragRegion: resolvedWindowDragRegion
@@ -321,6 +321,12 @@ function RunFoundationInteractiveApp(
             laidOut = FoundationLayoutPass().runIncremental(root: root, available: viewport, cached: state.cachedLayoutTree)
         }
         state.cachedLayoutTree = laidOut
+        // Where everything keyed came out, for the NEXT frame's build to read.
+        // Recorded here rather than during the render walk because a frame that
+        // re-presents a retained batch does not walk, and geometry that only
+        // updates on drawn frames is geometry that goes stale exactly when a
+        // view moved without being redrawn.
+        foundationRecordGeometry(root, laidOut)
         let profileLayoutEnd = foundationProfileNow(state.profile, frame)
         let rootFrame = foundationRootFrame(laidOut)
         if rootFrame.width > 0.0 && rootFrame.height > 0.0 && !state.announcedLayout {
