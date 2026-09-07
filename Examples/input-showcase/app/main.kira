@@ -19,43 +19,43 @@ struct ShowcaseState {
 }
 
 function appBackground() -> Color {
-    return Color { r: 0.05 g: 0.06 b: 0.09 a: 1.0 }
+    return Color { r: 0.05, g: 0.06, b: 0.09, a: 1.0 }
 }
 
 function primaryText() -> Color {
-    return Color { r: 0.96 g: 0.97 b: 0.99 a: 1.0 }
+    return Color { r: 0.96, g: 0.97, b: 0.99, a: 1.0 }
 }
 
 function secondaryText() -> Color {
-    return Color { r: 0.74 g: 0.80 b: 0.88 a: 1.0 }
+    return Color { r: 0.74, g: 0.80, b: 0.88, a: 1.0 }
 }
 
 function accentText() -> Color {
-    return Color { r: 0.62 g: 0.86 b: 1.0 a: 1.0 }
+    return Color { r: 0.62, g: 0.86, b: 1.0, a: 1.0 }
 }
 
 function buttonFill(hovered: Bool, pressed: Bool) -> Color {
     if pressed {
-        return Color { r: 0.16 g: 0.45 b: 0.78 a: 1.0 }
+        return Color { r: 0.16, g: 0.45, b: 0.78, a: 1.0 }
     }
     if hovered {
-        return Color { r: 0.24 g: 0.40 b: 0.66 a: 1.0 }
+        return Color { r: 0.24, g: 0.40, b: 0.66, a: 1.0 }
     }
-    return Color { r: 0.14 g: 0.16 b: 0.23 a: 1.0 }
+    return Color { r: 0.14, g: 0.16, b: 0.23, a: 1.0 }
 }
 
 function panelFill(active: Bool) -> Color {
     if active {
-        return Color { r: 0.20 g: 0.34 b: 0.58 a: 1.0 }
+        return Color { r: 0.20, g: 0.34, b: 0.58, a: 1.0 }
     }
-    return Color { r: 0.12 g: 0.14 b: 0.20 a: 1.0 }
+    return Color { r: 0.12, g: 0.14, b: 0.20, a: 1.0 }
 }
 
 function panelBorder(active: Bool) -> Color {
     if active {
-        return Color { r: 0.80 g: 0.90 b: 1.0 a: 0.55 }
+        return Color { r: 0.80, g: 0.90, b: 1.0, a: 0.55 }
     }
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.12 }
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 0.12 }
 }
 
 // Concatenate Unicode codepoints into a UTF-8 string for display.
@@ -168,7 +168,7 @@ function card(key: Int, title: String, status: String, active: Bool, interaction
                 shape: FoundationShape.RegularRoundedRect,
                 material: FoundationMaterial.Flat,
                 effects: [],
-                padding: EdgeInsets { top: 18.0 trailing: 18.0 bottom: 18.0 leading: 18.0 },
+                padding: EdgeInsets { top: 18.0, trailing: 18.0, bottom: 18.0, leading: 18.0 },
                 clipContent: true
             )
         ],
@@ -223,27 +223,27 @@ function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, ho
     }
 
     let buttonInteraction = FoundationInteraction {
-        onHoverEnter: move onHoverEnter
-        onHoverExit: foundationNoopPress
-        onDragStart: foundationNoopScroll
-        onDragMove: foundationNoopScroll
-        onDragEnd: foundationNoopScroll
+        onHoverEnter: move onHoverEnter,
+        onHoverExit: foundationNoopPress,
+        onDragStart: foundationNoopScroll,
+        onDragMove: foundationNoopScroll,
+        onDragEnd: foundationNoopScroll,
         imeEnabled: false
     }
     let dragInteraction = FoundationInteraction {
-        onHoverEnter: foundationNoopPress
-        onHoverExit: foundationNoopPress
-        onDragStart: move onDragStart
-        onDragMove: move onDragMove
-        onDragEnd: move onDragEnd
+        onHoverEnter: foundationNoopPress,
+        onHoverExit: foundationNoopPress,
+        onDragStart: move onDragStart,
+        onDragMove: move onDragMove,
+        onDragEnd: move onDragEnd,
         imeEnabled: false
     }
     let textInteraction = FoundationInteraction {
-        onHoverEnter: foundationNoopPress
-        onHoverExit: foundationNoopPress
-        onDragStart: foundationNoopScroll
-        onDragMove: foundationNoopScroll
-        onDragEnd: foundationNoopScroll
+        onHoverEnter: foundationNoopPress,
+        onHoverExit: foundationNoopPress,
+        onDragStart: foundationNoopScroll,
+        onDragMove: foundationNoopScroll,
+        onDragEnd: foundationNoopScroll,
         imeEnabled: true
     }
 
@@ -281,7 +281,7 @@ function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, ho
                 fill: buttonFill(context.hoveredKey == 1001, context.pressedKey == 1001),
                 border: panelBorder(hoverButtonActive), borderWidth: 1.0, radius: 18.0,
                 shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
-                effects: [], padding: EdgeInsets { top: 18.0 trailing: 18.0 bottom: 18.0 leading: 18.0 },
+                effects: [], padding: EdgeInsets { top: 18.0, trailing: 18.0, bottom: 18.0, leading: 18.0 },
                 clipContent: true
             )
         ],
@@ -303,7 +303,7 @@ function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, ho
                     width: SizeMode.Fixed(220.0), height: SizeMode.Fixed(72.0), flex: 0,
                     fill: panelFill(dragActive), border: panelBorder(dragActive), borderWidth: 1.0,
                     radius: 16.0, shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
-                    effects: [], padding: EdgeInsets { top: 24.0 trailing: 18.0 bottom: 24.0 leading: 18.0 },
+                    effects: [], padding: EdgeInsets { top: 24.0, trailing: 18.0, bottom: 24.0, leading: 18.0 },
                     clipContent: true
                 )
             ]
@@ -312,7 +312,7 @@ function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, ho
         SizeMode.Fixed(120.0),
         0,
         Alignment.TopLeading,
-        EdgeInsets { top: dragOffsetY leading: dragOffsetX trailing: 0.0 bottom: 0.0 }
+        EdgeInsets { top: dragOffsetY, leading: dragOffsetX, trailing: 0.0, bottom: 0.0 }
     )
 
     // IME text field.
@@ -343,9 +343,9 @@ function showcaseRoot(context: borrow FoundationUiContext, stateUser: RawPtr, ho
             )
         ],
         width: SizeMode.Fill, height: SizeMode.Fill, flex: 0,
-        fill: appBackground(), border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }, borderWidth: 0.0,
+        fill: appBackground(), border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }, borderWidth: 0.0,
         radius: 0.0, shape: FoundationShape.RegularRoundedRect, material: FoundationMaterial.Flat,
-        effects: [], padding: EdgeInsets { top: 32.0 trailing: 32.0 bottom: 32.0 leading: 32.0 },
+        effects: [], padding: EdgeInsets { top: 32.0, trailing: 32.0, bottom: 32.0, leading: 32.0 },
         clipContent: true
     )
 }

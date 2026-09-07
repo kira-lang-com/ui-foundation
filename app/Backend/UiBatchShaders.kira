@@ -20,14 +20,14 @@ import KiraGraphics
 function createSpecializedPipeline(graphics: borrow Graphics, label: String, artifact: borrow KslArtifact) -> RenderPipeline {
     let shader = shaderOrReport(graphics.createShaderFromKslArtifact(label, artifact), "shader")
     return pipelineOrReport(graphics.createRenderPipeline(RenderPipelineDescriptor {
-        label: label
-        shader: shader
-        vertexEntry: artifact.vertexEntry
-        fragmentEntry: artifact.fragmentEntry
-        vertexLayout: VertexLayout { stride: 0 attributes: [] }
-        colorTargets: [ColorTargetDescriptor { format: .Swapchain blend: BlendState { enabled: true preset: .PremultipliedAlpha } }]
-        depthStencil: DepthStencilDescriptor { depthEnabled: false depthWriteEnabled: false depthCompare: .Always format: .None }
-        rasterization: RasterizationDescriptor { cullMode: .None frontFace: .CounterClockwise }
+        label: label,
+        shader: shader,
+        vertexEntry: artifact.vertexEntry,
+        fragmentEntry: artifact.fragmentEntry,
+        vertexLayout: VertexLayout { stride: 0, attributes: [] },
+        colorTargets: [ColorTargetDescriptor { format: .Swapchain, blend: BlendState { enabled: true, preset: .PremultipliedAlpha } }],
+        depthStencil: DepthStencilDescriptor { depthEnabled: false, depthWriteEnabled: false, depthCompare: .Always, format: .None },
+        rasterization: RasterizationDescriptor { cullMode: .None, frontFace: .CounterClockwise },
         primitive: PrimitiveDescriptor { topology: .TriangleList }
     }), "create render pipeline")
 }

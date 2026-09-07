@@ -285,8 +285,8 @@ function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetai
     while i < total {
         let nodeId = acc.ids[i]
         tree.stateSlots.append(FoundationRetainedStateSlot {
-            nodeId: nodeId
-            value: 0
+            nodeId: nodeId,
+            value: 0,
             active: true
         })
         let slotIndex = tree.stateSlots.count - 1
@@ -295,18 +295,18 @@ function foundationRetainedMount(root: borrow FoundationView) -> FoundationRetai
         }
         tree.stateSlotIds[nodeId] = slotIndex
         tree.nodes.append(FoundationRetainedNode {
-            id: nodeId
-            parentId: acc.parentIds[i]
-            key: acc.keys[i]
-            childOrdinal: acc.ordinals[i]
-            kind: foundationViewKindFromCode(acc.kindCodes[i])
-            childIds: foundationRetainedChildIdsAt(lists, i)
-            childCount: acc.childCounts[i]
-            layoutSignature: acc.layoutSigs[i]
-            renderSignature: acc.renderSigs[i]
-            layoutDirty: true
-            renderDirty: true
-            mounted: true
+            id: nodeId,
+            parentId: acc.parentIds[i],
+            key: acc.keys[i],
+            childOrdinal: acc.ordinals[i],
+            kind: foundationViewKindFromCode(acc.kindCodes[i]),
+            childIds: foundationRetainedChildIdsAt(lists, i),
+            childCount: acc.childCounts[i],
+            layoutSignature: acc.layoutSigs[i],
+            renderSignature: acc.renderSigs[i],
+            layoutDirty: true,
+            renderDirty: true,
+            mounted: true,
             stateSlot: slotIndex
         })
         i = i + 1
@@ -361,14 +361,14 @@ function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow Fou
         }
         if slotIndex != -1 {
             next.stateSlots[slotIndex] = FoundationRetainedStateSlot {
-                nodeId: nodeId
-                value: next.stateSlots[slotIndex].value
+                nodeId: nodeId,
+                value: next.stateSlots[slotIndex].value,
                 active: true
             }
         } else {
             next.stateSlots.append(FoundationRetainedStateSlot {
-                nodeId: nodeId
-                value: 0
+                nodeId: nodeId,
+                value: 0,
                 active: true
             })
             slotIndex = next.stateSlots.count - 1
@@ -401,18 +401,18 @@ function foundationRetainedUpdate(tree: FoundationRetainedTree, root: borrow Fou
             next.renderInvalidations = next.renderInvalidations + 1
         }
         next.nodes.append(FoundationRetainedNode {
-            id: nodeId
-            parentId: acc.parentIds[i]
-            key: acc.keys[i]
-            childOrdinal: acc.ordinals[i]
-            kind: foundationViewKindFromCode(acc.kindCodes[i])
-            childIds: move childIds
-            childCount: acc.childCounts[i]
-            layoutSignature: acc.layoutSigs[i]
-            renderSignature: acc.renderSigs[i]
-            layoutDirty: layoutDirty
-            renderDirty: renderDirty
-            mounted: true
+            id: nodeId,
+            parentId: acc.parentIds[i],
+            key: acc.keys[i],
+            childOrdinal: acc.ordinals[i],
+            kind: foundationViewKindFromCode(acc.kindCodes[i]),
+            childIds: move childIds,
+            childCount: acc.childCounts[i],
+            layoutSignature: acc.layoutSigs[i],
+            renderSignature: acc.renderSigs[i],
+            layoutDirty: layoutDirty,
+            renderDirty: renderDirty,
+            mounted: true,
             stateSlot: slotIndex
         })
         i = i + 1

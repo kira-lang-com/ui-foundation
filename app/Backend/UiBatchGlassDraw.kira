@@ -118,22 +118,22 @@ function glassEnsureInteriorCache(state: borrow mut UiBatchState, graphics: borr
         return
     }
     let cacheTex = textureOrReport(graphics.createTexture(TextureDescriptor {
-        label: "kira-ui-glass-interior-cache"
-        width: cacheW
-        height: cacheH
-        format: .Swapchain
-        usage: .RenderTargetSampled
-        sampleCount: 1
+        label: "kira-ui-glass-interior-cache",
+        width: cacheW,
+        height: cacheH,
+        format: .Swapchain,
+        usage: .RenderTargetSampled,
+        sampleCount: 1,
         storage: .Transient
     }), "glass interior cache")
     if state.glassCacheSampler.id == 0 {
         // Nearest: a copy fragment lands exactly on its texel centre, and
         // nearest guarantees the fetch returns that texel's bytes unchanged.
         state.glassCacheSampler = samplerOrReport(graphics.createSampler(SamplerDescriptor {
-            label: "kira-ui-glass-cache-nearest"
-            minFilter: .Nearest
-            magFilter: .Nearest
-            addressModeU: .ClampToEdge
+            label: "kira-ui-glass-cache-nearest",
+            minFilter: .Nearest,
+            magFilter: .Nearest,
+            addressModeU: .ClampToEdge,
             addressModeV: .ClampToEdge
         }), "glass cache sampler")
     }
@@ -161,25 +161,25 @@ function glassInteriorCachePass(state: borrow mut UiBatchState) -> RenderPassDes
     }
     let attachment = ColorAttachment {
         target: RenderTarget {
-            kind: .Texture
-            texture: state.glassCacheTexture
-            mipLevel: 0
+            kind: .Texture,
+            texture: state.glassCacheTexture,
+            mipLevel: 0,
             arrayLayer: 0
-        }
-        loadAction: load
-        storeAction: .Store
-        clearColor: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
-        resolveTarget: emptyRenderTarget()
+        },
+        loadAction: load,
+        storeAction: .Store,
+        clearColor: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+        resolveTarget: emptyRenderTarget(),
         hasResolveTarget: false
     }
     return RenderPassDescriptor {
-        label: "kira-ui-glass-interior-cache-pass"
-        colorAttachments: [attachment]
-        primaryColorAttachment: attachment
-        hasPrimaryColorAttachment: true
-        depthAttachment: emptyDepthAttachment()
-        hasDepthAttachment: false
-        stencilAttachment: emptyStencilAttachment()
+        label: "kira-ui-glass-interior-cache-pass",
+        colorAttachments: [attachment],
+        primaryColorAttachment: attachment,
+        hasPrimaryColorAttachment: true,
+        depthAttachment: emptyDepthAttachment(),
+        hasDepthAttachment: false,
+        stencilAttachment: emptyStencilAttachment(),
         hasStencilAttachment: false
     }
 }

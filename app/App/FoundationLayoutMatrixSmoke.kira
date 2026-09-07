@@ -2,9 +2,9 @@ import Foundation
 import KiraLayout
 function foundationMatrixInsets(top: Float, trailing: Float, bottom: Float, leading: Float) -> EdgeInsets {
     return EdgeInsets {
-        top: top
-        trailing: trailing
-        bottom: bottom
+        top: top,
+        trailing: trailing,
+        bottom: bottom,
         leading: leading
     }
 }
@@ -15,16 +15,16 @@ function foundationMatrixLeaf(width: SizeMode, height: SizeMode, flex: Int, marg
         childCount: 0
     )
     layoutNodeFlattenDescriptor(node, LayoutDescriptor {
-        width: width
-        height: height
-        flex: flex
-        arrange: .Fill
-        axis: .Vertical
-        alignment: .Stretch
-        overlayAlignment: .Center
-        padding: EdgeInsets {}
-        margin: margin
-        x: x
+        width: width,
+        height: height,
+        flex: flex,
+        arrange: .Fill,
+        axis: .Vertical,
+        alignment: .Stretch,
+        overlayAlignment: .Center,
+        padding: EdgeInsets {},
+        margin: margin,
+        x: x,
         y: y
     })
     return node
@@ -51,17 +51,17 @@ function foundationMatrixContainer(
         childCount: childCount
     )
     layoutNodeFlattenDescriptor(node, LayoutDescriptor {
-        width: width
-        height: height
-        flex: flex
-        arrange: arrange
-        axis: axis
-        spacing: spacing
-        rowSpacing: rowSpacing
-        alignment: alignment
-        overlayAlignment: overlayAlignment
-        columns: columns
-        padding: padding
+        width: width,
+        height: height,
+        flex: flex,
+        arrange: arrange,
+        axis: axis,
+        spacing: spacing,
+        rowSpacing: rowSpacing,
+        alignment: alignment,
+        overlayAlignment: overlayAlignment,
+        columns: columns,
+        padding: padding,
         margin: margin
     })
     return node
@@ -272,8 +272,8 @@ function foundationMatrixFillTree() -> LayoutTree {
 }
 
 function FoundationFlattenVariantSmoke() -> Bool {
-    let large = Size { width: 640.0 height: 420.0 }
-    let small = Size { width: 360.0 height: 260.0 }
+    let large = Size { width: 640.0, height: 420.0 }
+    let small = Size { width: 360.0, height: 260.0 }
     return foundationMatrixCaseMatches(1, large, small) &&
         foundationMatrixCaseMatches(2, large, small) &&
         foundationMatrixCaseMatches(3, large, small) &&

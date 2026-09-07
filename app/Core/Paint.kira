@@ -7,14 +7,14 @@ import Foundation
 type FoundationColor = Color
 
 function foundationRgba(r: Float, g: Float, b: Float, a: Float) -> FoundationColor {
-    return Color { r: r g: g b: b a: a }
+    return Color { r: r, g: g, b: b, a: a }
 }
 
 struct Glow {
     let color: Color = Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
         a: 1.0
     }
     let radius: Float = 0.0
@@ -110,13 +110,13 @@ function foundationBlurMix(blur: borrow FoundationBlur) -> Float {
     match blur {
         // A raw Surface has no frost step to follow, so Step means the blur of the
         // platform's default material — Regular, which FoundationFrost calls High.
-        Step -> return foundationFrostBlur(.High);
-        None -> return 0.0;
-        Light -> return 0.2;
-        Medium -> return 0.4;
-        High -> return 0.6;
-        XHigh -> return 0.8;
-        Max -> return 1.0;
+        Step -> return foundationFrostBlur(.High)
+        None -> return 0.0
+        Light -> return 0.2
+        Medium -> return 0.4
+        High -> return 0.6
+        XHigh -> return 0.8
+        Max -> return 1.0
     }
 }
 
@@ -128,12 +128,12 @@ function foundationBlurMix(blur: borrow FoundationBlur) -> Float {
 // near and never touches the far level at all.
 function foundationFrostBlur(frost: borrow FoundationFrost) -> Float {
     match frost {
-        Translucent -> return 0.0;
-        Light -> return 0.05;
-        Medium -> return 0.10;
-        High -> return 0.15;
-        XHigh -> return 0.20;
-        Max -> return 0.25;
+        Translucent -> return 0.0
+        Light -> return 0.05
+        Medium -> return 0.10
+        High -> return 0.15
+        XHigh -> return 0.20
+        Max -> return 0.25
     }
 }
 
@@ -143,13 +143,13 @@ function foundationBlurAmount(
     frost: borrow FoundationFrost,
 ) -> Float {
     match blur {
-        Step -> return foundationFrostBlur(frost);
-        None -> return 0.0;
-        Light -> return foundationBlurMix(blur);
-        Medium -> return foundationBlurMix(blur);
-        High -> return foundationBlurMix(blur);
-        XHigh -> return foundationBlurMix(blur);
-        Max -> return foundationBlurMix(blur);
+        Step -> return foundationFrostBlur(frost)
+        None -> return 0.0
+        Light -> return foundationBlurMix(blur)
+        Medium -> return foundationBlurMix(blur)
+        High -> return foundationBlurMix(blur)
+        XHigh -> return foundationBlurMix(blur)
+        Max -> return foundationBlurMix(blur)
     }
 }
 
@@ -259,26 +259,26 @@ function foundationGlassMaterialWithTint(
     stack: borrow FoundationTintStack,
 ) -> FoundationGlassMaterial {
     return FoundationGlassMaterial {
-        edgeStrokeStrength: base.edgeStrokeStrength
-        edgeStrokeDarken: base.edgeStrokeDarken
-        edgeStrokePeak: base.edgeStrokePeak
-        edgeStrokeFade: base.edgeStrokeFade
-        sheenStrength: base.sheenStrength
-        lensMaxBend: base.lensMaxBend
-        refractionReach: base.refractionReach
-        blurNearSplit: base.blurNearSplit
-        borderSpread: base.borderSpread
-        borderSideOffset: base.borderSideOffset
-        borderSideSpread: base.borderSideSpread
-        borderGrey: base.borderGrey
-        borderSideGrey: base.borderSideGrey
-        innerRimStrength: base.innerRimStrength
-        innerRimWidth: base.innerRimWidth
-        washBlend: foundationBlendId(stack.lower.blend)
-        washUpperR: stack.upper.color.r
-        washUpperG: stack.upper.color.g
-        washUpperB: stack.upper.color.b
-        washUpperAlpha: stack.upper.alpha
+        edgeStrokeStrength: base.edgeStrokeStrength,
+        edgeStrokeDarken: base.edgeStrokeDarken,
+        edgeStrokePeak: base.edgeStrokePeak,
+        edgeStrokeFade: base.edgeStrokeFade,
+        sheenStrength: base.sheenStrength,
+        lensMaxBend: base.lensMaxBend,
+        refractionReach: base.refractionReach,
+        blurNearSplit: base.blurNearSplit,
+        borderSpread: base.borderSpread,
+        borderSideOffset: base.borderSideOffset,
+        borderSideSpread: base.borderSideSpread,
+        borderGrey: base.borderGrey,
+        borderSideGrey: base.borderSideGrey,
+        innerRimStrength: base.innerRimStrength,
+        innerRimWidth: base.innerRimWidth,
+        washBlend: foundationBlendId(stack.lower.blend),
+        washUpperR: stack.upper.color.r,
+        washUpperG: stack.upper.color.g,
+        washUpperB: stack.upper.color.b,
+        washUpperAlpha: stack.upper.alpha,
         washUpperBlend: foundationBlendId(stack.upper.blend)
     }
 }
@@ -296,50 +296,50 @@ function foundationGlassMaterialEdgeLit(
 ) -> FoundationGlassMaterial {
     if enabled {
         return FoundationGlassMaterial {
-            edgeStrokeStrength: base.edgeStrokeStrength
-            edgeStrokeDarken: base.edgeStrokeDarken
-            edgeStrokePeak: base.edgeStrokePeak
-            edgeStrokeFade: base.edgeStrokeFade
-            sheenStrength: base.sheenStrength
-            lensMaxBend: base.lensMaxBend
-            refractionReach: base.refractionReach
-            blurNearSplit: base.blurNearSplit
-            borderSpread: base.borderSpread
-            borderSideOffset: base.borderSideOffset
-            borderSideSpread: base.borderSideSpread
-            borderGrey: base.borderGrey
-            borderSideGrey: base.borderSideGrey
-            innerRimStrength: base.innerRimStrength
-            innerRimWidth: base.innerRimWidth
-            washBlend: base.washBlend
-            washUpperR: base.washUpperR
-            washUpperG: base.washUpperG
-            washUpperB: base.washUpperB
-            washUpperAlpha: base.washUpperAlpha
+            edgeStrokeStrength: base.edgeStrokeStrength,
+            edgeStrokeDarken: base.edgeStrokeDarken,
+            edgeStrokePeak: base.edgeStrokePeak,
+            edgeStrokeFade: base.edgeStrokeFade,
+            sheenStrength: base.sheenStrength,
+            lensMaxBend: base.lensMaxBend,
+            refractionReach: base.refractionReach,
+            blurNearSplit: base.blurNearSplit,
+            borderSpread: base.borderSpread,
+            borderSideOffset: base.borderSideOffset,
+            borderSideSpread: base.borderSideSpread,
+            borderGrey: base.borderGrey,
+            borderSideGrey: base.borderSideGrey,
+            innerRimStrength: base.innerRimStrength,
+            innerRimWidth: base.innerRimWidth,
+            washBlend: base.washBlend,
+            washUpperR: base.washUpperR,
+            washUpperG: base.washUpperG,
+            washUpperB: base.washUpperB,
+            washUpperAlpha: base.washUpperAlpha,
             washUpperBlend: base.washUpperBlend
         }
     }
     return FoundationGlassMaterial {
-        edgeStrokeStrength: base.edgeStrokeStrength
-        edgeStrokeDarken: base.edgeStrokeDarken
-        edgeStrokePeak: base.edgeStrokePeak
-        edgeStrokeFade: base.edgeStrokeFade
-        sheenStrength: 0.0
-        lensMaxBend: base.lensMaxBend
-        refractionReach: base.refractionReach
-        blurNearSplit: base.blurNearSplit
-        borderSpread: base.borderSpread
-        borderSideOffset: base.borderSideOffset
-        borderSideSpread: base.borderSideSpread
-        borderGrey: base.borderGrey
-        borderSideGrey: base.borderSideGrey
-        innerRimStrength: 0.0
-        innerRimWidth: base.innerRimWidth
-        washBlend: base.washBlend
-        washUpperR: base.washUpperR
-        washUpperG: base.washUpperG
-        washUpperB: base.washUpperB
-        washUpperAlpha: base.washUpperAlpha
+        edgeStrokeStrength: base.edgeStrokeStrength,
+        edgeStrokeDarken: base.edgeStrokeDarken,
+        edgeStrokePeak: base.edgeStrokePeak,
+        edgeStrokeFade: base.edgeStrokeFade,
+        sheenStrength: 0.0,
+        lensMaxBend: base.lensMaxBend,
+        refractionReach: base.refractionReach,
+        blurNearSplit: base.blurNearSplit,
+        borderSpread: base.borderSpread,
+        borderSideOffset: base.borderSideOffset,
+        borderSideSpread: base.borderSideSpread,
+        borderGrey: base.borderGrey,
+        borderSideGrey: base.borderSideGrey,
+        innerRimStrength: 0.0,
+        innerRimWidth: base.innerRimWidth,
+        washBlend: base.washBlend,
+        washUpperR: base.washUpperR,
+        washUpperG: base.washUpperG,
+        washUpperB: base.washUpperB,
+        washUpperAlpha: base.washUpperAlpha,
         washUpperBlend: base.washUpperBlend
     }
 }
@@ -348,9 +348,9 @@ function foundationGlassMaterialEdgeLit(
 // opacity as the alpha the compositor reads the wash strength from.
 function foundationTintFill(stack: borrow FoundationTintStack) -> Color {
     return Color {
-        r: stack.lower.color.r
-        g: stack.lower.color.g
-        b: stack.lower.color.b
+        r: stack.lower.color.r,
+        g: stack.lower.color.g,
+        b: stack.lower.color.b,
         a: stack.lower.alpha
     }
 }
@@ -361,12 +361,12 @@ function foundationTintFill(stack: borrow FoundationTintStack) -> Color {
 // the platform ships, in order.
 function foundationFrostStyle(frost: borrow FoundationFrost) -> FoundationMaterialStyle {
     match frost {
-        Translucent -> return .Ultrathin;
-        Light -> return .Ultrathin;
-        Medium -> return .Thin;
-        High -> return .Regular;
-        XHigh -> return .Thick;
-        Max -> return .Chrome;
+        Translucent -> return .Ultrathin
+        Light -> return .Ultrathin
+        Medium -> return .Thin
+        High -> return .Regular
+        XHigh -> return .Thick
+        Max -> return .Chrome
     }
 }
 
@@ -378,12 +378,12 @@ function foundationFrostStack(
     scheme: borrow FoundationScheme,
 ) -> FoundationTintStack {
     match frost {
-        Translucent -> return FoundationTintStack {};
-        Light -> return foundationMaterialTint(.Ultrathin, scheme);
-        Medium -> return foundationMaterialTint(.Thin, scheme);
-        High -> return foundationMaterialTint(.Regular, scheme);
-        XHigh -> return foundationMaterialTint(.Thick, scheme);
-        Max -> return foundationMaterialTint(.Chrome, scheme);
+        Translucent -> return FoundationTintStack {}
+        Light -> return foundationMaterialTint(.Ultrathin, scheme)
+        Medium -> return foundationMaterialTint(.Thin, scheme)
+        High -> return foundationMaterialTint(.Regular, scheme)
+        XHigh -> return foundationMaterialTint(.Thick, scheme)
+        Max -> return foundationMaterialTint(.Chrome, scheme)
     }
 }
 
@@ -395,9 +395,9 @@ enum FoundationEffect {
 struct FoundationTextPaint {
     let content: String
     let color: Color = Color {
-        r: 0.08
-        g: 0.08
-        b: 0.10
+        r: 0.08,
+        g: 0.08,
+        b: 0.10,
         a: 1.0
     }
     let size: Float = 15.0
@@ -406,15 +406,15 @@ struct FoundationTextPaint {
 
 struct FoundationSurfacePaint {
     let fill: Color = Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 1.0
     }
     let border: Color = Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
         a: 0.0
     }
     let borderWidth: Float = 0.0

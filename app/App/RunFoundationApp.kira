@@ -16,22 +16,22 @@ function RunFoundationApp(
     opacity: Float = 1.0,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
-        root: root
-        batch: UiBatch { storage: nullPointer() }
-        profile: foundationFrameProfileFromEnvironment()
-        page: foundationPageFor(transparent)
+        root: root,
+        batch: UiBatch { storage: nullPointer() },
+        profile: foundationFrameProfileFromEnvironment(),
+        page: foundationPageFor(transparent),
         transparent: transparent
     })
     let runtimeUser = nativeUserData(runtimeStorage)
 
     var app = GraphicsApplication {
-        title: "Kira UI Foundation"
-        width: 1280
-        height: 720
-        sampleCount: 1
-        windowMode: windowMode
-        transparent: transparent
-        opacity: opacity
+        title: "Kira UI Foundation",
+        width: 1280,
+        height: 720,
+        sampleCount: 1,
+        windowMode: windowMode,
+        transparent: transparent,
+        opacity: opacity,
         // Platform-aware default: Metal on Apple hosts, Sokol otherwise
         // (incl. Web/WASM where the platform probe reports Unknown).
         backend: graphicsDefaultBackend()
@@ -54,7 +54,7 @@ function RunFoundationApp(
             vpH = 720
         }
         state.ui.viewport = Size {
-            width: intAsFloat(value: vpW)
+            width: intAsFloat(value: vpW),
             height: intAsFloat(value: vpH)
         }
 
@@ -92,8 +92,8 @@ function RunFoundationApp(
             foundationProfileSample(
                 state.profile,
                 FoundationFramePhases {
-                    presentNs: profilePresentEnd - profilePresentStart
-                    frameNs: profilePresentEnd - profileFrameStart
+                    presentNs: profilePresentEnd - profilePresentStart,
+                    frameNs: profilePresentEnd - profileFrameStart,
                     represented: true
                 },
                 state.batch.presentPhaseTimes(),
@@ -118,8 +118,8 @@ function RunFoundationApp(
         // The walk only accumulates quads; the pass structure (including the
         // liquid-glass capture/blur passes) is owned by presentBatch after it.
         var backend = KiraGraphicsFoundationBackend {
-            graphics: graphics
-            batch: batch
+            graphics: graphics,
+            batch: batch,
             windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
@@ -195,9 +195,9 @@ function RunFoundationApp(
         foundationProfileSample(
             state.profile,
             FoundationFramePhases {
-                layoutNs: profileLayoutEnd - profileLayoutStart
-                renderNs: profileRenderEnd - profileRenderStart
-                presentNs: profilePresentEnd - profilePresentStart
+                layoutNs: profileLayoutEnd - profileLayoutStart,
+                renderNs: profileRenderEnd - profileRenderStart,
+                presentNs: profilePresentEnd - profilePresentStart,
                 frameNs: profilePresentEnd - profileFrameStart
             },
             state.batch.presentPhaseTimes(),
@@ -231,7 +231,7 @@ function RunFoundationAppSmoke(root: FoundationView) {
     let laidOut = FoundationLayoutPass().run(
         root: root,
         available: Size {
-            width: 1280.0
+            width: 1280.0,
             height: 720.0
         }
     )

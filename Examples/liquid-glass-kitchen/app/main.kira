@@ -59,21 +59,21 @@ struct KitchenState {
 // ---------------------------------------------------------------------------
 
 function inkStrong() -> Color {
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
 }
 
 function inkSoft() -> Color {
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.72 }
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 0.72 }
 }
 
 function inkFaint() -> Color {
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.5 }
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 0.5 }
 }
 
 // The wash colour every surface uses: #F6F6F6, which is the document's
 // "#BFBFBF 10% over white 70%" collapsed to one layer.
 function glassTint() -> Color {
-    return Color { r: 0.9657 g: 0.9657 b: 0.9657 a: 1.0 }
+    return Color { r: 0.9657, g: 0.9657, b: 0.9657, a: 1.0 }
 }
 
 function frostForStep(step: Int) -> FoundationFrost {
@@ -136,13 +136,13 @@ function stepName(step: Int, zeroLabel: String) -> String {
 // The material the whole editor renders with, rebuilt from state every frame.
 function kitchenMaterial(state: borrow KitchenState) -> FoundationGlassMaterial {
     return FoundationGlassMaterial {
-        edgeStrokeStrength: state.edgeStrokeStrength
-        edgeStrokeDarken: state.edgeStrokeDarken
-        edgeStrokePeak: state.edgeStrokePeak
-        edgeStrokeFade: state.edgeStrokeFade
-        sheenStrength: state.sheenStrength
-        lensMaxBend: state.lensMaxBend
-        refractionReach: state.refractionReach
+        edgeStrokeStrength: state.edgeStrokeStrength,
+        edgeStrokeDarken: state.edgeStrokeDarken,
+        edgeStrokePeak: state.edgeStrokePeak,
+        edgeStrokeFade: state.edgeStrokeFade,
+        sheenStrength: state.sheenStrength,
+        lensMaxBend: state.lensMaxBend,
+        refractionReach: state.refractionReach,
         blurNearSplit: state.blurNearSplit
     }
 }
@@ -275,8 +275,8 @@ function sliderTrack(fraction: Float) -> FoundationView {
             width: SizeMode.Fixed(sliderWidth()),
             height: SizeMode.Fixed(sliderTrackHeight()),
             flex: 0,
-            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.22 },
-            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            fill: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.22 },
+            border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
             borderWidth: 0.0,
             radius: sliderTrackHeight() / 2.0,
             shape: FoundationShape.RegularRoundedRect,
@@ -292,8 +292,8 @@ function sliderTrack(fraction: Float) -> FoundationView {
             width: SizeMode.Fixed(filled),
             height: SizeMode.Fixed(sliderTrackHeight()),
             flex: 0,
-            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.85 },
-            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            fill: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.85 },
+            border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
             borderWidth: 0.0,
             radius: sliderTrackHeight() / 2.0,
             shape: FoundationShape.RegularRoundedRect,
@@ -313,8 +313,8 @@ function sliderTrack(fraction: Float) -> FoundationView {
         width: SizeMode.Fixed(sliderWidth()),
         height: SizeMode.Fixed(sliderTrackHeight()),
         flex: 0,
-        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        fill: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,
@@ -373,7 +373,7 @@ function slider(
         width: SizeMode.Fixed(sliderWidth()),
         height: SizeMode.Hug,
         spacing: 10.0,
-        padding: EdgeInsets { top: 2.0 bottom: 4.0 },
+        padding: EdgeInsets { top: 2.0, bottom: 4.0 },
         crossAxisAlignment: CrossAlignment.Start
     )
     return GestureHitArea(
@@ -384,7 +384,7 @@ function slider(
         // nothing and the row only responds once the pointer has travelled.
         onPress: move onPress,
         interaction: FoundationInteraction {
-            onDragStart: move onDragStart
+            onDragStart: move onDragStart,
             onDragMove: move onDragMove
         },
         children: [
@@ -617,7 +617,7 @@ function sectionLabel(text: String) -> FoundationView {
         height: SizeMode.Fixed(18.0),
         flex: 0,
         alignment: Alignment.Leading,
-        padding: EdgeInsets { top: 4.0 leading: 4.0 }
+        padding: EdgeInsets { top: 4.0, leading: 4.0 }
     )
 }
 

@@ -61,27 +61,27 @@ function foundationBadgeFps(displayedFps: Int, rawFps: Int, viewportChanged: Boo
 
 function foundationFpsBadgeFill() -> Color {
     return Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
         a: 0.55
     }
 }
 
 function foundationFpsBadgeBorder() -> Color {
     return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 0.14
     }
 }
 
 function foundationFpsTextColor() -> Color {
     return Color {
-        r: 0.80
-        g: 1.0
-        b: 0.85
+        r: 0.80,
+        g: 1.0,
+        b: 0.85,
         a: 1.0
     }
 }
@@ -217,7 +217,7 @@ function foundationGraphicsHud(stats: borrow FoundationGraphicsStats) -> Foundat
         shape: .RegularRoundedRect,
         material: .Flat,
         effects: [],
-        padding: EdgeInsets { top: 9.0 trailing: 12.0 bottom: 9.0 leading: 12.0 },
+        padding: EdgeInsets { top: 9.0, trailing: 12.0, bottom: 9.0, leading: 12.0 },
         clipContent: false,
     )
 }
@@ -238,9 +238,9 @@ function foundationFpsBadge(fps: Int) -> FoundationView {
         material: .Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 4.0
-            trailing: 9.0
-            bottom: 4.0
+            top: 4.0,
+            trailing: 9.0,
+            bottom: 4.0,
             leading: 9.0
         },
         clipContent: false
@@ -260,7 +260,7 @@ function foundationGraphicsStatsBadge(stats: borrow FoundationGraphicsStats) -> 
         shape: .RegularRoundedRect,
         material: .Flat,
         effects: [],
-        padding: EdgeInsets { top: 4.0 trailing: 9.0 bottom: 4.0 leading: 9.0 },
+        padding: EdgeInsets { top: 4.0, trailing: 9.0, bottom: 4.0, leading: 9.0 },
         clipContent: false,
     )
 }
@@ -273,8 +273,8 @@ function foundationFpsSmokeView() -> FoundationView {
         width: .Fill,
         height: .Fill,
         flex: 0,
-        fill: Color { r: 0.1 g: 0.1 b: 0.12 a: 1.0 },
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        fill: Color { r: 0.1, g: 0.1, b: 0.12, a: 1.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: .RegularRoundedRect,
@@ -306,7 +306,7 @@ function FoundationFpsOverlaySmoke() -> Int {
         foundationIntToString(120).count == 3
     )
 
-    let viewport = Size { width: 1280.0 height: 720.0 }
+    let viewport = Size { width: 1280.0, height: 720.0 }
     let laidOut = runFoundationLayout(foundationFpsSmokeView(), viewport)
 
     // App view fills the whole surface; the FPS layer does too (transparent).
@@ -368,9 +368,9 @@ function foundationFpsOverlay(fps: Int) -> FoundationView {
         flex: 0,
         alignment: .BottomLeading,
         padding: EdgeInsets {
-            top: 12.0
-            trailing: 12.0
-            bottom: 12.0
+            top: 12.0,
+            trailing: 12.0,
+            bottom: 12.0,
             leading: 12.0
         }
     )
@@ -387,7 +387,7 @@ function foundationGraphicsOverlay(stats: borrow FoundationGraphicsStats, expand
         height: .Fill,
         flex: 0,
         alignment: .BottomLeading,
-        padding: EdgeInsets { top: 12.0 trailing: 12.0 bottom: 12.0 leading: 12.0 },
+        padding: EdgeInsets { top: 12.0, trailing: 12.0, bottom: 12.0, leading: 12.0 },
     )
 }
 
@@ -402,17 +402,17 @@ function foundationComposeWithFps(root: FoundationView, fps: Int) -> FoundationV
         flex: 0,
         alignment: .BottomLeading,
         padding: EdgeInsets {
-            top: 12.0
-            trailing: 12.0
-            bottom: 12.0
+            top: 12.0,
+            trailing: 12.0,
+            bottom: 12.0,
             leading: 12.0
         }
     )
     return FoundationView {
-        kind: .Frame
-        width: .Fill
-        height: .Fill
-        alignment: .TopLeading
+        kind: .Frame,
+        width: .Fill,
+        height: .Fill,
+        alignment: .TopLeading,
         children: [move root, fpsLayer]
     }
 }

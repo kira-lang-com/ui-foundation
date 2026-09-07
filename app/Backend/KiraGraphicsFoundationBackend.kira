@@ -264,9 +264,9 @@ class KiraGraphicsFoundationBackend {
         if self.suppressNextFill {
             self.suppressNextFill = false
             let noFill = Color {
-                r: 0.0
-                g: 0.0
-                b: 0.0
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
                 a: 0.0
             }
             // The fill is suppressed because the glass shader applies it — but
@@ -344,7 +344,7 @@ class KiraGraphicsFoundationBackend {
         // and the rule simply was not there.
         if self.suppressNextFill {
             self.suppressNextFill = false
-            let noFill = Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+            let noFill = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
             self.batch.pushRect(
                 bounds.x, bounds.y, bounds.width, bounds.height, noFill, border, borderWidth, radius,
                 self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY, 0.25
@@ -390,21 +390,21 @@ class KiraGraphicsFoundationBackend {
             return
         }
         let transparent = Color {
-            r: 0.0
-            g: 0.0
-            b: 0.0
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
             a: 0.0
         }
         let frameColor = Color {
-            r: 1.0
-            g: 0.20
-            b: 0.05
+            r: 1.0,
+            g: 0.20,
+            b: 0.05,
             a: 0.78
         }
         let inkColor = Color {
-            r: 0.05
-            g: 0.85
-            b: 1.0
+            r: 0.05,
+            g: 0.85,
+            b: 1.0,
             a: 0.95
         }
         self.batch.pushRect(frame.x, frame.y, frame.width, frame.height, transparent, frameColor, 0.75, 0.0, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
@@ -495,18 +495,18 @@ class KiraGraphicsFoundationBackend {
             // approximation at all: those blends are affine in the backdrop.
             let inkWash = foundationTintStackEquivalent(FoundationTintStack {
                 lower: FoundationTintLayer {
-                    color: fill
-                    alpha: fill.a
+                    color: fill,
+                    alpha: fill.a,
                     blend: foundationBlendModeFromId(glassMaterial.washBlend)
-                }
+                },
                 upper: FoundationTintLayer {
                     color: Color {
-                        r: glassMaterial.washUpperR
-                        g: glassMaterial.washUpperG
-                        b: glassMaterial.washUpperB
+                        r: glassMaterial.washUpperR,
+                        g: glassMaterial.washUpperG,
+                        b: glassMaterial.washUpperB,
                         a: 1.0
-                    }
-                    alpha: glassMaterial.washUpperAlpha
+                    },
+                    alpha: glassMaterial.washUpperAlpha,
                     blend: foundationBlendModeFromId(glassMaterial.washUpperBlend)
                 }
             })
@@ -526,9 +526,9 @@ class KiraGraphicsFoundationBackend {
         }
         let tint = materialTint(material: material)
         let hairline = Color {
-            r: 1.0
-            g: 1.0
-            b: 1.0
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
             a: 0.08
         }
         drawSurfaceFields(bounds, tint, hairline, 1.0, radius)
@@ -553,15 +553,15 @@ class KiraGraphicsFoundationBackend {
         // (a single batched quad). A separable-blur effect pass can refine this
         // later; the approximation keeps the abstraction backend-agnostic.
         let glow = Color {
-            r: color.r
-            g: color.g
-            b: color.b
+            r: color.r,
+            g: color.g,
+            b: color.b,
             a: color.a * intensity * 0.5
         }
         let noBorder = Color {
-            r: 0.0
-            g: 0.0
-            b: 0.0
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
             a: 0.0
         }
         self.batch.pushRect(bounds.x, bounds.y, bounds.width, bounds.height, glow, noBorder, 0.0, radius, self.clipMinX, self.clipMinY, self.clipMaxX, self.clipMaxY)
@@ -635,19 +635,19 @@ class KiraGraphicsFoundationBackend {
         interaction: FoundationInteraction,
     ) {
         self.hitRegions.append(FoundationHitRegionRecord {
-            key: key
-            bounds: bounds
-            disabled: disabled
-            focusable: focusable
-            autofocus: autofocus
-            onPress: onPress
-            onTextInput: onTextInput
-            onTextCodepoint: onTextCodepoint
-            onBackspace: onBackspace
-            onSubmit: onSubmit
-            onKey: onKey
-            onScroll: onScroll
-            wheel: wheel
+            key: key,
+            bounds: bounds,
+            disabled: disabled,
+            focusable: focusable,
+            autofocus: autofocus,
+            onPress: onPress,
+            onTextInput: onTextInput,
+            onTextCodepoint: onTextCodepoint,
+            onBackspace: onBackspace,
+            onSubmit: onSubmit,
+            onKey: onKey,
+            onScroll: onScroll,
+            wheel: wheel,
             interaction: interaction
         })
         return
@@ -659,11 +659,11 @@ class KiraGraphicsFoundationBackend {
     // tint that matches the platform's "clear" appearance.
     function materialTint(material: borrow FoundationMaterial) -> Color {
         match material {
-            Flat -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
-            Frosted -> return Color { r: 0.88 g: 0.94 b: 1.0 a: 0.10 };
-            LiquidGlass -> return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.04 };
+            Flat -> return Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+            Frosted -> return Color { r: 0.88, g: 0.94, b: 1.0, a: 0.10 }
+            LiquidGlass -> return Color { r: 1.0, g: 1.0, b: 1.0, a: 0.04 }
             // The compositor fills this one; nothing is washed over it here.
-            WindowBackdrop -> return Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 };
+            WindowBackdrop -> return Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
         }
     }
 

@@ -63,32 +63,32 @@ function glassLayerOccupied(state: borrow mut UiBatchState, x0: Float, y0: Float
 // A render pass targeting one of the glass offscreen textures.
 function glassTexturePass(label: String, texture: borrow GraphicsTexture, r: Float, g: Float, b: Float, a: Float) -> RenderPassDescriptor {
     let target = RenderTarget {
-        kind: .Texture
-        texture: texture
-        mipLevel: 0
+        kind: .Texture,
+        texture: texture,
+        mipLevel: 0,
         arrayLayer: 0
     }
     let attachment = ColorAttachment {
-        target: target
-        loadAction: .Clear
-        storeAction: .Store
+        target: target,
+        loadAction: .Clear,
+        storeAction: .Store,
         clearColor: Color {
-            r: r
-            g: g
-            b: b
+            r: r,
+            g: g,
+            b: b,
             a: a
-        }
-        resolveTarget: emptyRenderTarget()
+        },
+        resolveTarget: emptyRenderTarget(),
         hasResolveTarget: false
     }
     return RenderPassDescriptor {
-        label: label
-        colorAttachments: [attachment]
-        primaryColorAttachment: attachment
-        hasPrimaryColorAttachment: true
-        depthAttachment: emptyDepthAttachment()
-        hasDepthAttachment: false
-        stencilAttachment: emptyStencilAttachment()
+        label: label,
+        colorAttachments: [attachment],
+        primaryColorAttachment: attachment,
+        hasPrimaryColorAttachment: true,
+        depthAttachment: emptyDepthAttachment(),
+        hasDepthAttachment: false,
+        stencilAttachment: emptyStencilAttachment(),
         hasStencilAttachment: false
     }
 }
@@ -179,31 +179,31 @@ function glassEnsureLayerScene(state: borrow mut UiBatchState, graphics: borrow 
     // Dawn it invalidates the whole frame's command buffer, and the window then
     // presents whatever the surface texture happened to hold.
     let scene = textureOrReport(graphics.createTexture(TextureDescriptor {
-        label: "kira-ui-glass-scene"
-        width: sceneW
-        height: sceneH
-        format: .Swapchain
-        usage: .RenderTargetSampled
-        sampleCount: 1
+        label: "kira-ui-glass-scene",
+        width: sceneW,
+        height: sceneH,
+        format: .Swapchain,
+        usage: .RenderTargetSampled,
+        sampleCount: 1,
         storage: .Transient
     }), "glass scene target")
     let sampler = state.sampler
     let nearOut = textureOrReport(graphics.createTexture(TextureDescriptor {
-        label: "kira-ui-glass-blur-near"
-        width: blurW
-        height: blurH
-        format: .Rgba8Unorm
-        usage: .SampledStorage
-        sampleCount: 1
+        label: "kira-ui-glass-blur-near",
+        width: blurW,
+        height: blurH,
+        format: .Rgba8Unorm,
+        usage: .SampledStorage,
+        sampleCount: 1,
         storage: .Transient
     }), "glass near-blur target")
     let blurOut = textureOrReport(graphics.createTexture(TextureDescriptor {
-        label: "kira-ui-glass-blur-out"
-        width: blurW
-        height: blurH
-        format: .Rgba8Unorm
-        usage: .SampledStorage
-        sampleCount: 1
+        label: "kira-ui-glass-blur-out",
+        width: blurW,
+        height: blurH,
+        format: .Rgba8Unorm,
+        usage: .SampledStorage,
+        sampleCount: 1,
         storage: .Transient
     }), "glass blur target")
     state.glassLayers[layer].sceneTexture = scene
@@ -307,21 +307,21 @@ extend UiBatch {
         }
         glassDestroyTargets(state, graphics)
         let blurA = textureOrReport(graphics.createTexture(TextureDescriptor {
-            label: "kira-ui-glass-blur-a"
-            width: blurW
-            height: blurH
-            format: .Rgba8Unorm
-            usage: .SampledStorage
-            sampleCount: 1
+            label: "kira-ui-glass-blur-a",
+            width: blurW,
+            height: blurH,
+            format: .Rgba8Unorm,
+            usage: .SampledStorage,
+            sampleCount: 1,
             storage: .Transient
         }), "glass blur ping target")
         let blurB = textureOrReport(graphics.createTexture(TextureDescriptor {
-            label: "kira-ui-glass-blur-b"
-            width: blurW
-            height: blurH
-            format: .Rgba8Unorm
-            usage: .SampledStorage
-            sampleCount: 1
+            label: "kira-ui-glass-blur-b",
+            width: blurW,
+            height: blurH,
+            format: .Rgba8Unorm,
+            usage: .SampledStorage,
+            sampleCount: 1,
             storage: .Transient
         }), "glass blur pong target")
         state.blurTextureA = blurA

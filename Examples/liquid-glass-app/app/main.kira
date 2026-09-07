@@ -186,9 +186,9 @@ function schemeArrived(at: Float) -> Float {
 // One colour on the way to another.
 function mixColor(from: borrow Color, to: borrow Color, t: Float) -> Color {
     return Color {
-        r: from.r + (to.r - from.r) * t
-        g: from.g + (to.g - from.g) * t
-        b: from.b + (to.b - from.b) * t
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
         a: from.a + (to.a - from.a) * t
     }
 }
@@ -204,9 +204,9 @@ function schemeInk(level: Int, at: Float, alpha: Float) -> Color {
 
 function withAlpha(color: borrow Color, alpha: Float) -> Color {
     return Color {
-        r: color.r
-        g: color.g
-        b: color.b
+        r: color.r,
+        g: color.g,
+        b: color.b,
         a: alpha
     }
 }
@@ -302,7 +302,7 @@ function glassSurfaceSized(children: [FoundationView], width: SizeMode, height: 
         // Untinted: the table's own colours are what the material is. A tint here
         // would multiply the dark table's greys down as readily as it leaves the
         // light table's whites alone, which is not what a hue override should do.
-        tint: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+        tint: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
         blur: move blur,
         edgeRefraction: edgeRefraction,
         glassMaterial: FoundationGlassMaterial {},
@@ -394,8 +394,8 @@ function sidebarRowTint(selected: Bool, at: Float) -> Color {
 // The tint reads as a row being picked only if it moves AWAY from the material
 // under it: darker than a light sidebar, lighter than a dark one.
 function sidebarRowFill(selected: Bool, hovered: Bool, at: Float) -> Color {
-    let onLight = Color { r: 0.32 g: 0.33 b: 0.36 a: 1.0 }
-    let onDark = Color { r: 0.86 g: 0.87 b: 0.90 a: 1.0 }
+    let onLight = Color { r: 0.32, g: 0.33, b: 0.36, a: 1.0 }
+    let onDark = Color { r: 0.86, g: 0.87, b: 0.90, a: 1.0 }
     let tint = mixColor(onLight, onDark, at)
     if selected {
         return withAlpha(tint, 0.30)
@@ -430,7 +430,7 @@ function sidebarRow(index: Int, svg: String, label: String, selected: Bool, hove
         height: .Fixed(42.0),
         flex: 0,
         fill: sidebarRowFill(selected, hovered, at),
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        border: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 14.0,
         shape: .RegularRoundedRect,
@@ -457,7 +457,7 @@ function sidebarSection(label: String, at: Float) -> FoundationView {
         height: .Fixed(26.0),
         flex: 0,
         alignment: .Leading,
-        padding: EdgeInsets { top: 8.0 leading: 14.0 }
+        padding: EdgeInsets { top: 8.0, leading: 14.0 }
     )
 }
 
@@ -532,9 +532,9 @@ function glassSidebar(context: borrow FoundationUiContext, demoUser: RawPtr, sel
                 flex: 0,
                 alignment: .TopLeading,
                 padding: EdgeInsets {
-                    top: 26.0
-                    trailing: sidebarPadding()
-                    bottom: 26.0
+                    top: 26.0,
+                    trailing: sidebarPadding(),
+                    bottom: 26.0,
                     leading: sidebarPadding()
                 }
             )

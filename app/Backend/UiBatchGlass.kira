@@ -55,7 +55,11 @@ extend UiBatch {
             if state.probeGlassLayerOpen {
                 print(646464)
                 print(0)
-                print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h)); print(1)
+                print(Int(x))
+                print(Int(y))
+                print(Int(w))
+                print(Int(h))
+                print(1)
             }
             openStream(state, graphics)
             return
@@ -70,7 +74,10 @@ extend UiBatch {
         if state.probeGlassLayerOpen {
             print(646464)
             print(state.streamIndex)
-            print(Int(x)); print(Int(y)); print(Int(w)); print(Int(h))
+            print(Int(x))
+            print(Int(y))
+            print(Int(w))
+            print(Int(h))
             if occupied { print(1) } else { print(0) }
         }
         if occupied {
@@ -334,36 +341,36 @@ extend UiBatch {
             var cachedInterior = false
             if cacheEligible {
                 cachedInterior = glassCacheKeyMatch(state, GlassSurfaceKey {
-                    glowX: glowX
-                    glowY: glowY
-                    glowStrength: glowStrength
-                    centreX: cx
-                    centreY: cy
-                    halfWidth: halfW
-                    halfHeight: halfH
-                    radius: clampedRadius
-                    tintR: tint.r
-                    tintG: tint.g
-                    tintB: tint.b
-                    tintAlpha: tint.a
-                    glowIntensity: glowIntensity
-                    edgeRefraction: edgeRefraction
-                    clipMinX: clipMinX
-                    clipMinY: clipMinY
-                    clipMaxX: clipMaxX
-                    clipMaxY: clipMaxY
-                    rimWidth: rimWidth
-                    washBlend: material.washBlend
-                    washUpperR: material.washUpperR
-                    washUpperG: material.washUpperG
-                    washUpperB: material.washUpperB
-                    washUpperAlpha: material.washUpperAlpha
-                    washUpperBlend: material.washUpperBlend
-                    blurNearSplit: material.blurNearSplit
-                    lensMaxBend: glassReachFor(material.lensMaxBend, halfW, halfH)
-                    refractionReach: glassReachFor(material.refractionReach, halfW, halfH)
-                    viewportWidth: vw
-                    viewportHeight: vh
+                    glowX: glowX,
+                    glowY: glowY,
+                    glowStrength: glowStrength,
+                    centreX: cx,
+                    centreY: cy,
+                    halfWidth: halfW,
+                    halfHeight: halfH,
+                    radius: clampedRadius,
+                    tintR: tint.r,
+                    tintG: tint.g,
+                    tintB: tint.b,
+                    tintAlpha: tint.a,
+                    glowIntensity: glowIntensity,
+                    edgeRefraction: edgeRefraction,
+                    clipMinX: clipMinX,
+                    clipMinY: clipMinY,
+                    clipMaxX: clipMaxX,
+                    clipMaxY: clipMaxY,
+                    rimWidth: rimWidth,
+                    washBlend: material.washBlend,
+                    washUpperR: material.washUpperR,
+                    washUpperG: material.washUpperG,
+                    washUpperB: material.washUpperB,
+                    washUpperAlpha: material.washUpperAlpha,
+                    washUpperBlend: material.washUpperBlend,
+                    blurNearSplit: material.blurNearSplit,
+                    lensMaxBend: glassReachFor(material.lensMaxBend, halfW, halfH),
+                    refractionReach: glassReachFor(material.refractionReach, halfW, halfH),
+                    viewportWidth: vw,
+                    viewportHeight: vh,
                     backdrop: Float(state.glassBlurSourceId) + state.backgroundTransition * 0.5 + Float(state.glassCacheEpochValue) * 16384.0
                 })
             }

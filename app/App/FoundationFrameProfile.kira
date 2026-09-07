@@ -72,8 +72,8 @@ function foundationFrameProfileFromEnvironment() -> FoundationFrameProfile {
         warmupFrames = 0
     }
     return FoundationFrameProfile {
-        enabled: environmentIsSet("KIRA_UI_FRAME_PROFILE")
-        warmupFrames: warmupFrames
+        enabled: environmentIsSet("KIRA_UI_FRAME_PROFILE"),
+        warmupFrames: warmupFrames,
         sampleFrames: sampleFrames
     }
 }
@@ -208,26 +208,26 @@ function FoundationFrameProfileSmoke() -> Int {
     var passed = 0
 
     let steady = FoundationFramePhases {
-        buildNs: 1000000
-        layoutNs: 500000
-        renderNs: 500000
-        presentNs: 1500000
+        buildNs: 1000000,
+        layoutNs: 500000,
+        renderNs: 500000,
+        presentNs: 1500000,
         frameNs: 4000000
     }
     let present = UiBatchPhaseTimes {
-        uploadNs: 100000
-        captureNs: 200000
-        blurNs: 900000
+        uploadNs: 100000,
+        captureNs: 200000,
+        blurNs: 900000,
         compositeNs: 300000
     }
     let glass = UiGlassFrameStats {
-        surfaces: 10
-        patchQuads: 89
-        layers: 1
-        captureReplays: 1
-        captureRegions: 1
-        blurDispatches: 2
-        cachedInteriors: 0
+        surfaces: 10,
+        patchQuads: 89,
+        layers: 1,
+        captureReplays: 1,
+        captureRegions: 1,
+        blurDispatches: 2,
+        cachedInteriors: 0,
         liveInteriors: 10
     }
 
@@ -240,8 +240,8 @@ function FoundationFrameProfileSmoke() -> Int {
     // Warm-up frames are seen and discarded; the window then takes exactly its
     // own size and stops.
     var profile = FoundationFrameProfile {
-        enabled: true
-        warmupFrames: 1
+        enabled: true,
+        warmupFrames: 1,
         sampleFrames: 2
     }
     var frame = 0
@@ -259,20 +259,20 @@ function FoundationFrameProfileSmoke() -> Int {
     // The remainder the four phases do not account for.
     passed = passed + smokePass(profile.otherNs == 1000000)
     passed = passed + smokePass(foundationProfileOtherNs(FoundationFramePhases {
-        buildNs: 3000
+        buildNs: 3000,
         frameNs: 1000
     }) == 0)
 
     // A re-presented frame reports no build, no layout and no walk, and is
     // counted apart so a mean can be read as the fast path's own.
     var fast = FoundationFrameProfile {
-        enabled: true
-        warmupFrames: 0
+        enabled: true,
+        warmupFrames: 0,
         sampleFrames: 1
     }
     foundationProfileSample(fast, FoundationFramePhases {
-        presentNs: 2000000
-        frameNs: 2000000
+        presentNs: 2000000,
+        frameNs: 2000000,
         represented: true
     }, present, glass)
     passed = passed + smokePass(fast.represents == 1)

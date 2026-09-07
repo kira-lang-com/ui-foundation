@@ -8,6 +8,8 @@
 // branch again.
 
 // Cached-interior surface slots; surfaces past the cap render live.
+import Foundation
+
 function glassCacheMaxSurfaces() -> Int { return 32 }
 
 // Compare (and store) this surface's cache key at the current push-order

@@ -24,8 +24,8 @@ struct ImeComposition {
 
 function imeReset() -> ImeComposition {
     return ImeComposition {
-        letters: []
-        candidates: []
+        letters: [],
+        candidates: [],
         activeIndex: 0
     }
 }
@@ -189,8 +189,8 @@ function imeAppendLetter(comp: borrow ImeComposition, codepoint: Int) -> ImeComp
     letters.append(codepoint)
     let candidates = imeCandidatesForLetters(letters)
     return ImeComposition {
-        letters: move letters
-        candidates: move candidates
+        letters: move letters,
+        candidates: move candidates,
         activeIndex: 0
     }
 }
@@ -213,8 +213,8 @@ function imeBackspace(comp: borrow ImeComposition) -> ImeComposition {
     }
     let candidates = imeCandidatesForLetters(letters)
     return ImeComposition {
-        letters: move letters
-        candidates: move candidates
+        letters: move letters,
+        candidates: move candidates,
         activeIndex: 0
     }
 }
@@ -234,8 +234,8 @@ function imeClampIndex(comp: borrow ImeComposition, index: Int) -> Int {
 
 function imeSelectIndex(comp: borrow ImeComposition, index: Int) -> ImeComposition {
     return ImeComposition {
-        letters: imeCloneInts(comp.letters)
-        candidates: imeCloneInts(comp.candidates)
+        letters: imeCloneInts(comp.letters),
+        candidates: imeCloneInts(comp.candidates),
         activeIndex: imeClampIndex(comp, index)
     }
 }

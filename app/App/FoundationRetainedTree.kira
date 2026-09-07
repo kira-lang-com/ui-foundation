@@ -52,33 +52,33 @@ function foundationBoolCode(value: Bool) -> Int {
 
 function foundationViewKindCode(kind: FoundationViewKind) -> Int {
     match kind {
-        Row -> return 1;
-        Column -> return 2;
-        Expanded -> return 3;
-        Frame -> return 4;
-        Spacer -> return 5;
-        Surface -> return 6;
-        Text -> return 7;
-        HitArea -> return 8;
-        LayoutPriority -> return 9;
-        TextureView -> return 10;
-        Icon -> return 11;
+        Row -> return 1
+        Column -> return 2
+        Expanded -> return 3
+        Frame -> return 4
+        Spacer -> return 5
+        Surface -> return 6
+        Text -> return 7
+        HitArea -> return 8
+        LayoutPriority -> return 9
+        TextureView -> return 10
+        Icon -> return 11
     }
 }
 
 function foundationMaterialCode(material: FoundationMaterial) -> Int {
     match material {
-        Flat -> return 1;
-        Frosted -> return 2;
-        LiquidGlass -> return 3;
-        WindowBackdrop -> return 4;
+        Flat -> return 1
+        Frosted -> return 2
+        LiquidGlass -> return 3
+        WindowBackdrop -> return 4
     }
 }
 
 function foundationShapeCode(shape: FoundationShape) -> Int {
     match shape {
-        RegularRoundedRect -> return 1;
-        Squircle -> return 2;
+        RegularRoundedRect -> return 1
+        Squircle -> return 2
     }
 }
 
@@ -166,18 +166,18 @@ function foundationRetainedNodeWithChildren(
 ) -> FoundationRetainedNode {
     let count = childIds.count
     return FoundationRetainedNode {
-        id: node.id
-        parentId: node.parentId
-        key: node.key
-        childOrdinal: node.childOrdinal
-        kind: node.kind
-        childIds: move childIds
-        childCount: count
-        layoutSignature: node.layoutSignature
-        renderSignature: node.renderSignature
-        layoutDirty: layoutDirty
-        renderDirty: renderDirty
-        mounted: node.mounted
+        id: node.id,
+        parentId: node.parentId,
+        key: node.key,
+        childOrdinal: node.childOrdinal,
+        kind: node.kind,
+        childIds: move childIds,
+        childCount: count,
+        layoutSignature: node.layoutSignature,
+        renderSignature: node.renderSignature,
+        layoutDirty: layoutDirty,
+        renderDirty: renderDirty,
+        mounted: node.mounted,
         stateSlot: node.stateSlot
     }
 }
@@ -196,16 +196,16 @@ function foundationRetainedEnsureStateSlot(tree: FoundationRetainedTree, nodeId:
     if nodeId < next.stateSlotIds.count && next.stateSlotIds[nodeId] != -1 {
         let index = next.stateSlotIds[nodeId]
         next.stateSlots[index] = FoundationRetainedStateSlot {
-            nodeId: nodeId
-            value: next.stateSlots[index].value
+            nodeId: nodeId,
+            value: next.stateSlots[index].value,
             active: true
         }
         next.lastStateSlot = index
         return next
     } else {
         next.stateSlots.append(FoundationRetainedStateSlot {
-            nodeId: nodeId
-            value: 0
+            nodeId: nodeId,
+            value: 0,
             active: true
         })
         let slotIndex = next.stateSlots.count - 1
@@ -223,8 +223,8 @@ function foundationRetainedDeactivateStateForNode(tree: FoundationRetainedTree, 
     if nodeId < next.stateSlotIds.count && next.stateSlotIds[nodeId] != -1 {
         let index = next.stateSlotIds[nodeId]
         next.stateSlots[index] = FoundationRetainedStateSlot {
-            nodeId: nodeId
-            value: next.stateSlots[index].value
+            nodeId: nodeId,
+            value: next.stateSlots[index].value,
             active: false
         }
         next.stateSlotIds[nodeId] = -1
@@ -246,8 +246,8 @@ function foundationRetainedAppendFreshNode(
     // ensureStateSlot inlined: a fresh mount node always has a new id, so only
     // the append arm applies; the call boundary cloned the tree per node.
     next.stateSlots.append(FoundationRetainedStateSlot {
-        nodeId: nodeId
-        value: 0
+        nodeId: nodeId,
+        value: 0,
         active: true
     })
     let nodeSlot = next.stateSlots.count - 1
@@ -257,18 +257,18 @@ function foundationRetainedAppendFreshNode(
     next.stateSlotIds[nodeId] = nodeSlot
     let nodeIndex = next.nodes.count
     next.nodes.append(FoundationRetainedNode {
-        id: nodeId
-        parentId: parentId
-        key: view.key
-        childOrdinal: childOrdinal
-        kind: view.kind
-        childIds: []
-        childCount: view.children.count
-        layoutSignature: foundationLayoutSignature(view)
-        renderSignature: foundationRenderSignature(view)
-        layoutDirty: true
-        renderDirty: true
-        mounted: true
+        id: nodeId,
+        parentId: parentId,
+        key: view.key,
+        childOrdinal: childOrdinal,
+        kind: view.kind,
+        childIds: [],
+        childCount: view.children.count,
+        layoutSignature: foundationLayoutSignature(view),
+        renderSignature: foundationRenderSignature(view),
+        layoutDirty: true,
+        renderDirty: true,
+        mounted: true,
         stateSlot: nodeSlot
     })
     next.mountCount = next.mountCount + 1
@@ -416,18 +416,18 @@ function foundationRetainedReconcileNode(
         let reusedSlot = next.lastStateSlot
         let nodeIndex = next.nodes.count
         next.nodes.append(FoundationRetainedNode {
-            id: reusableId
-            parentId: parentId
-            key: view.key
-            childOrdinal: childOrdinal
-            kind: view.kind
-            childIds: []
-            childCount: view.children.count
-            layoutSignature: layoutSignature
-            renderSignature: renderSignature
-            layoutDirty: layoutDirty
-            renderDirty: renderDirty
-            mounted: true
+            id: reusableId,
+            parentId: parentId,
+            key: view.key,
+            childOrdinal: childOrdinal,
+            kind: view.kind,
+            childIds: [],
+            childCount: view.children.count,
+            layoutSignature: layoutSignature,
+            renderSignature: renderSignature,
+            layoutDirty: layoutDirty,
+            renderDirty: renderDirty,
+            mounted: true,
             stateSlot: reusedSlot
         })
 

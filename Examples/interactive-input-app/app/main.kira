@@ -10,29 +10,29 @@ struct InteractiveInputState {
 }
 
 function appBackground() -> Color {
-    return Color { r: 0.05 g: 0.06 b: 0.09 a: 1.0 }
+    return Color { r: 0.05, g: 0.06, b: 0.09, a: 1.0 }
 }
 
 function panelFill(active: Bool) -> Color {
     if active {
-        return Color { r: 0.22 g: 0.36 b: 0.62 a: 1.0 }
+        return Color { r: 0.22, g: 0.36, b: 0.62, a: 1.0 }
     }
-    return Color { r: 0.14 g: 0.16 b: 0.23 a: 1.0 }
+    return Color { r: 0.14, g: 0.16, b: 0.23, a: 1.0 }
 }
 
 function panelBorder(active: Bool) -> Color {
     if active {
-        return Color { r: 0.80 g: 0.90 b: 1.0 a: 0.55 }
+        return Color { r: 0.80, g: 0.90, b: 1.0, a: 0.55 }
     }
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 0.12 }
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 0.12 }
 }
 
 function primaryText() -> Color {
-    return Color { r: 0.96 g: 0.97 b: 0.99 a: 1.0 }
+    return Color { r: 0.96, g: 0.97, b: 0.99, a: 1.0 }
 }
 
 function secondaryText() -> Color {
-    return Color { r: 0.74 g: 0.80 b: 0.88 a: 1.0 }
+    return Color { r: 0.74, g: 0.80, b: 0.88, a: 1.0 }
 }
 
 function placeholderOrValue(value: String) -> String {
@@ -131,9 +131,9 @@ function interactiveCard(
                 material: FoundationMaterial.Flat,
                 effects: [],
                 padding: EdgeInsets {
-                    top: 22.0
-                    trailing: 22.0
-                    bottom: 22.0
+                    top: 22.0,
+                    trailing: 22.0,
+                    bottom: 22.0,
                     leading: 22.0
                 },
                 clipContent: true
@@ -251,16 +251,16 @@ function interactiveRoot(
         height: SizeMode.Fill,
         flex: 0,
         fill: appBackground(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 28.0
-            trailing: 28.0
-            bottom: 28.0
+            top: 28.0,
+            trailing: 28.0,
+            bottom: 28.0,
             leading: 28.0
         },
         clipContent: true

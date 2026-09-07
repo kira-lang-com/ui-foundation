@@ -76,9 +76,9 @@ function foundationRenderChildren(
 function foundationRenderDeform(view: borrow FoundationView, tree: borrow LayoutTree, nodeIndex: Int, inherited: borrow FoundationDeform) -> FoundationDeform {
     if view.deform.scaleX == 1.0 && view.deform.scaleY == 1.0 && view.deform.pressScale == 1.0 && view.deform.x == 0.0 && view.deform.y == 0.0 {
         return FoundationDeform {
-            scaleX: inherited.scaleX
-            scaleY: inherited.scaleY
-            translateX: inherited.translateX
+            scaleX: inherited.scaleX,
+            scaleY: inherited.scaleY,
+            translateX: inherited.translateX,
             translateY: inherited.translateY
         }
     }
@@ -210,11 +210,11 @@ function foundationRenderView(
             current.drawIconFields(frame, view.content, view.color, view.weightGrowth, view.rotation)
             return 1
         }
-        Row -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
-        Column -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
-        Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
-        Frame -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
-        Spacer -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
-        LayoutPriority -> return foundationRenderChildren(view, tree, nodeIndex, current, deform);
+        Row -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
+        Column -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
+        Expanded -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
+        Frame -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
+        Spacer -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
+        LayoutPriority -> return foundationRenderChildren(view, tree, nodeIndex, current, deform)
     }
 }

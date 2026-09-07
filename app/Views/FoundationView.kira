@@ -38,10 +38,10 @@ enum FoundationGradient {
 
 function foundationGradientAxis(gradient: borrow FoundationGradient) -> Float {
     match gradient {
-        None -> return 0.0;
-        Down -> return 1.0;
-        Across -> return 2.0;
-        Diagonal -> return 3.0;
+        None -> return 0.0
+        Down -> return 1.0
+        Across -> return 2.0
+        Diagonal -> return 3.0
     }
 }
 
@@ -120,15 +120,15 @@ struct FoundationView {
     let crossAxisAlignment: CrossAlignment = .Stretch
     let alignment: Alignment = .Center
     let fill: Color = Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 1.0
     }
     let border: Color = Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
         a: 0.0
     }
     let borderWidth: Float = 0.0
@@ -146,9 +146,9 @@ struct FoundationView {
     // Optional background painted behind a HitArea (transparent = none). Buttons
     // use it for their default hover highlight without any layout wrapping.
     let backgroundFill: Color = Color {
-        r: 0.0
-        g: 0.0
-        b: 0.0
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
         a: 0.0
     }
     let shape: FoundationShape = .RegularRoundedRect
@@ -163,9 +163,9 @@ struct FoundationView {
     let sizingProxy: Bool = false
     let content: String = ""
     let color: Color = Color {
-        r: 0.08
-        g: 0.08
-        b: 0.10
+        r: 0.08,
+        g: 0.08,
+        b: 0.10,
         a: 1.0
     }
     let size: Float = 15.0
@@ -294,21 +294,21 @@ function foundationViewChildren(view: borrow FoundationView) -> [FoundationView]
 
 function foundationLayoutDescriptorWithFlex(layout: borrow LayoutDescriptor, flex: Int) -> LayoutDescriptor {
     return LayoutDescriptor {
-        width: layout.width
-        height: layout.height
-        flex: flex
-        arrange: layout.arrange
-        axis: layout.axis
-        spacing: layout.spacing
-        rowSpacing: layout.rowSpacing
-        alignment: layout.alignment
-        overlayAlignment: layout.overlayAlignment
-        columns: layout.columns
-        padding: layout.padding
-        margin: layout.margin
-        x: layout.x
-        y: layout.y
-        zIndex: layout.zIndex
+        width: layout.width,
+        height: layout.height,
+        flex: flex,
+        arrange: layout.arrange,
+        axis: layout.axis,
+        spacing: layout.spacing,
+        rowSpacing: layout.rowSpacing,
+        alignment: layout.alignment,
+        overlayAlignment: layout.overlayAlignment,
+        columns: layout.columns,
+        padding: layout.padding,
+        margin: layout.margin,
+        x: layout.x,
+        y: layout.y,
+        zIndex: layout.zIndex,
         clipContent: layout.clipContent
     }
 }
@@ -408,56 +408,56 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
     match view.kind {
         Row -> {
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                arrange: .Stack
-                axis: .Horizontal
-                spacing: view.gap
-                alignment: view.crossAxisAlignment
-                overlayAlignment: .Center
-                baseline: foundationDeepestBaseline(view)
-                padding: view.padding
+                width: view.width,
+                height: view.height,
+                arrange: .Stack,
+                axis: .Horizontal,
+                spacing: view.gap,
+                alignment: view.crossAxisAlignment,
+                overlayAlignment: .Center,
+                baseline: foundationDeepestBaseline(view),
+                padding: view.padding,
                 margin: EdgeInsets {}
             }
         }
         Column -> {
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                arrange: .Stack
-                axis: .Vertical
-                spacing: view.gap
-                alignment: view.crossAxisAlignment
-                overlayAlignment: .Center
-                baseline: foundationWrappedBaseline(view)
-                padding: view.padding
+                width: view.width,
+                height: view.height,
+                arrange: .Stack,
+                axis: .Vertical,
+                spacing: view.gap,
+                alignment: view.crossAxisAlignment,
+                overlayAlignment: .Center,
+                baseline: foundationWrappedBaseline(view),
+                padding: view.padding,
                 margin: EdgeInsets {}
             }
         }
         Expanded -> {
             return LayoutDescriptor {
-                width: .Fill
-                height: .Fill
-                flex: view.flex
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                padding: EdgeInsets {}
+                width: .Fill,
+                height: .Fill,
+                flex: view.flex,
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                padding: EdgeInsets {},
                 margin: EdgeInsets {}
             }
         }
         Frame -> {
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                flex: view.flex
-                arrange: .Overlay
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: view.alignment
-                baseline: foundationWrappedBaseline(view)
-                padding: view.padding
+                width: view.width,
+                height: view.height,
+                flex: view.flex,
+                arrange: .Overlay,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: view.alignment,
+                baseline: foundationWrappedBaseline(view),
+                padding: view.padding,
                 margin: EdgeInsets {}
             }
         }
@@ -472,14 +472,14 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             // instead and put the panel in the bottom-right corner.
             let ignored = view.minLength
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                flex: view.flex
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                padding: EdgeInsets {}
+                width: view.width,
+                height: view.height,
+                flex: view.flex,
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                padding: EdgeInsets {},
                 margin: EdgeInsets {}
             }
         }
@@ -490,28 +490,28 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             // and content that never overflows never scrolls.
             if view.scrolls {
                 return LayoutDescriptor {
-                    width: view.width
-                    height: view.height
-                    flex: view.flex
-                    arrange: .Overlay
-                    axis: .Vertical
-                    alignment: .Stretch
-                    overlayAlignment: .TopLeading
-                    padding: view.padding
-                    margin: EdgeInsets {}
+                    width: view.width,
+                    height: view.height,
+                    flex: view.flex,
+                    arrange: .Overlay,
+                    axis: .Vertical,
+                    alignment: .Stretch,
+                    overlayAlignment: .TopLeading,
+                    padding: view.padding,
+                    margin: EdgeInsets {},
                     clipContent: view.clipContent
                 }
             }
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                flex: view.flex
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                padding: view.padding
-                margin: EdgeInsets {}
+                width: view.width,
+                height: view.height,
+                flex: view.flex,
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                padding: view.padding,
+                margin: EdgeInsets {},
                 clipContent: view.clipContent
             }
         }
@@ -544,14 +544,14 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
                 textHeight = view.lineHeight
             }
             return LayoutDescriptor {
-                width: .Fixed(textWidth)
-                height: .Fixed(textHeight)
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                baseline: foundationTextBaseline(view.size, view.weight, textHeight)
-                padding: EdgeInsets {}
+                width: .Fixed(textWidth),
+                height: .Fixed(textHeight),
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                baseline: foundationTextBaseline(view.size, view.weight, textHeight),
+                padding: EdgeInsets {},
                 margin: EdgeInsets {}
             }
         }
@@ -563,14 +563,14 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             // area that dropped the padding drew the fill tight around the
             // letters.
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                baseline: foundationWrappedBaseline(view)
-                padding: view.padding
+                width: view.width,
+                height: view.height,
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                baseline: foundationWrappedBaseline(view),
+                padding: view.padding,
                 margin: EdgeInsets {}
             }
         }
@@ -578,14 +578,14 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             // A sized leaf: the texture stretches to whatever box the layout gives it
             // (Fixed / Fill via the width/height modes, flex-participating like Surface).
             return LayoutDescriptor {
-                width: view.width
-                height: view.height
-                flex: view.flex
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                padding: EdgeInsets {}
+                width: view.width,
+                height: view.height,
+                flex: view.flex,
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                padding: EdgeInsets {},
                 margin: EdgeInsets {}
             }
         }
@@ -593,28 +593,28 @@ function foundationViewLayoutDescriptor(view: borrow FoundationView) -> LayoutDe
             // A fixed leaf, the size of the symbol's own ink: as tall as the band
             // it was asked to fill and as wide as its drawing is at that height.
             return LayoutDescriptor {
-                width: .Fixed(foundationIconWidth(view))
-                height: .Fixed(view.size)
-                arrange: .Fill
-                axis: .Vertical
-                alignment: .Stretch
-                overlayAlignment: .Center
-                baseline: view.baseline
-                padding: EdgeInsets {}
+                width: .Fixed(foundationIconWidth(view)),
+                height: .Fixed(view.size),
+                arrange: .Fill,
+                axis: .Vertical,
+                alignment: .Stretch,
+                overlayAlignment: .Center,
+                baseline: view.baseline,
+                padding: EdgeInsets {},
                 margin: EdgeInsets {}
             }
         }
         LayoutPriority -> {
             if view.children.count == 0 {
                 return LayoutDescriptor {
-                    width: .Hug
-                    height: .Hug
-                    flex: view.flex
-                    arrange: .Fill
-                    axis: .Vertical
-                    alignment: .Stretch
-                    overlayAlignment: .Center
-                    padding: EdgeInsets {}
+                    width: .Hug,
+                    height: .Hug,
+                    flex: view.flex,
+                    arrange: .Fill,
+                    axis: .Vertical,
+                    alignment: .Stretch,
+                    overlayAlignment: .Center,
+                    padding: EdgeInsets {},
                     margin: EdgeInsets {}
                 }
             }

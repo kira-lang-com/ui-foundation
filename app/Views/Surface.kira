@@ -32,26 +32,26 @@ function Surface(
     morphBlend: Float = 0.0,
 ) -> FoundationView {
     return FoundationView {
-        kind: .Surface
-        blur: blur
-        edgeRefraction: edgeRefraction
-        glassMaterial: glassMaterial
-        deform: deform
-        glow: glow
-        morph: morph
-        morphBlend: morphBlend
-        children: move children
-        width: width
-        height: height
-        flex: flex
-        fill: fill
-        border: border
-        borderWidth: borderWidth
-        radius: radius
-        shape: shape
-        material: material
-        effects: move effects
-        padding: padding
+        kind: .Surface,
+        blur: blur,
+        edgeRefraction: edgeRefraction,
+        glassMaterial: glassMaterial,
+        deform: deform,
+        glow: glow,
+        morph: morph,
+        morphBlend: morphBlend,
+        children: move children,
+        width: width,
+        height: height,
+        flex: flex,
+        fill: fill,
+        border: border,
+        borderWidth: borderWidth,
+        radius: radius,
+        shape: shape,
+        material: material,
+        effects: move effects,
+        padding: padding,
         clipContent: clipContent
     }
 }
@@ -75,7 +75,7 @@ function LiquidGlassSurface(
     // Overrides the table's colour while keeping its opacities and blend modes,
     // for a surface that wants the platform's material in a hue of its own. White
     // leaves the Light table exactly as the platform ships it.
-    tint: Color = Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
+    tint: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
     blur: FoundationBlur = .Step,
     edgeRefraction: Float = 1.0,
     glassMaterial: FoundationGlassMaterial = FoundationGlassMaterial {},
@@ -121,7 +121,7 @@ function LiquidGlassSurface(
         height: move height,
         flex: flex,
         fill: foundationTintFill(stack),
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        border: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.0 },
         borderWidth: 1.0,
         radius: radius,
         shape: move shape,
@@ -145,8 +145,8 @@ function Sidebar(child: FoundationView, width: Float, padding: EdgeInsets) -> Fo
         width: .Fixed(width),
         height: .Fill,
         flex: 0,
-        fill: Color { r: 0.13 g: 0.14 b: 0.19 a: 0.96 },
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.08 },
+        fill: Color { r: 0.13, g: 0.14, b: 0.19, a: 0.96 },
+        border: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.08 },
         borderWidth: 1.0,
         radius: 28.0,
         shape: .RegularRoundedRect,
@@ -164,15 +164,15 @@ function Card(children: [FoundationView]) -> FoundationView {
         height: .Hug,
         flex: 0,
         fill: Color {
-            r: 1.0
-            g: 1.0
-            b: 1.0
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
             a: 0.18
         },
         border: Color {
-            r: 1.0
-            g: 1.0
-            b: 1.0
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
             a: 0.26
         },
         borderWidth: 1.0,
@@ -182,19 +182,19 @@ function Card(children: [FoundationView]) -> FoundationView {
         effects: [
             .LayerGlow(Glow {
                 color: Color {
-                    r: 0.30
-                    g: 0.55
-                    b: 1.0
+                    r: 0.30,
+                    g: 0.55,
+                    b: 1.0,
                     a: 1.0
-                }
-                radius: 18.0
+                },
+                radius: 18.0,
                 intensity: 0.45
             })
         ],
         padding: EdgeInsets {
-            top: 16.0
-            trailing: 18.0
-            bottom: 16.0
+            top: 16.0,
+            trailing: 18.0,
+            bottom: 16.0,
             leading: 18.0
         },
         clipContent: true

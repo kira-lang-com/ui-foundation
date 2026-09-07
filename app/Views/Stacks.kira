@@ -8,12 +8,12 @@ function Row(
     crossAxisAlignment: CrossAlignment,
 ) -> FoundationView {
     return FoundationView {
-        kind: .Row
-        width: width
-        height: height
-        gap: spacing
-        padding: padding
-        crossAxisAlignment: crossAxisAlignment
+        kind: .Row,
+        width: width,
+        height: height,
+        gap: spacing,
+        padding: padding,
+        crossAxisAlignment: crossAxisAlignment,
         children: move children
     }
 }
@@ -27,20 +27,20 @@ function Column(
     crossAxisAlignment: CrossAlignment,
 ) -> FoundationView {
     return FoundationView {
-        kind: .Column
-        width: width
-        height: height
-        gap: spacing
-        padding: padding
-        crossAxisAlignment: crossAxisAlignment
+        kind: .Column,
+        width: width,
+        height: height,
+        gap: spacing,
+        padding: padding,
+        crossAxisAlignment: crossAxisAlignment,
         children: move children
     }
 }
 
 function Expanded(child: FoundationView, flex: Int) -> FoundationView {
     return FoundationView {
-        kind: .Expanded
-        flex: flex
+        kind: .Expanded,
+        flex: flex,
         children: [child]
     }
 }
@@ -60,30 +60,30 @@ function Frame(
     padding: EdgeInsets,
 ) -> FoundationView {
     return FoundationView {
-        kind: .Frame
-        width: width
-        height: height
-        flex: flex
-        alignment: alignment
-        padding: padding
+        kind: .Frame,
+        width: width,
+        height: height,
+        flex: flex,
+        alignment: alignment,
+        padding: padding,
         children: [child]
     }
 }
 
 function Spacer(minLength: Float, flex: Int) -> FoundationView {
     return FoundationView {
-        kind: .Spacer
-        width: .Fill
-        height: .Fill
-        flex: flex
+        kind: .Spacer,
+        width: .Fill,
+        height: .Fill,
+        flex: flex,
         minLength: minLength
     }
 }
 
 function LayoutPriority(child: FoundationView, value: Int) -> FoundationView {
     return FoundationView {
-        kind: .LayoutPriority
-        flex: value
+        kind: .LayoutPriority,
+        flex: value,
         children: [child]
     }
 }

@@ -550,7 +550,7 @@ function rootView(context: borrow FoundationUiContext, stateUser: RawPtr, state:
                     height: SizeMode.Fill,
                     flex: 0,
                     alignment: Alignment.TopLeading,
-                    padding: EdgeInsets { top: 14.0 trailing: 18.0 bottom: 14.0 leading: 18.0 }
+                    padding: EdgeInsets { top: 14.0, trailing: 18.0, bottom: 14.0, leading: 18.0 }
                 )
             ],
             w: sidebarWidth(), h: context.viewport.height - 36.0, radius: 28.0,
@@ -579,7 +579,7 @@ function rootView(context: borrow FoundationUiContext, stateUser: RawPtr, state:
         height: SizeMode.Fill,
         flex: 0,
         alignment: Alignment.TopLeading,
-        padding: EdgeInsets { top: 40.0 leading: sidebarWidth() + 64.0 }
+        padding: EdgeInsets { top: 40.0, leading: sidebarWidth() + 64.0 }
     ))
     layers.append(Frame(
         child: canvas(state),
@@ -587,15 +587,15 @@ function rootView(context: borrow FoundationUiContext, stateUser: RawPtr, state:
         height: SizeMode.Fill,
         flex: 0,
         alignment: Alignment.TopLeading,
-        padding: EdgeInsets { top: 132.0 leading: sidebarWidth() + 64.0 }
+        padding: EdgeInsets { top: 132.0, leading: sidebarWidth() + 64.0 }
     ))
     return Surface(
         children: move layers,
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: Color { r: 0.09 g: 0.10 b: 0.13 a: 1.0 },
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        fill: Color { r: 0.09, g: 0.10, b: 0.13, a: 1.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,

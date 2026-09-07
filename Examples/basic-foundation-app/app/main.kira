@@ -6,51 +6,51 @@ import KiraUIFoundation
 // A warm, minimalist light theme with refined neutrals.
 
 function bgBase() -> Color {
-    return Color { r: 0.96 g: 0.95 b: 0.93 a: 1.0 }  // #F5F2ED — warm cream
+    return Color { r: 0.96, g: 0.95, b: 0.93, a: 1.0 }  // #F5F2ED — warm cream
 }
 
 function bgSidebar() -> Color {
-    return Color { r: 0.93 g: 0.91 b: 0.88 a: 1.0 }  // #EDE8E1 — slightly warmer
+    return Color { r: 0.93, g: 0.91, b: 0.88, a: 1.0 }  // #EDE8E1 — slightly warmer
 }
 
 function surfaceWhite() -> Color {
-    return Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }     // #FFFFFF — crisp white
+    return Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }     // #FFFFFF — crisp white
 }
 
 function borderSoft() -> Color {
-    return Color { r: 0.89 g: 0.86 b: 0.82 a: 1.0 }  // #E3DDD2 — soft warm border
+    return Color { r: 0.89, g: 0.86, b: 0.82, a: 1.0 }  // #E3DDD2 — soft warm border
 }
 
 function borderSubtle() -> Color {
-    return Color { r: 0.91 g: 0.89 b: 0.85 a: 1.0 }  // #E9E4D9 — barely there
+    return Color { r: 0.91, g: 0.89, b: 0.85, a: 1.0 }  // #E9E4D9 — barely there
 }
 
 function textPrimary() -> Color {
-    return Color { r: 0.11 g: 0.11 b: 0.12 a: 1.0 }  // #1C1C1E — soft black
+    return Color { r: 0.11, g: 0.11, b: 0.12, a: 1.0 }  // #1C1C1E — soft black
 }
 
 function textSecondary() -> Color {
-    return Color { r: 0.56 g: 0.56 b: 0.58 a: 1.0 }  // #8E8E93 — muted gray
+    return Color { r: 0.56, g: 0.56, b: 0.58, a: 1.0 }  // #8E8E93 — muted gray
 }
 
 function textMuted() -> Color {
-    return Color { r: 0.69 g: 0.68 b: 0.66 a: 1.0 }  // #B0ADA9 — faint
+    return Color { r: 0.69, g: 0.68, b: 0.66, a: 1.0 }  // #B0ADA9 — faint
 }
 
 function accentTaupe() -> Color {
-    return Color { r: 0.61 g: 0.53 b: 0.48 a: 1.0 }  // #9B8B7A — warm taupe
+    return Color { r: 0.61, g: 0.53, b: 0.48, a: 1.0 }  // #9B8B7A — warm taupe
 }
 
 function statGreen() -> Color {
-    return Color { r: 0.45 g: 0.68 b: 0.50 a: 1.0 }  // #73AE80 — muted sage
+    return Color { r: 0.45, g: 0.68, b: 0.50, a: 1.0 }  // #73AE80 — muted sage
 }
 
 function statBlue() -> Color {
-    return Color { r: 0.45 g: 0.58 b: 0.72 a: 1.0 }  // #7394B8 — muted blue
+    return Color { r: 0.45, g: 0.58, b: 0.72, a: 1.0 }  // #7394B8 — muted blue
 }
 
 function statOrange() -> Color {
-    return Color { r: 0.76 g: 0.58 b: 0.40 a: 1.0 }  // #C29466 — warm ochre
+    return Color { r: 0.76, g: 0.58, b: 0.40, a: 1.0 }  // #C29466 — warm ochre
 }
 
 // ── Sidebar ───────────────────────────────────────────────
@@ -71,7 +71,7 @@ function sidebarView() -> FoundationView {
                         height: SizeMode.Fixed(1.0),
                         flex: 0,
                         fill: borderSoft(),
-                        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+                        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
                         borderWidth: 0.0,
                         radius: 0.0,
                         shape: FoundationShape.RegularRoundedRect,
@@ -106,16 +106,16 @@ function sidebarView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: bgSidebar(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 32.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 32.0
-            trailing: 28.0
-            bottom: 28.0
+            top: 32.0,
+            trailing: 28.0,
+            bottom: 28.0,
             leading: 28.0
         },
         clipContent: true
@@ -150,9 +150,9 @@ function StatCard(value: String, label: String, accent: Color) -> FoundationView
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 20.0
-            trailing: 24.0
-            bottom: 20.0
+            top: 20.0,
+            trailing: 24.0,
+            bottom: 20.0,
             leading: 24.0
         },
         clipContent: true
@@ -189,7 +189,7 @@ function activityRow(label: String, detail: String) -> FoundationView {
                 height: SizeMode.Fixed(8.0),
                 flex: 0,
                 fill: accentTaupe(),
-                border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+                border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
                 borderWidth: 0.0,
                 radius: 4.0,
                 shape: FoundationShape.RegularRoundedRect,
@@ -225,7 +225,7 @@ function activityDivider() -> FoundationView {
         height: SizeMode.Fixed(1.0),
         flex: 0,
         fill: borderSubtle(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,
@@ -271,9 +271,9 @@ function activityCardView() -> FoundationView {
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 24.0
-            trailing: 28.0
-            bottom: 24.0
+            top: 24.0,
+            trailing: 28.0,
+            bottom: 24.0,
             leading: 28.0
         },
         clipContent: true
@@ -308,9 +308,9 @@ function regularCardView() -> FoundationView {
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 28.0
-            trailing: 28.0
-            bottom: 28.0
+            top: 28.0,
+            trailing: 28.0,
+            bottom: 28.0,
             leading: 28.0
         },
         clipContent: true
@@ -343,9 +343,9 @@ function squircleCardView() -> FoundationView {
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 28.0
-            trailing: 28.0
-            bottom: 28.0
+            top: 28.0,
+            trailing: 28.0,
+            bottom: 28.0,
             leading: 28.0
         },
         clipContent: true
@@ -412,9 +412,9 @@ function componentsCardView() -> FoundationView {
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 24.0
-            trailing: 28.0
-            bottom: 24.0
+            top: 24.0,
+            trailing: 28.0,
+            bottom: 24.0,
             leading: 28.0
         },
         clipContent: true
@@ -501,16 +501,16 @@ function FoundationDashboardView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: bgBase(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 32.0
-            trailing: 32.0
-            bottom: 32.0
+            top: 32.0,
+            trailing: 32.0,
+            bottom: 32.0,
             leading: 32.0
         },
         clipContent: false

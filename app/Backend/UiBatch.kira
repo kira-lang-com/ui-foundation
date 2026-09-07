@@ -260,14 +260,14 @@ function quadIndices(quadCount: Int) -> [U32] {
 // to name a face in, and it does not need one.
 function fontCandidates() -> [String] {
     match hostPlatform() {
-        MacOS -> return appleFontCandidates();
-        IOS -> return appleFontCandidates();
-        Windows -> return windowsFontCandidates();
-        Linux -> return linuxFontCandidates();
-        Web -> return [];
+        MacOS -> return appleFontCandidates()
+        IOS -> return appleFontCandidates()
+        Windows -> return windowsFontCandidates()
+        Linux -> return linuxFontCandidates()
+        Web -> return []
         // A host the build does not recognize gets every list, because a wrong
         // guess here costs a failed open and the bundled face is behind it.
-        Unknown -> return everyFontCandidate();
+        Unknown -> return everyFontCandidate()
     }
 }
 

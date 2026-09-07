@@ -16,14 +16,14 @@ function TextureView(
     transition: Float = 0.0,
 ) -> FoundationView {
     return FoundationView {
-        kind: .TextureView
-        width: width
-        height: height
-        flex: flex
-        texture: texture
-        textureOpacity: opacity
-        secondaryTexture: secondaryTexture
-        textureTransition: transition
+        kind: .TextureView,
+        width: width,
+        height: height,
+        flex: flex,
+        texture: texture,
+        textureOpacity: opacity,
+        secondaryTexture: secondaryTexture,
+        textureTransition: transition,
         radius: radius
     }
 }

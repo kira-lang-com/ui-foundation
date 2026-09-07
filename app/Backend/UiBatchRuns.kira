@@ -105,12 +105,12 @@ extend UiBatch {
             let buf = allocateBytes(U64(bufBytes))
             let rendered = rasterizeIconInk(svg, px, pxH, Float(growthKey) / 4.0, buf)
             var newSlot = UiGlyphSlot {
-                key: key
-                advance: 0.0
-                bearingX: 0
-                bearingY: 0
-                w: px
-                h: pxH
+                key: key,
+                advance: 0.0,
+                bearingX: 0,
+                bearingY: 0,
+                w: px,
+                h: pxH,
                 valid: true
             }
             if rendered != 0 {
@@ -403,12 +403,12 @@ extend UiBatch {
                             let gwp = readInt(bm, glyphWidthOffset())
                             let ghp = readInt(bm, glyphRowsOffset())
                             var newSlot = UiGlyphSlot {
-                                key: key
-                                advance: readFloat(bm, glyphAdvanceOffset())
-                                bearingX: readInt(bm, glyphBearingXOffset())
-                                bearingY: readInt(bm, glyphBearingYOffset())
-                                w: gwp
-                                h: ghp
+                                key: key,
+                                advance: readFloat(bm, glyphAdvanceOffset()),
+                                bearingX: readInt(bm, glyphBearingXOffset()),
+                                bearingY: readInt(bm, glyphBearingYOffset()),
+                                w: gwp,
+                                h: ghp,
                                 valid: true
                             }
                             let pitch = readInt(bm, glyphPitchOffset())

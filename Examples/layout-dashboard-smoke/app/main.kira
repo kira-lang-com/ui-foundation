@@ -4,90 +4,90 @@ import KiraUIFoundation
 
 function dashboardRootFill() -> Color {
     return Color {
-        r: 0.07
-        g: 0.08
-        b: 0.11
+        r: 0.07,
+        g: 0.08,
+        b: 0.11,
         a: 1.0
     }
 }
 
 function dashboardSidebarFill() -> Color {
     return Color {
-        r: 0.13
-        g: 0.14
-        b: 0.19
+        r: 0.13,
+        g: 0.14,
+        b: 0.19,
         a: 1.0
     }
 }
 
 function dashboardSidebarBorder() -> Color {
     return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 0.10
     }
 }
 
 function dashboardCardFill() -> Color {
     return Color {
-        r: 0.14
-        g: 0.16
-        b: 0.22
+        r: 0.14,
+        g: 0.16,
+        b: 0.22,
         a: 1.0
     }
 }
 
 function dashboardCardBorder() -> Color {
     return Color {
-        r: 1.0
-        g: 1.0
-        b: 1.0
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 0.14
     }
 }
 
 function dashboardRegularCardFill() -> Color {
     return Color {
-        r: 0.18
-        g: 0.19
-        b: 0.26
+        r: 0.18,
+        g: 0.19,
+        b: 0.26,
         a: 1.0
     }
 }
 
 function dashboardSquircleFill() -> Color {
     return Color {
-        r: 0.18
-        g: 0.22
-        b: 0.30
+        r: 0.18,
+        g: 0.22,
+        b: 0.30,
         a: 1.0
     }
 }
 
 function dashboardCardStageFill() -> Color {
     return Color {
-        r: 0.17
-        g: 0.18
-        b: 0.25
+        r: 0.17,
+        g: 0.18,
+        b: 0.25,
         a: 1.0
     }
 }
 
 function dashboardTextPrimary() -> Color {
     return Color {
-        r: 0.96
-        g: 0.97
-        b: 0.99
+        r: 0.96,
+        g: 0.97,
+        b: 0.99,
         a: 1.0
     }
 }
 
 function dashboardTextSecondary() -> Color {
     return Color {
-        r: 0.70
-        g: 0.76
-        b: 0.84
+        r: 0.70,
+        g: 0.76,
+        b: 0.84,
         a: 1.0
     }
 }
@@ -111,16 +111,16 @@ function dashboardSidebarView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: dashboardSidebarFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 48.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 32.0
-            trailing: 24.0
-            bottom: 32.0
+            top: 32.0,
+            trailing: 24.0,
+            bottom: 32.0,
             leading: 24.0
         },
         clipContent: true
@@ -146,16 +146,16 @@ function dashboardRegularCardView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: dashboardRegularCardFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 18.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
+            top: 36.0,
+            trailing: 36.0,
+            bottom: 36.0,
             leading: 36.0
         },
         clipContent: true
@@ -181,16 +181,16 @@ function dashboardSquircleCardView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: dashboardSquircleFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 72.0,
         shape: FoundationShape.Squircle,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
+            top: 36.0,
+            trailing: 36.0,
+            bottom: 36.0,
             leading: 36.0
         },
         clipContent: true
@@ -235,9 +235,9 @@ function dashboardMainCardView() -> FoundationView {
                         flex: 0,
                         alignment: Alignment.TopLeading,
                         padding: EdgeInsets {
-                            top: 6.0
-                            trailing: 6.0
-                            bottom: 6.0
+                            top: 6.0,
+                            trailing: 6.0,
+                            bottom: 6.0,
                             leading: 6.0
                         }
                     )
@@ -253,16 +253,16 @@ function dashboardMainCardView() -> FoundationView {
         height: SizeMode.Hug,
         flex: 0,
         fill: dashboardCardFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 56.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 36.0
-            trailing: 36.0
-            bottom: 36.0
+            top: 36.0,
+            trailing: 36.0,
+            bottom: 36.0,
             leading: 36.0
         },
         clipContent: true
@@ -316,16 +316,16 @@ function FoundationDashboardView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: dashboardRootFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,
         material: FoundationMaterial.Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 40.0
-            trailing: 40.0
-            bottom: 40.0
+            top: 40.0,
+            trailing: 40.0,
+            bottom: 40.0,
             leading: 40.0
         },
         clipContent: false
@@ -336,7 +336,7 @@ function FoundationDashboardLayoutSmoke() -> Int {
     let laidOut = runFoundationLayout(
         FoundationDashboardView(),
         Size {
-            width: 1280.0
+            width: 1280.0,
             height: 720.0
         }
     )

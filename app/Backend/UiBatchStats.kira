@@ -93,13 +93,13 @@ extend UiBatch {
     function glassFrameStats() -> UiGlassFrameStats {
         var state = nativeRecover<UiBatchState>(self.storage)
         return UiGlassFrameStats {
-            surfaces: state.glassStatSurfaces
-            patchQuads: state.glassStatPatchQuads
-            layers: state.glassStatLayers
-            captureReplays: state.glassStatCaptureReplays
-            captureRegions: state.glassStatCaptureRegions
-            blurDispatches: state.glassStatBlurDispatches
-            cachedInteriors: state.glassStatCachedInteriors
+            surfaces: state.glassStatSurfaces,
+            patchQuads: state.glassStatPatchQuads,
+            layers: state.glassStatLayers,
+            captureReplays: state.glassStatCaptureReplays,
+            captureRegions: state.glassStatCaptureRegions,
+            blurDispatches: state.glassStatBlurDispatches,
+            cachedInteriors: state.glassStatCachedInteriors,
             liveInteriors: state.glassStatLiveInteriors
         }
     }
@@ -110,9 +110,9 @@ extend UiBatch {
     function presentPhaseTimes() -> UiBatchPhaseTimes {
         var state = nativeRecover<UiBatchState>(self.storage)
         return UiBatchPhaseTimes {
-            uploadNs: state.presentUploadNs
-            captureNs: state.presentCaptureNs
-            blurNs: state.presentBlurNs
+            uploadNs: state.presentUploadNs,
+            captureNs: state.presentCaptureNs,
+            blurNs: state.presentBlurNs,
             compositeNs: state.presentCompositeNs
         }
     }

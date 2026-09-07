@@ -143,10 +143,10 @@ function morphMoving() -> Bool {
 // rectangle whose radius is half its shorter side.
 function badgeShape(state: borrow MorphState) -> MotionShape {
     return MotionShape {
-        x: motionSpringSample(state.x, state.x.elapsed).value
-        y: motionSpringSample(state.y, state.y.elapsed).value
-        width: badgeSize()
-        height: badgeSize()
+        x: motionSpringSample(state.x, state.x.elapsed).value,
+        y: motionSpringSample(state.y, state.y.elapsed).value,
+        width: badgeSize(),
+        height: badgeSize(),
         radius: badgeSize() * 0.5
     }
 }
@@ -159,28 +159,28 @@ function pad(l: Float, t: Float, r: Float, b: Float) -> EdgeInsets {
 
 function dot() -> FoundationView {
     return FoundationView {
-        kind: .Surface
-        width: .Fixed(7.0)
-        height: .Fixed(7.0)
-        radius: 3.5
-        fill: Color { r: 0.12 g: 0.12 b: 0.14 a: 0.85 }
+        kind: .Surface,
+        width: .Fixed(7.0),
+        height: .Fixed(7.0),
+        radius: 3.5,
+        fill: Color { r: 0.12, g: 0.12, b: 0.14, a: 0.85 }
     }
 }
 
 function toolbar(state: borrow MorphState) -> FoundationView {
     return FoundationView {
-        kind: .Surface
-        width: .Fixed(panelWidth())
-        height: .Fixed(panelHeight())
+        kind: .Surface,
+        width: .Fixed(panelWidth()),
+        height: .Fixed(panelHeight()),
         // A pill: the radius is half the height, so the ends are semicircles.
-        radius: panelHeight() * 0.5
-        fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.55 }
-        material: .LiquidGlass
-        blur: foundationBlurMix(FoundationBlur.Step)
-        edgeRefraction: 1.0
-        glassMaterial: foundationGlassMaterialWithTint(FoundationGlassMaterial {}, foundationLiquidGlassTint(FoundationScheme.Light))
-        morph: badgeShape(state)
-        morphBlend: motionMetaballBlend()
+        radius: panelHeight() * 0.5,
+        fill: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.55 },
+        material: .LiquidGlass,
+        blur: foundationBlurMix(FoundationBlur.Step),
+        edgeRefraction: 1.0,
+        glassMaterial: foundationGlassMaterialWithTint(FoundationGlassMaterial {}, foundationLiquidGlassTint(FoundationScheme.Light)),
+        morph: badgeShape(state),
+        morphBlend: motionMetaballBlend(),
         children: [
             Row(
                 children: [dot(), dot(), dot()],
@@ -201,9 +201,9 @@ function toolbar(state: borrow MorphState) -> FoundationView {
 // looks like a rectangle of paint. The stripes are what make the neck legible
 // as GLASS — they compress into its waist and splay out the other side.
 function rule(dark: Bool, vertical: Bool) -> FoundationView {
-    var ink = Color { r: 1.0 g: 1.0 b: 1.0 a: 0.17 }
+    var ink = Color { r: 1.0, g: 1.0, b: 1.0, a: 0.17 }
     if dark {
-        ink = Color { r: 0.0 g: 0.0 b: 0.0 a: 0.17 }
+        ink = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.17 }
     }
     if vertical {
         return FoundationView { kind: .Surface, width: .Fixed(11.0), height: .Fill, fill: ink }
@@ -229,13 +229,13 @@ function grid() -> FoundationView {
         rows.append(rule(index - (index / 2) * 2 == 0, false))
     }
     return FoundationView {
-        kind: .Surface
-        width: .Fill
-        height: .Fill
+        kind: .Surface,
+        width: .Fill,
+        height: .Fill,
         // A surface PAINTS, and its fill defaults to opaque white — so a
         // surface used as a bare container hides everything under it. This one
         // exists only to hold two overlaid rulings.
-        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+        fill: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         children: [
             Row(
                 move columns,
@@ -259,17 +259,17 @@ function grid() -> FoundationView {
 
 function backdrop() -> FoundationView {
     return FoundationView {
-        kind: .Surface
-        width: .Fill
-        height: .Fill
-        fill: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 }
+        kind: .Surface,
+        width: .Fill,
+        height: .Fill,
+        fill: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         children: [
             Column(
                 [
-                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(170.0), fill: Color { r: 0.16 g: 0.42 b: 0.72 a: 1.0 } },
-                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(120.0), fill: Color { r: 0.86 g: 0.55 b: 0.28 a: 1.0 } },
-                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(150.0), fill: Color { r: 0.93 g: 0.86 b: 0.72 a: 1.0 } },
-                    FoundationView { kind: .Surface, width: .Fill, height: .Fill, fill: Color { r: 0.20 g: 0.30 b: 0.24 a: 1.0 } }
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(170.0), fill: Color { r: 0.16, g: 0.42, b: 0.72, a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(120.0), fill: Color { r: 0.86, g: 0.55, b: 0.28, a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fixed(150.0), fill: Color { r: 0.93, g: 0.86, b: 0.72, a: 1.0 } },
+                    FoundationView { kind: .Surface, width: .Fill, height: .Fill, fill: Color { r: 0.20, g: 0.30, b: 0.24, a: 1.0 } }
                 ],
                 SizeMode.Fill,
                 SizeMode.Fill,
@@ -312,10 +312,10 @@ function placedToolbar(state: borrow MorphState) -> FoundationView {
 
 function rootView(state: borrow MorphState) -> FoundationView {
     return FoundationView {
-        kind: .Surface
-        width: .Fill
-        height: .Fill
-        fill: Color { r: 0.08 g: 0.09 b: 0.11 a: 1.0 }
+        kind: .Surface,
+        width: .Fill,
+        height: .Fill,
+        fill: Color { r: 0.08, g: 0.09, b: 0.11, a: 1.0 },
         children: [
             backdrop(),
             GestureHitArea(
@@ -323,8 +323,8 @@ function rootView(state: borrow MorphState) -> FoundationView {
                 disabled: false,
                 onPress: onMorphTap,
                 interaction: FoundationInteraction {
-                    onDragStart: onMorphDragStart
-                    onDragMove: onMorphDragMove
+                    onDragStart: onMorphDragStart,
+                    onDragMove: onMorphDragMove,
                     onDragEnd: onMorphDragEnd
                 },
                 children: [placedToolbar(state)]

@@ -62,7 +62,7 @@ function foundationCollectGeometry(
 ) {
     if view.key != 0 {
         into.append(FoundationGeometryRecord {
-            key: view.key
+            key: view.key,
             bounds: layoutFrame(tree, nodeIndex)
         })
     }

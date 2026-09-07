@@ -120,7 +120,7 @@ function foundationStringFromCodepoints(codes: borrow [Int], start: Int, end: In
 function foundationTextMeasure(content: borrow String, size: Float, weight: Float) -> Size {
     if content.count <= 0 {
         return Size {
-            width: 0.0
+            width: 0.0,
             height: foundationTextIntrinsicHeight(size: size)
         }
     }
@@ -149,7 +149,7 @@ function foundationTextMeasure(content: borrow String, size: Float, weight: Floa
     }
 
     return Size {
-        width: width
+        width: width,
         height: height
     }
 }
@@ -170,14 +170,14 @@ class FoundationTextMeasurer {
 
 function Text(content: String, color: Color, size: Float, weight: Float) -> FoundationView {
     return FoundationView {
-        kind: .Text
-        content: content
-        color: color
-        size: size
-        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight)
-        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight)
-        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight)
-        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight)
+        kind: .Text,
+        content: content,
+        color: color,
+        size: size,
+        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight),
+        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight),
+        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight),
+        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight),
         weight: weight
     }
 }
@@ -187,15 +187,15 @@ function Text(content: String, color: Color, size: Float, weight: Float) -> Foun
 // layer, nothing has been captured, so the authored colour still decides.
 function AdaptiveText(content: String, fallback: Color, size: Float, weight: Float) -> FoundationView {
     return FoundationView {
-        kind: .Text
-        content: content
-        color: fallback
-        size: size
-        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight)
-        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight)
-        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight)
-        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight)
-        weight: weight
+        kind: .Text,
+        content: content,
+        color: fallback,
+        size: size,
+        inkLeft: foundationTextRunInkLeft(content: content, size: size, weight: weight),
+        inkRight: foundationTextRunInkRight(content: content, size: size, weight: weight),
+        inkTop: foundationTextRunInkTop(content: content, size: size, weight: weight),
+        inkBottom: foundationTextRunInkBottom(content: content, size: size, weight: weight),
+        weight: weight,
         adaptiveInk: true
     }
 }
@@ -204,9 +204,9 @@ function AdaptiveText(content: String, fallback: Color, size: Float, weight: Flo
 // subset), drawn as a `size`-by-`size` box tinted `color`.
 function Icon(svg: String, color: Color, size: Float) -> FoundationView {
     return FoundationView {
-        kind: .Icon
-        content: svg
-        color: color
+        kind: .Icon,
+        content: svg,
+        color: color,
         size: size
     }
 }

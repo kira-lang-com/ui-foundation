@@ -65,10 +65,10 @@ function RunFoundationInteractiveApp(
     windowDragRegion: borrow (Float, Float) -> Bool = graphicsApplicationFallbackWindowDragRegion,
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
-        root: foundationEmptyRootView()
-        batch: UiBatch { storage: nullPointer() }
-        profile: foundationFrameProfileFromEnvironment()
-        page: foundationPageFor(transparent)
+        root: foundationEmptyRootView(),
+        batch: UiBatch { storage: nullPointer() },
+        profile: foundationFrameProfileFromEnvironment(),
+        page: foundationPageFor(transparent),
         transparent: transparent
     })
     let runtimeUser = nativeUserData(runtimeStorage)
@@ -85,19 +85,19 @@ function RunFoundationInteractiveApp(
     }
 
     var app = GraphicsApplication {
-        title: title
-        width: width
-        height: height
-        sampleCount: 1
-        windowMode: windowMode
-        transparent: transparent
-        opacity: opacity
+        title: title,
+        width: width,
+        height: height,
+        sampleCount: 1,
+        windowMode: windowMode,
+        transparent: transparent,
+        opacity: opacity,
         // Platform-aware default: Metal on Apple hosts, Dawn on some platforms
         // and Sokol on everything else (including Web/WASM, where the host-platform
         // probe honestly reports Unknown and Sokol/WebGPU is the only backend).
         // The per-frame path already dispatches on the frame's own backend.
-        backend: graphicsDefaultBackend()
-        harness: harness
+        backend: graphicsDefaultBackend(),
+        harness: harness,
         windowDragRegion: resolvedWindowDragRegion
     }
 
@@ -138,12 +138,12 @@ function RunFoundationInteractiveApp(
             mvH = intAsFloat(value: frame.drawableHeight()) / renderScale
         }
         state.ui.viewport = Size {
-            width: mvW
+            width: mvW,
             height: mvH
         }
         if state.ui.viewport.width <= 0.0 || state.ui.viewport.height <= 0.0 {
             state.ui.viewport = Size {
-                width: 1280.0
+                width: 1280.0,
                 height: 720.0
             }
         }
@@ -221,8 +221,8 @@ function RunFoundationInteractiveApp(
             foundationProfileSample(
                 state.profile,
                 FoundationFramePhases {
-                    presentNs: profilePresentEnd - profilePresentStart
-                    frameNs: profilePresentEnd - profileFrameStart
+                    presentNs: profilePresentEnd - profilePresentStart,
+                    frameNs: profilePresentEnd - profileFrameStart,
                     represented: true
                 },
                 state.batch.presentPhaseTimes(),
@@ -265,8 +265,8 @@ function RunFoundationInteractiveApp(
         // yet — a liquid-glass frame runs its capture/blur passes first, and
         // presentBatch owns the whole pass structure.
         var backend = KiraGraphicsFoundationBackend {
-            graphics: graphics
-            batch: batch
+            graphics: graphics,
+            batch: batch,
             windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
@@ -361,10 +361,10 @@ function RunFoundationInteractiveApp(
         foundationProfileSample(
             state.profile,
             FoundationFramePhases {
-                buildNs: profileBuildEnd - profileBuildStart
-                layoutNs: profileLayoutEnd - profileLayoutStart
-                renderNs: profileRenderEnd - profileRenderStart
-                presentNs: profilePresentEnd - profilePresentStart
+                buildNs: profileBuildEnd - profileBuildStart,
+                layoutNs: profileLayoutEnd - profileLayoutStart,
+                renderNs: profileRenderEnd - profileRenderStart,
+                presentNs: profilePresentEnd - profilePresentStart,
                 frameNs: profilePresentEnd - profileFrameStart
             },
             state.batch.presentPhaseTimes(),

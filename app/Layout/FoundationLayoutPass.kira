@@ -9,7 +9,7 @@ function foundationLayoutAppendNode(nodes: borrow mut [LayoutNode], descriptors:
     var outNodes = nodes
     var outDescs = descriptors
     var node = LayoutNode {
-        firstChild: firstChild
+        firstChild: firstChild,
         childCount: childCount
     }
     layoutNodeFlattenDescriptor(node, desc)
@@ -156,7 +156,7 @@ class FoundationLayoutPass {
         var descriptors: [LayoutDescriptor] = []
         foundationLayoutAppendRoot(root, nodes, descriptors)
         return LayoutTree {
-            nodes: move nodes
+            nodes: move nodes,
             descriptors: move descriptors
         }
     }

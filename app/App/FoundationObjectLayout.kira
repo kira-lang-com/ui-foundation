@@ -27,9 +27,9 @@ function approxEqual(left: Float, right: Float) -> Bool {
 
 function smokeTextColor() -> Color {
     return Color {
-        r: 0.96
-        g: 0.97
-        b: 0.99
+        r: 0.96,
+        g: 0.97,
+        b: 0.99,
         a: 1.0
     }
 }
@@ -86,7 +86,7 @@ function foundationIncrementalSampleView(label: String) -> FoundationView {
 function FoundationIncrementalLayoutSmoke() -> Int {
     var passed = 0
     let viewport = Size {
-        width: 1280.0
+        width: 1280.0,
         height: 720.0
     }
     let pass = FoundationLayoutPass()
@@ -199,9 +199,9 @@ function foundationIncrementalDeepView(label: String) -> FoundationView {
         height: .Fill,
         spacing: 24.0,
         padding: EdgeInsets {
-            top: 16.0
-            trailing: 16.0
-            bottom: 16.0
+            top: 16.0,
+            trailing: 16.0,
+            bottom: 16.0,
             leading: 16.0
         },
         crossAxisAlignment: .Stretch
@@ -229,7 +229,7 @@ function foundationTreesGeometryEqual(a: borrow LayoutTree, b: borrow LayoutTree
 function FoundationIncrementalDeepSmoke() -> Int {
     var passed = 0
     let pass = FoundationLayoutPass()
-    let viewport = Size { width: 1280.0 height: 720.0 }
+    let viewport = Size { width: 1280.0, height: 720.0 }
 
     var tree = pass.runIncremental(root: foundationIncrementalDeepView("ALPHA"), available: viewport, cached: LayoutTree { nodes: [] })
 
@@ -245,7 +245,7 @@ function FoundationIncrementalDeepSmoke() -> Int {
 
     // Viewport resize: same descriptors, new constraints -- everything Fill
     // must re-resolve, and the result must still match from-scratch.
-    let smaller = Size { width: 900.0 height: 500.0 }
+    let smaller = Size { width: 900.0, height: 500.0 }
     tree = pass.runIncremental(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: smaller, cached: move tree)
     let scratchC = pass.run(root: foundationIncrementalDeepView("OMEGA-LONGER"), available: smaller)
     passed = passed + smokePass(foundationTreesGeometryEqual(tree, scratchC))
@@ -261,8 +261,8 @@ function FoundationResizeLayoutSmoke() -> Int {
     var passed = 0
     let pass = FoundationLayoutPass()
 
-    let large = Size { width: 1280.0 height: 720.0 }
-    let small = Size { width: 900.0 height: 500.0 }
+    let large = Size { width: 1280.0, height: 720.0 }
+    let small = Size { width: 900.0, height: 500.0 }
 
     var tree = pass.run(root: foundationIncrementalDeepView("ALPHA"), available: large)
 
@@ -294,7 +294,7 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         crossAxisAlignment: .Start
     )
     let columnLayout = runFoundationLayout(move columnRoot, Size {
-        width: 400.0
+        width: 400.0,
         height: 200.0
     })
     let columnTop = foundationFrameAtPath(
@@ -347,7 +347,7 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         crossAxisAlignment: .Start
     )
     let rowLayout = runFoundationLayout(move rowRoot, Size {
-        width: 400.0
+        width: 400.0,
         height: 120.0
     })
     let rowLeft = foundationFrameAtPath(
@@ -397,7 +397,7 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         padding: EdgeInsets {}
     )
     let frameLayout = runFoundationLayout(move frameRootView, Size {
-        width: 300.0
+        width: 300.0,
         height: 120.0
     })
     let frameRoot = layoutFrame(frameLayout, 0)
@@ -431,23 +431,23 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         width: .Hug,
         height: .Hug,
         flex: 0,
-        fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        fill: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: .RegularRoundedRect,
         material: .Flat,
         effects: [],
         padding: EdgeInsets {
-            top: 10.0
-            trailing: 12.0
-            bottom: 14.0
+            top: 10.0,
+            trailing: 12.0,
+            bottom: 14.0,
             leading: 16.0
         },
         clipContent: false
     )
     let surfaceLayout = runFoundationLayout(move surfaceRootView, Size {
-        width: 300.0
+        width: 300.0,
         height: 200.0
     })
     let surfaceRoot = layoutFrame(surfaceLayout, 0)
@@ -459,17 +459,17 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
             width: .Hug,
             height: .Hug,
             flex: 0,
-            fill: Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 },
-            border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+            fill: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
             borderWidth: 0.0,
             radius: 0.0,
             shape: .RegularRoundedRect,
             material: .Flat,
             effects: [],
             padding: EdgeInsets {
-                top: 10.0
-                trailing: 12.0
-                bottom: 14.0
+                top: 10.0,
+                trailing: 12.0,
+                bottom: 14.0,
                 leading: 16.0
             },
             clipContent: false
@@ -487,14 +487,14 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
     let textLayoutA = runFoundationLayout(
         Text("KIRA", smokeTextColor(), 26.0, 400.0),
         Size {
-            width: 300.0
+            width: 300.0,
             height: 100.0
         }
     )
     let textLayoutB = runFoundationLayout(
         Text("KIRA", smokeTextColor(), 26.0, 400.0),
         Size {
-            width: 300.0
+            width: 300.0,
             height: 100.0
         }
     )
@@ -515,7 +515,7 @@ function FoundationPrimitiveLayoutSmoke() -> Int {
         crossAxisAlignment: .Stretch
     )
     let spacerLayout = runFoundationLayout(move spacerRootView, Size {
-        width: 320.0
+        width: 320.0,
         height: 28.0
     })
     let spacerFrame = foundationFrameAtPath(

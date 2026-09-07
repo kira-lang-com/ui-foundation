@@ -80,7 +80,7 @@ function pinnedNote(at: Float) -> FoundationView {
         flex: 0,
         alignment: .BottomTrailing,
         padding: EdgeInsets {
-            trailing: 26.0
+            trailing: 26.0,
             bottom: 26.0
         }
     )
@@ -197,9 +197,9 @@ function glassDock(context: borrow FoundationUiContext, demoUser: RawPtr, query:
                         flex: 0,
                         alignment: .Leading,
                         padding: EdgeInsets {
-                            top: 0.0
-                            trailing: 0.0
-                            bottom: 0.0
+                            top: 0.0,
+                            trailing: 0.0,
+                            bottom: 0.0,
                             leading: 18.0
                         }
                     )
@@ -304,9 +304,9 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
             flex: 0,
             alignment: .TopLeading,
             padding: EdgeInsets {
-                top: 24.0
-                trailing: 24.0
-                bottom: 0.0
+                top: 24.0,
+                trailing: 24.0,
+                bottom: 0.0,
                 leading: 24.0
             }
         ))
@@ -320,9 +320,9 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         flex: 0,
         alignment: .Leading,
         padding: EdgeInsets {
-            top: sidebarInset()
-            trailing: 0.0
-            bottom: sidebarInset()
+            top: sidebarInset(),
+            trailing: 0.0,
+            bottom: sidebarInset(),
             leading: sidebarInset()
         }
     ))
@@ -334,9 +334,9 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         flex: 0,
         alignment: .TopLeading,
         padding: EdgeInsets {
-            top: 44.0
-            trailing: 0.0
-            bottom: 0.0
+            top: 44.0,
+            trailing: 0.0,
+            bottom: 0.0,
             leading: sidebarInset() + sidebarWidth() + 44.0
         }
     ))
@@ -350,9 +350,9 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         flex: 0,
         alignment: .Bottom,
         padding: EdgeInsets {
-            top: 0.0
-            trailing: 0.0
-            bottom: sidebarInset()
+            top: 0.0,
+            trailing: 0.0,
+            bottom: sidebarInset(),
             leading: 0.0
         }
     ))
@@ -363,9 +363,9 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         flex: 0,
         alignment: .TopTrailing,
         padding: EdgeInsets {
-            top: sidebarInset()
-            trailing: sidebarInset()
-            bottom: 0.0
+            top: sidebarInset(),
+            trailing: sidebarInset(),
+            bottom: 0.0,
             leading: 0.0
         }
     ))
@@ -374,8 +374,8 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
     // The page behind everything. It only shows with the photo off, but it has to
     // be the scheme's own page — glass over a white wall in dark mode is a light UI
     // with dark chrome on it.
-    let pageLight = Color { r: 1.0 g: 1.0 b: 1.0 a: 1.0 }
-    let pageDark = Color { r: 0.07 g: 0.07 b: 0.08 a: 1.0 }
+    let pageLight = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+    let pageDark = Color { r: 0.07, g: 0.07, b: 0.08, a: 1.0 }
     var page = mixColor(pageLight, pageDark, at)
     if textureId > 0 {
         // The opaque photo covers the page completely. Keep the page only for the
@@ -389,7 +389,7 @@ function rootView(context: borrow FoundationUiContext, demoUser: RawPtr, texture
         height: .Fill,
         flex: 0,
         fill: move page,
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: .RegularRoundedRect,

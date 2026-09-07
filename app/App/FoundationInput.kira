@@ -379,11 +379,11 @@ function foundationHandleKeyEvent(ui: borrow mut FoundationUiContext, regions: b
 // recovered `var` so it can hand mutable borrows of its fields to the handlers.
 function foundationPointerButtonInt(button: PointerButton) -> Int {
     match button {
-        Left -> return 1;
-        Right -> return 2;
-        Middle -> return 3;
-        None -> return 0;
-        Other -> return 0;
+        Left -> return 1
+        Right -> return 2
+        Middle -> return 3
+        None -> return 0
+        Other -> return 0
     }
 }
 
@@ -406,7 +406,7 @@ function foundationDispatchEvent(userData: RawPtr, event: borrow AppEvent) {
     state.ui.modAlt = event.modifiers.alt
     if event.windowWidth > 0 && event.windowHeight > 0 {
         state.ui.viewport = Size {
-            width: intAsFloat(value: event.windowWidth)
+            width: intAsFloat(value: event.windowWidth),
             height: intAsFloat(value: event.windowHeight)
         }
     }

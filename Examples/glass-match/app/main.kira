@@ -27,8 +27,8 @@ function glassSurface(w: Float, h: Float, radius: Float) -> FoundationView {
         width: SizeMode.Fixed(w),
         height: SizeMode.Fixed(h),
         flex: 0,
-        fill: Color { r: 1.0 g: 0.99215686 b: 0.9764706 a: 0.28 },
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        fill: Color { r: 1.0, g: 0.99215686, b: 0.9764706, a: 0.28 },
+        border: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.0 },
         borderWidth: 1.0,
         radius: radius,
         shape: FoundationShape.RegularRoundedRect,
@@ -48,9 +48,9 @@ function placed(child: FoundationView, x: Float, y: Float) -> FoundationView {
         flex: 0,
         alignment: Alignment.TopLeading,
         padding: EdgeInsets {
-            top: y
-            trailing: 0.0
-            bottom: 0.0
+            top: y,
+            trailing: 0.0,
+            bottom: 0.0,
             leading: x
         }
     )
@@ -76,8 +76,8 @@ function rootView(textureId: Int) -> FoundationView {
         width: SizeMode.Fill,
         height: SizeMode.Fill,
         flex: 0,
-        fill: Color { r: 0.91 g: 0.894 b: 0.874 a: 1.0 },
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        fill: Color { r: 0.91, g: 0.894, b: 0.874, a: 1.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,

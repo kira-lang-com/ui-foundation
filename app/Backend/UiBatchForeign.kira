@@ -160,55 +160,55 @@ function readPointer(ptr: RawPtr, offset: U64) -> RawPtr {
 // the C glyph-bitmap struct can be read field-by-field through the helpers above.
 // ---------------------------------------------------------------------------
 
-@FFI.Extern { library: kiratext; symbol: kira_text_engine_create; abi: c; }
-function createTextEngine(): RawPtr;
-@FFI.Extern { library: kiratext; symbol: kira_text_face_load; abi: c; }
-function loadFace(engine: RawPtr, path: CString, faceIndex: I32): RawPtr;
+@FFI.Extern { library: kiratext, symbol: kira_text_engine_create, abi: c }
+function createTextEngine(): RawPtr
+@FFI.Extern { library: kiratext, symbol: kira_text_face_load, abi: c }
+function loadFace(engine: RawPtr, path: CString, faceIndex: I32): RawPtr
 // The Figtree variable face compiled into libkiratext. The one face that exists
 // wherever the library is linked — including a browser, which has no filesystem
 // to name a system font in — so the retained atlas always has an outline source
 // and never has to ask whether text is possible on this platform.
-@FFI.Extern { library: kiratext; symbol: kira_text_face_load_bundled; abi: c; }
-function loadBundledFace(engine: RawPtr): RawPtr;
-@FFI.Extern { library: kiratext; symbol: kira_text_face_set_pixel_size; abi: c; }
-function faceSetPixelSize(face: RawPtr, pixelSize: F32, weight: F32): I32;
-@FFI.Extern { library: kiratext; symbol: kira_text_face_glyph_index; abi: c; }
-function faceGlyphIndex(face: RawPtr, codepoint: U32): U32;
-@FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph; abi: c; }
-function faceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32;
+@FFI.Extern { library: kiratext, symbol: kira_text_face_load_bundled, abi: c }
+function loadBundledFace(engine: RawPtr): RawPtr
+@FFI.Extern { library: kiratext, symbol: kira_text_face_set_pixel_size, abi: c }
+function faceSetPixelSize(face: RawPtr, pixelSize: F32, weight: F32): I32
+@FFI.Extern { library: kiratext, symbol: kira_text_face_glyph_index, abi: c }
+function faceGlyphIndex(face: RawPtr, codepoint: U32): U32
+@FFI.Extern { library: kiratext, symbol: kira_text_face_render_glyph, abi: c }
+function faceRenderGlyph(face: RawPtr, glyphIndex: U32, out: RawPtr): I32
 // Subpixel-positioned rasterization: the outline is shifted by xOffset26_6 (64 to a
 // pixel) before it is scan-converted, so coverage is computed for where the glyph
 // actually lands rather than computed once and resampled. Both entry points render
 // UNHINTED, which is the other half of what makes macOS text look the way it does.
-@FFI.Extern { library: kiratext; symbol: kira_text_face_render_glyph_offset; abi: c; }
-function faceRenderGlyphOffset(face: RawPtr, glyphIndex: U32, xOffset26_6: I32, out: RawPtr): I32;
-@FFI.Extern { library: kiratext; symbol: kira_text_face_vmetrics; abi: c; }
-function faceVerticalMetrics(face: RawPtr, out: RawPtr): Void;
-@FFI.Extern { library: kiratext; symbol: kira_text_utf8_next; abi: c; }
-function nextUtf8Scalar(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32;
-@FFI.Extern { library: kiratext; symbol: kira_text_decode_codepoints; abi: c; }
-function decodeCodepoints(s: CString, out: RawPtr, max: I32): I32;
+@FFI.Extern { library: kiratext, symbol: kira_text_face_render_glyph_offset, abi: c }
+function faceRenderGlyphOffset(face: RawPtr, glyphIndex: U32, xOffset26_6: I32, out: RawPtr): I32
+@FFI.Extern { library: kiratext, symbol: kira_text_face_vmetrics, abi: c }
+function faceVerticalMetrics(face: RawPtr, out: RawPtr): Void
+@FFI.Extern { library: kiratext, symbol: kira_text_utf8_next, abi: c }
+function nextUtf8Scalar(s: CString, len: I32, indexPtr: RawPtr, codepointPtr: RawPtr): I32
+@FFI.Extern { library: kiratext, symbol: kira_text_decode_codepoints, abi: c }
+function decodeCodepoints(s: CString, out: RawPtr, max: I32): I32
 
 // ---------------------------------------------------------------------------
 // Icon engine (SVG-subset rasterizer, NativeLibs/Icon): coverage bitmaps packed
 // into the same atlas as glyphs and drawn as tinted mode-1 quads.
 // ---------------------------------------------------------------------------
 
-@FFI.Extern { library: kiraicon; symbol: kira_icon_hash; abi: c; }
-function iconHash(svg: CString): Int;
-@FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize; abi: c; }
-function rasterizeIcon(svg: CString, px: I32, outBuffer: RawPtr): I32;
-@FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize_weighted; abi: c; }
-function rasterizeIconWeighted(svg: CString, px: I32, dilatePx: Float, outBuffer: RawPtr): I32;
-@FFI.Extern { library: kiraicon; symbol: kira_icon_rasterize_ink; abi: c; }
-function rasterizeIconInk(svg: CString, outW: I32, outH: I32, dilatePx: Float, outBuffer: RawPtr): I32;
+@FFI.Extern { library: kiraicon, symbol: kira_icon_hash, abi: c }
+function iconHash(svg: CString): Int
+@FFI.Extern { library: kiraicon, symbol: kira_icon_rasterize, abi: c }
+function rasterizeIcon(svg: CString, px: I32, outBuffer: RawPtr): I32
+@FFI.Extern { library: kiraicon, symbol: kira_icon_rasterize_weighted, abi: c }
+function rasterizeIconWeighted(svg: CString, px: I32, dilatePx: Float, outBuffer: RawPtr): I32
+@FFI.Extern { library: kiraicon, symbol: kira_icon_rasterize_ink, abi: c }
+function rasterizeIconInk(svg: CString, outW: I32, outH: I32, dilatePx: Float, outBuffer: RawPtr): I32
 
 // libc fread — the only raw-file symbol the linked program does not already bind
 // (fopen/fwrite/fclose live in the Metal backend's foreign surface and are reused
 // below through their Kira functions; a second @FFI.Extern binding of the same C
 // symbol would be dropped).
-@FFI.Extern { library: kiratext; symbol: fread; abi: c; }
-function readFileBytes(ptr: RawPtr, size: U64, count: U64, stream: RawPtr): U64;
+@FFI.Extern { library: kiratext, symbol: fread, abi: c }
+function readFileBytes(ptr: RawPtr, size: U64, count: U64, stream: RawPtr): U64
 
 // Copy a Kira string's UTF-8 bytes into a NUL-terminated C buffer (caller frees).
 // Needed because fopen's one program-wide binding takes a RawPtr path (the shape
@@ -271,12 +271,12 @@ function loadRgbaTexture(graphics: borrow Graphics, path: borrow String, width: 
     }
     attempt {
         let texture = try graphics.createTextureFromPixels(TextureDescriptor {
-            label: path
-            width: width
-            height: height
-            format: .Rgba8Unorm
-            usage: .Sampled
-            sampleCount: 1
+            label: path,
+            width: width,
+            height: height,
+            format: .Rgba8Unorm,
+            usage: .Sampled,
+            sampleCount: 1,
             storage: .Persistent
         }, pixels)
         return .Ok(Int(texture.viewId))

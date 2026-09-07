@@ -56,11 +56,11 @@ function foundationDeformFor(shape: borrow MotionDeformation, frame: borrow Rect
     let pivotX = frame.x + frame.width * 0.5
     let pivotY = frame.y + frame.height * 0.5
     return FoundationDeform {
-        scaleX: scaleX
-        scaleY: scaleY
+        scaleX: scaleX,
+        scaleY: scaleY,
         // `p·(1 - s)` is the pivot folded into the translation: it is what puts
         // the scaled rectangle back so that `p` did not move.
-        translateX: pivotX * (1.0 - scaleX) + shape.x
+        translateX: pivotX * (1.0 - scaleX) + shape.x,
         translateY: pivotY * (1.0 - scaleY) + shape.y
     }
 }
@@ -72,9 +72,9 @@ function foundationDeformFor(shape: borrow MotionDeformation, frame: borrow Rect
 // keeping only four numbers: substituting gives `x·(sᵢ·sₒ) + (tᵢ·sₒ + tₒ)`.
 function foundationDeformCompose(outer: borrow FoundationDeform, inner: borrow FoundationDeform) -> FoundationDeform {
     return FoundationDeform {
-        scaleX: inner.scaleX * outer.scaleX
-        scaleY: inner.scaleY * outer.scaleY
-        translateX: inner.translateX * outer.scaleX + outer.translateX
+        scaleX: inner.scaleX * outer.scaleX,
+        scaleY: inner.scaleY * outer.scaleY,
+        translateX: inner.translateX * outer.scaleX + outer.translateX,
         translateY: inner.translateY * outer.scaleY + outer.translateY
     }
 }

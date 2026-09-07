@@ -24,11 +24,11 @@ import KiraUIFoundation
 // shadow below.
 
 function pageFill() -> Color {
-    return Color { r: 0.98 g: 0.98 b: 0.98 a: 1.0 }
+    return Color { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }
 }
 
 function cardInk() -> Color {
-    return Color { r: 0.12 g: 0.13 b: 0.15 a: 1.0 }
+    return Color { r: 0.12, g: 0.13, b: 0.15, a: 1.0 }
 }
 
 function cardWidth() -> Float {
@@ -89,7 +89,7 @@ function card() -> FoundationView {
         height: SizeMode.Fixed(cardHeight()),
         flex: 0,
         fill: foundationTintFill(cardTint()),
-        border: Color { r: 1.0 g: 1.0 b: 1.0 a: 0.0 },
+        border: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.0 },
         borderWidth: 1.0,
         radius: cardRadius(),
         shape: FoundationShape.RegularRoundedRect,
@@ -117,7 +117,7 @@ function rootView() -> FoundationView {
         height: SizeMode.Fill,
         flex: 0,
         fill: pageFill(),
-        border: Color { r: 0.0 g: 0.0 b: 0.0 a: 0.0 },
+        border: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         borderWidth: 0.0,
         radius: 0.0,
         shape: FoundationShape.RegularRoundedRect,

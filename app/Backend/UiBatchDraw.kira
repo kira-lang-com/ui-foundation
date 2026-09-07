@@ -339,9 +339,9 @@ extend UiBatch {
         var state = nativeRecover<UiBatchState>(self.storage)
         state.streams[state.streamIndex].quadCount = state.quadCount
         let bg = Color {
-            r: bgR
-            g: bgG
-            b: bgB
+            r: bgR,
+            g: bgG,
+            b: bgB,
             a: bgA
         }
         prepareBackground(state, graphics)
@@ -378,9 +378,9 @@ extend UiBatch {
         let layers = state.streamIndex
         state.glassStatLayers = layers
         let bg = Color {
-            r: bgR
-            g: bgG
-            b: bgB
+            r: bgR,
+            g: bgG,
+            b: bgB,
             a: bgA
         }
         prepareBackground(state, graphics)

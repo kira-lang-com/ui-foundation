@@ -12,8 +12,8 @@ function foundationRetainedSetState(tree: FoundationRetainedTree, nodeId: Int, v
     var next = foundationRetainedEnsureStateSlot(move tree, nodeId)
     let slot = next.lastStateSlot
     next.stateSlots[slot] = FoundationRetainedStateSlot {
-        nodeId: nodeId
-        value: value
+        nodeId: nodeId,
+        value: value,
         active: true
     }
     return next
@@ -81,11 +81,11 @@ function foundationRetainedKeyedRow(keys: borrow [Int]) -> FoundationView {
     var i = 0
     while i < keys.count {
         children.append(FoundationView {
-            kind: .Text
-            key: keys[i]
-            content: "ITEM"
-            color: foundationRetainedTestColor()
-            size: 14.0
+            kind: .Text,
+            key: keys[i],
+            content: "ITEM",
+            color: foundationRetainedTestColor(),
+            size: 14.0,
             weight: 400.0
         })
         i = i + 1
@@ -164,23 +164,23 @@ function FoundationRetainedReconcileScaleSmoke() -> Int {
 }
 
 function foundationRetainedTestColor() -> Color {
-    return Color { r: 0.9 g: 0.9 b: 0.95 a: 1.0 }
+    return Color { r: 0.9, g: 0.9, b: 0.95, a: 1.0 }
 }
 
 function foundationRetainedTreeRoot(firstText: String, secondText: String, includeHitArea: Bool, hitFirst: Bool) -> FoundationView {
     let textNode = FoundationView {
-        kind: .Text
-        key: 10
-        content: move firstText
-        color: foundationRetainedTestColor()
-        size: 16.0
+        kind: .Text,
+        key: 10,
+        content: move firstText,
+        color: foundationRetainedTestColor(),
+        size: 16.0,
         weight: 400.0
     }
     let hitNode = FoundationView {
-        kind: .HitArea
-        key: 20
-        disabled: false
-        onPress: foundationNoopPress
+        kind: .HitArea,
+        key: 20,
+        disabled: false,
+        onPress: foundationNoopPress,
         children: [Text(move secondText, foundationRetainedTestColor(), 14.0, 400.0)]
     }
     if includeHitArea && hitFirst {
