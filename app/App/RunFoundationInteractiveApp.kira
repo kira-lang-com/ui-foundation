@@ -66,12 +66,17 @@ function RunFoundationInteractiveApp(
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: foundationEmptyRootView(),
-        batch: UiBatch { storage: nullPointer() },
+        batch: UiBatch { storage: nativeState(UiBatchState {
+            engine: nullPointer(),
+            face: nullPointer(),
+            contentsPtr: nullPointer(),
+            atlasPixels: nullPointer()
+        }) },
         profile: foundationFrameProfileFromEnvironment(),
         page: foundationPageFor(transparent),
         transparent: transparent
     })
-    let runtimeUser = nativeUserData(runtimeStorage)
+    let runtimeUser = nativeUserDataBorrow(runtimeStorage)
 
     let declaredWindowDragRegion: borrow (Float, Float) -> Bool = windowDragRegion
     let resolvedWindowDragRegion: (Float, Float) -> Bool = { x, y in
@@ -153,7 +158,6 @@ function RunFoundationInteractiveApp(
             state.batch = UiBatch { storage: createBatch(graphics) }
             state.batchReady = true
         }
-        let batch = state.batch
 
         // A VM hot patch preserves the window and callback-state store, so the
         // retained fast path would otherwise keep presenting the old tree
@@ -266,7 +270,7 @@ function RunFoundationInteractiveApp(
         // presentBatch owns the whole pass structure.
         var backend = KiraGraphicsFoundationBackend {
             graphics: graphics,
-            batch: batch,
+            batch: UiBatch { storage: nativeUserData(state.batch.storage) },
             windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
@@ -395,7 +399,7 @@ function RunFoundationInteractiveApp(
 
     kiraGraphicsLiveUiFoundationAppStarted()
     app.run(runtimeUser)
-    nativeStateFree(runtimeStorage)
+    stateSlotReset()
     return
 }
 

@@ -12,7 +12,7 @@
 function rawStateSlotHas(key: CString): I32
 @FFI.Extern { library: kirastatestore, symbol: kira_state_slot_get, abi: c }
 function rawStateSlotGet(key: CString): RawPtr
-@FFI.Extern { library: kirastatestore, symbol: kira_state_slot_put, abi: c }
+@FFI.Extern { library: kirastatestore, symbol: kira_state_slot_put, abi: c, retains: value }
 function rawStateSlotPut(key: CString, value: RawPtr): Void
 @FFI.Extern { library: kirastatestore, symbol: kira_state_slot_reset, abi: c }
 function rawStateSlotReset(): Void
@@ -31,14 +31,18 @@ function stateSlotGet(key: String) -> RawPtr {
     return rawStateSlotGet(key)
 }
 
-// Store `value` under `key`, replacing any existing entry.
+// Transfer one affine callback-state owner under `key`, replacing any existing
+// entry. `retains: value` is the ownership boundary: the compiler requires the
+// move and does not release that state reference after the successful C call.
+// The C store releases exactly that reference on replacement/reset.
 @Native
-function stateSlotPut(key: String, value: RawPtr) {
-    rawStateSlotPut(key, value)
+function stateSlotPut(key: String, value: NativeState<Any>) {
+    rawStateSlotPut(key, move value)
     return
 }
 
-// Drop every slot (test isolation / editor session reset). The Kira-side values are not freed.
+// Drop every slot (test isolation / editor session reset), releasing the one
+// native-state reference owned by each entry.
 @Native
 function stateSlotReset() {
     rawStateSlotReset()

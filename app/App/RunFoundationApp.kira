@@ -17,12 +17,17 @@ function RunFoundationApp(
 ) {
     let runtimeStorage = nativeState(FoundationAppState {
         root: root,
-        batch: UiBatch { storage: nullPointer() },
+        batch: UiBatch { storage: nativeState(UiBatchState {
+            engine: nullPointer(),
+            face: nullPointer(),
+            contentsPtr: nullPointer(),
+            atlasPixels: nullPointer()
+        }) },
         profile: foundationFrameProfileFromEnvironment(),
         page: foundationPageFor(transparent),
         transparent: transparent
     })
-    let runtimeUser = nativeUserData(runtimeStorage)
+    let runtimeUser = nativeUserDataBorrow(runtimeStorage)
 
     var app = GraphicsApplication {
         title: "Kira UI Foundation",
@@ -63,7 +68,6 @@ function RunFoundationApp(
             state.batch = UiBatch { storage: createBatch(graphics) }
             state.batchReady = true
         }
-        let batch = state.batch
 
         let rawStats = foundationFrameGraphicsStats(frame)
         let rawFps = rawStats.fps
@@ -119,7 +123,7 @@ function RunFoundationApp(
         // liquid-glass capture/blur passes) is owned by presentBatch after it.
         var backend = KiraGraphicsFoundationBackend {
             graphics: graphics,
-            batch: batch,
+            batch: UiBatch { storage: nativeUserData(state.batch.storage) },
             windowTransparent: state.transparent
         }
         let viewport = state.ui.viewport
@@ -218,7 +222,7 @@ function RunFoundationApp(
 
     kiraGraphicsLiveUiFoundationAppStarted()
     app.run(runtimeUser)
-    nativeStateFree(runtimeStorage)
+    stateSlotReset()
     return
 }
 

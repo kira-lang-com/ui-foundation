@@ -7,7 +7,10 @@ import KiraLayout
 // working set from; the methods themselves are spread across the UiBatch* files
 // through `extend`, grouped by what they draw.
 class UiBatch {
-    var storage: RawPtr
+    // Typed affine owner of the retained compositor state. There is no raw
+    // lifetime token: replacing or dropping a batch recursively releases its
+    // state and every typed graphics owner it contains.
+    var storage: NativeState<UiBatchState>
 }
 // Batched UI compositor — the one render path on every platform. Every primitive
 // the UI Foundation renders (rounded-rect / squircle surfaces with borders, and text)
@@ -590,7 +593,6 @@ extend UiBatch {
         return
     }
 }
-
 
 
 

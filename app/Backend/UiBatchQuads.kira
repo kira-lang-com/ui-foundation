@@ -268,7 +268,7 @@ function externalCacheEnsure(state: borrow mut UiBatchState, graphics: borrow Gr
 function externalCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
         for index in 0..state.externalCacheIds.count {
         if state.externalCacheIds[index] == textureId {
-            return state.externalCacheGroups[index]
+            return shareBindGroup(state.externalCacheGroups[index])
         }
             }
     // The miss case is read only through `.id != 0`, so it carries no box.
@@ -305,7 +305,7 @@ function secondaryCacheEnsure(state: borrow mut UiBatchState, graphics: borrow G
 function secondaryCacheGroup(state: borrow UiBatchState, textureId: Int) -> BindGroup {
         for index in 0..state.secondaryCacheIds.count {
         if state.secondaryCacheIds[index] == textureId {
-            return state.secondaryCacheGroups[index]
+            return shareBindGroup(state.secondaryCacheGroups[index])
         }
             }
     // The miss case is read only through `.id != 0`, so it carries no box.

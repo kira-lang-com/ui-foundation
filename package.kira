@@ -35,7 +35,7 @@ Package KiraUIFoundation {
             linkMode: LinkMode.Static,
             headers: Headers { entrypoint: "NativeLibs/StateStore/kira_state_store.h", includeDirs: ["NativeLibs/StateStore"] },
             sources: ["NativeLibs/StateStore/kira_state_store.c"],
-            autobind: Autobind { module: "state_store", headers: ["NativeLibs/StateStore/kira_state_store.h"], mode: AutobindMode.AllPublic },
+            autobind: Autobind { module: "state_store", headers: ["NativeLibs/StateStore/kira_state_store.h"], functions: ["kira_state_slot_count", "kira_state_slot_get", "kira_state_slot_has", "kira_state_slot_reset"], mode: AutobindMode.Selected },
             nativeTargets: [
                 NativeTarget { triple: "x86_64-windows-msvc", staticLib: "NativeLibs/../generated/native/x86_64-windows-msvc/kirastatestore.lib" },
                 NativeTarget { triple: "x86_64-linux-gnu", staticLib: "NativeLibs/../generated/native/x86_64-linux-gnu/libkirastatestore.a" },

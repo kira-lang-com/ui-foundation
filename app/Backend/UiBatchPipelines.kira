@@ -12,7 +12,7 @@ import KiraGraphics
 // Create the compositor's persistent GPU resources and font, store the state behind a
 // nativeState handle, and return that handle.
 @Native
-function createBatch(graphics: borrow Graphics) -> RawPtr {
+function createBatch(graphics: borrow Graphics) -> NativeState<UiBatchState> {
     var state = UiBatchState {
         engine: nullPointer(),
         face: nullPointer(),
@@ -485,6 +485,5 @@ function createBatch(graphics: borrow Graphics) -> RawPtr {
 
     loadBatchFont(state)
 
-    let storage = nativeState(state)
-    return nativeUserData(storage)
+    return nativeState(state)
 }

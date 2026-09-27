@@ -27,35 +27,35 @@ extend UiBatch {
         // The stream's vertices are already in its buffer — written into shared
         // memory as they were emitted on Metal, handed over by
         // `commitDynamicBuffer` on sokol — so there is nothing to upload here.
-        let bindGroup = state.atlasGroup
+        let bindGroup = shareBindGroup(state.atlasGroup)
         // Caveat on the glass streams' external slot: a TextureView ABOVE a glass plane
         // samples the sharp capture instead of its own texture; below-glass
         // TextureViews (the common case) draw in stream 0 and are fine.
-        var externalGroup = slot1Group
+        var externalGroup = shareBindGroup(slot1Group)
         if externalGroup.id == 0 {
-            externalGroup = state.fallbackExternalGroup
+            externalGroup = shareBindGroup(state.fallbackExternalGroup)
             if state.externalBindReady {
-                externalGroup = state.externalGroup
+                externalGroup = shareBindGroup(state.externalGroup)
             }
         }
         // The two blurred levels arrive together, so slot3Group is only consulted as
         // the layer's combined group when the caller has one.
-        var softNearGroup = slot2Group
+        var softNearGroup = shareBindGroup(slot2Group)
         if softNearGroup.id == 0 {
-            softNearGroup = slot3Group
+            softNearGroup = shareBindGroup(slot3Group)
         }
         if softNearGroup.id == 0 {
             if state.secondaryExternalBindReady {
-                softNearGroup = state.secondaryExternalGroup
+                softNearGroup = shareBindGroup(state.secondaryExternalGroup)
             } else {
-                softNearGroup = state.fallbackBackdropGroup
+                softNearGroup = shareBindGroup(state.fallbackBackdropGroup)
             }
         }
         // The vertex data is a STORAGE resource in the shader, not an attribute
         // stream: it binds through a group like every other resource, and the vertex
         // stage reads it one slot above (vertex buffer 0 is the attribute stream that
         // this shader does not have).
-        let vertsGroup = state.streams[modeStream].vertsGroup
+        let vertsGroup = shareBindGroup(state.streams[modeStream].vertsGroup)
         encoder.setIndexBuffer(state.indexBuffer, .Uint32)
         encoder.setBindGroup(vertexBindGroup(), vertsGroup)
         encoder.setBindGroup(atlasBindGroup(), bindGroup)
@@ -160,9 +160,9 @@ extend UiBatch {
                 // mode 2 must read the host-published engine target instead.
                 // Bind at the run boundary rather than once per stream so
                 // the two resources can share the same ordered stream safely.
-                var runExternalGroup = externalGroup
+                var runExternalGroup = shareBindGroup(externalGroup)
                 if runUsesExternalTexture {
-                    runExternalGroup = state.externalGroup
+                    runExternalGroup = shareBindGroup(state.externalGroup)
                     // This run's OWN texture, when the run is a TextureView's.
                     // The backdrop group is the fallback rather than the answer:
                     // it is whichever texture was registered last, which is the
@@ -178,7 +178,7 @@ extend UiBatch {
                 // secondary tore down the binding the first one had, so a
                 // sidebar mid-swipe crossfaded against the fallback -- the
                 // glyph atlas -- and stood still while the number moved.
-                var runNearGroup = softNearGroup
+                var runNearGroup = shareBindGroup(softNearGroup)
                 if runUsesExternalTexture && runSecondaryId > 0 {
                     let cachedNear = secondaryCacheGroup(state, runSecondaryId)
                     if cachedNear.id != 0 {
@@ -231,7 +231,7 @@ extend UiBatch {
     function flushStreams(graphics: borrow Graphics, encoder: borrow mut RenderEncoder) {
         var state = nativeRecover<UiBatchState>(self.storage)
         var target = encoder
-        let none = state.emptyGroup
+        let none = shareBindGroup(state.emptyGroup)
         var index = 0
         while index <= state.streamIndex && index < state.streams.count {
             self.drawStream(target, index, state.streams[index].quadCount, none, none, none)
@@ -244,7 +244,7 @@ extend UiBatch {
         var state = nativeRecover<UiBatchState>(self.storage)
         let quadCount = state.quadCount
         var target = encoder
-        let none = state.emptyGroup
+        let none = shareBindGroup(state.emptyGroup)
         self.drawStream(target, state.streamIndex, quadCount, none, none, none)
         return
     }
@@ -272,11 +272,11 @@ function drawBackground(state: borrow mut UiBatchState, encoder: borrow mut Rend
     if state.benchNoBackground {
         return
     }
-    let params = state.backgroundParamsGroup
-    let primary = state.externalGroup
-    var secondary = state.fallbackBackdropGroup
+    let params = shareBindGroup(state.backgroundParamsGroup)
+    let primary = shareBindGroup(state.externalGroup)
+    var secondary = shareBindGroup(state.fallbackBackdropGroup)
     if state.secondaryExternalBindReady {
-        secondary = state.secondaryExternalGroup
+        secondary = shareBindGroup(state.secondaryExternalGroup)
     }
     encoder.setPipeline(state.backgroundPipeline)
     encoder.setBindGroup(0, primary)
@@ -371,7 +371,7 @@ extend UiBatch {
         // its preconditions. Crossfades and later frames must re-evaluate it.
         state.directBackdropLayer0 = false
         state.glassBackdropStatic = false
-        state.directBackdropSharpGroup = state.emptyGroup
+        state.directBackdropSharpGroup = shareBindGroup(state.emptyGroup)
         // The active stream's count only reaches its entry here: emitting keeps it in
         // the mirrored hot field.
         state.streams[state.streamIndex].quadCount = state.quadCount
@@ -460,7 +460,7 @@ extend UiBatch {
         while layer < layers && !skipBackdropPrep {
             var directSourceId: U32 = 0
             var directSecondId: U32 = 0
-            var directSharpGroup = state.emptyGroup
+            var directSharpGroup = shareBindGroup(state.emptyGroup)
             // Liquid Glass commonly sits directly above one opaque fullscreen
             // photo — or, mid-scheme-change, above a crossfade between two.
             // Rendering that into an identical full-resolution intermediate
@@ -478,19 +478,19 @@ extend UiBatch {
                 if state.secondaryExternalBindReady {
                     directSourceId = state.externalTextureId
                     directSecondId = state.secondaryExternalTextureId
-                    directSharpGroup = state.backdropSharpGroup
+                    directSharpGroup = shareBindGroup(state.backdropSharpGroup)
                 } else if backdropBlend <= 0.001 {
                     // No second photo to fade to. The background pass then mixes
                     // the primary against the atlas fallback, which is only the
                     // primary while the transition is at rest, so that is the
                     // only place this may take it directly.
                     directSourceId = state.externalTextureId
-                    directSharpGroup = state.externalGroup
+                    directSharpGroup = shareBindGroup(state.externalGroup)
                 }
             }
             if directSourceId != 0 && directSharpGroup.id != 0 {
                 state.directBackdropLayer0 = true
-                state.directBackdropSharpGroup = directSharpGroup
+                state.directBackdropSharpGroup = shareBindGroup(directSharpGroup)
                 // The interior cache may trust a backdrop that is standing
                 // still: a photo at rest has a blur at rest. A crossfade in
                 // flight moves every interior pixel every frame, so it keeps the

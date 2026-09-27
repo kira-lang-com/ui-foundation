@@ -318,7 +318,7 @@ function foundationHudRefreshSeconds() -> Float { return 0.1 }
 // rebuilding the entire interface.
 function foundationEmitHud(
     graphics: borrow Graphics,
-    batch: UiBatch,
+    batch: borrow UiBatch,
     overlay: borrow FoundationView,
     layout: borrow LayoutTree,
     viewportW: Int,
@@ -326,7 +326,7 @@ function foundationEmitHud(
 ) {
     var hudBackend = KiraGraphicsFoundationBackend {
         graphics: graphics,
-        batch: batch
+        batch: UiBatch { storage: nativeUserData(batch.storage) }
     }
     hudBackend.beginHudFrame(viewportW, viewportH)
     foundationRender(overlay, layout, hudBackend)
